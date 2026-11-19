@@ -7,6 +7,7 @@ const TYPE_RESET_VIDEO = 17
 const ACTION_DOWN = 0
 const ACTION_UP = 1
 const ACTION_MOVE = 2
+const ACTION_CANCEL = 3
 
 export class ScrcpyControl {
   constructor(
@@ -48,6 +49,16 @@ export class ScrcpyControl {
   }
 
   touchUp(pointerId: number, x = 0, y = 0): void {
+    this.writeTouchEvent(ACTION_UP, pointerId, x, y)
+  }
+
+  /**
+   * Cancel the touch (#1115), then release it: the server forgets a pointer only on an up, and one left in its state
+   * turns the next touch into a second pointer. Android is expected to drop that up as inconsistent once the cancel
+   * has landed (an up with no touched window) — read from the dispatcher, not measured on a device.
+   */
+  touchCancel(pointerId: number, x = 0, y = 0): void {
+    this.writeTouchEvent(ACTION_CANCEL, pointerId, x, y)
     this.writeTouchEvent(ACTION_UP, pointerId, x, y)
   }
 
@@ -95,7 +106,7 @@ export class ScrcpyControl {
     buf.writeInt32BE(y, 14)
     buf.writeUInt16BE(this.screenWidth, 18)
     buf.writeUInt16BE(this.screenHeight, 20)
-    buf.writeUInt16BE(action === ACTION_UP ? 0 : 0xffff, 22) // pressure
+    buf.writeUInt16BE(action === ACTION_UP || action === ACTION_CANCEL ? 0 : 0xffff, 22) // pressure
     buf.writeInt32BE(0x1, 24)    // actionButton (BUTTON_PRIMARY)
     buf.writeInt32BE(0, 28)      // buttons
     this.socket.write(buf)

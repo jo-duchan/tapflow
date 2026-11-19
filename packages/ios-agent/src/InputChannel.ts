@@ -25,12 +25,18 @@ export interface InputChannel {
    *  reconnect and is stopped by the device teardown, not by whoever drops the channel. */
   stop(): void
   inputState(): 'ready' | 'starting' | 'unavailable'
+  /** Resolves `true` once a write would reach the device, `false` once this channel is stopped. Unbounded otherwise:
+   *  a helper that dies before it is ready is replaced, and the waiter keeps waiting, so the caller sets the limit. */
+  whenReady(): Promise<boolean>
   ownsGesture(): boolean
 
   touchStart(x: number, y: number): boolean
   touchMove(x: number, y: number): boolean
   touchEnd(): boolean
   touchEndAfterMinContact(): Promise<boolean>
+  /** Lift the open single-finger touch as cancelled, or with an up where the channel cannot cancel. False when no
+   *  touch is down. The end that follows writes nothing. */
+  touchCancel(): boolean
 
   pinchStart(x1: number, y1: number, x2: number, y2: number): boolean
   pinchMove(x1: number, y1: number, x2: number, y2: number): boolean

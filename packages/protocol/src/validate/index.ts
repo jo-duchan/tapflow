@@ -26,7 +26,7 @@
  *   yields `EnvelopeOf<I>`, so the relay **cannot** read a payload it did not check. Used where the
  *   relay only forwards.
  *
- * ## Why the whole agent direction is Envelope except the six it consumes
+ * ## Why the whole agent direction is Envelope except the eight it consumes
  *
  * Not laziness, and not a deferral: agent-payload conformance is a property the protocol deliberately
  * does not have. `AgentRegister.platform` is `string` — open, because a third-party platform registers
@@ -37,8 +37,8 @@
  * skips `setChromeData` and therefore empties the re-join replay too, and there is no
  * `session:chrome-error` for anyone to be told through.
  *
- * The six the relay consumes (`agent:register`, `agent:resources`, the two screenshot replies and the
- * two ui-tree replies) forward nowhere, so rejecting them breaks no forward path — and their schemas
+ * The eight the relay consumes (`agent:register`, `agent:devices`, `agent:resources`, the two screenshot
+ * replies, the two ui-tree replies and the field read's reply) forward nowhere, so rejecting them breaks no forward path — and their schemas
  * carry a `.default()` for every field the relay currently reads through a `??`, which keeps today's
  * tolerance for an older agent exactly as it is. `UIElement` is safe to validate where `ChromePayload`
  * is not, for a reason worth stating: it is not a per-platform union but the normalized shape every
@@ -59,10 +59,12 @@ import type {
   NetworkError, NetworkSet, NetworkState,
   ClipboardWriteDone, DeviceBoot, DeviceBootError, DeviceLease, DeviceBooting, DeviceReady, DeviceShutdown,
   DeviceShutdownDone, DeviceShutdownError, InputButton, InputDone, InputError, InputKey, InputKeyboardToggle,
-  InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchEnd, InputTouchMove,
+  InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, WatchStart, WatchStop,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
+  WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
 
@@ -84,7 +86,9 @@ const serviceTier = z.object({ name: z.enum(['stock', 'lean', 'slim']), keep: z.
 /** A tier as an agent reports it. Anything this relay does not know reads as absent rather than refusing the frame. */
 const reportedTier = z.union([serviceTier, z.literal('unsupported')]).optional().catch(undefined)
 
-const RUN_RESET_ITEMS = ['app-uninstall', 'app-files', 'app-data', 'keychain', 'privacy-services', 'pasteboard', 'location'] as const
+const RUN_RESET_ITEMS = [
+  'app-uninstall', 'app-files', 'app-data', 'app-reinstall', 'keychain', 'privacy-services', 'pasteboard', 'location', 'network', 'orientation',
+] as const
 const appIds = z.array(z.string().min(1).max(255)).max(32)
 const runResetRequest = z.object({ uninstall: appIds, clear: appIds })
 /** An item this reader does not know is dropped rather than failing the report: a newer agent may reset more. */
@@ -97,6 +101,24 @@ const requestId = z.string().min(1)
 const point = z.object({ x: z.number(), y: z.number() })
 const space = z.literal('frame').optional()
 const touchPoint = z.object({ x: z.number(), y: z.number(), space })
+const normalizedRect = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+// A rect the relay cannot read is dropped, not the state: whether the keyboard is up still decides the taps around it.
+const keyboardState = z.object({
+  shown: z.boolean().nullable(),
+  rect: normalizedRect.optional().catch(undefined),
+  frameRect: normalizedRect.optional().catch(undefined),
+  onHome: z.boolean().optional().catch(undefined),
+})
+// What a touch hit, as the app's accessibility names it (`capture:touched`). A frame the relay cannot read is dropped,
+// not the element: its name still says what the person touched.
+const observedElement = z.object({
+  // Cut by the agent at 256; past this the observation is refused rather than let fill the capture's budget.
+  identifier: z.string().max(1024).optional(),
+  label: z.string().max(1024).optional(),
+  traits: z.number(),
+  input: z.boolean().optional(),
+  frame: normalizedRect.optional().catch(undefined),
+})
 
 // ── envelope-tier builders ───────────────────────────────────────────────────
 //
@@ -197,6 +219,14 @@ const BROWSER_INBOUND = {
     type: z.literal('app:clear-state'), sessionId, requestId,
     payload: z.object({ bundleId: z.string() }),
   }),
+  'device:keyboard-set': z.object({
+    type: z.literal('device:keyboard-set'), sessionId, requestId,
+    payload: z.object({ keyboard: z.string().optional() }),
+  }),
+  'device:run-reset': z.object({
+    type: z.literal('device:run-reset'), sessionId, requestId,
+    payload: z.object({ apps: appIds }),
+  }),
   'open-url': z.object({
     type: z.literal('open-url'), sessionId, requestId, payload: z.object({ url: z.string() }),
   }),
@@ -207,6 +237,7 @@ const BROWSER_INBOUND = {
   'input:touch:end': z.object({
     type: z.literal('input:touch:end'), sessionId, requestId, payload: point.optional(),
   }),
+  'input:touch:cancel': z.object({ type: z.literal('input:touch:cancel'), sessionId }),
   'input:pinch:start': z.object({
     type: z.literal('input:pinch:start'), sessionId, payload: z.object({ f0: point, f1: point, space }),
   }),
@@ -259,7 +290,7 @@ const BROWSER_INBOUND = {
 
 // ── agent → relay ────────────────────────────────────────────────────────────
 
-/** The six the relay consumes. Every `.default()` below mirrors a `??` that is in `RelayServer` today,
+/** The eight the relay consumes. Every `.default()` below mirrors a `??` that is in `RelayServer` today,
  *  so an agent older than a field keeps working exactly as it does now — the default lands in the
  *  schema, where it is visible, instead of at the read site, where it read as defensive noise.
  *
@@ -337,14 +368,73 @@ const AGENT_CONSUMED = {
       frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
       enabled: z.boolean(),
       rawRole: z.string().optional(),
+      // Forgiving for the reason `interfaceTurn` is: a strict boolean would refuse the whole tree over one
+      // field a third-party agent spelled `"true"`. A dropped `secure` reads as unknown, which is secret.
+      secure: z.boolean().optional().catch(undefined),
+      focused: z.boolean().optional().catch(undefined),
+      checked: z.boolean().optional().catch(undefined),
+      selected: z.boolean().optional().catch(undefined),
     })).default([]),
+    // Optional and forgiving: a value this relay does not know drops the field, not the frame. A closed enum
+    // would refuse the whole tree for one unknown turn, and the caller would wait out the 15 s deadline for a
+    // tree that had arrived.
+    interfaceTurn: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().catch(undefined),
   }),
   'ui:tree:error': z.object({
     type: z.literal('ui:tree:error'), sessionId, requestId, message: z.string().default(''),
   }),
+  // One result per target, each read on its own: a result this relay cannot read is `unknown`, so the caller taps
+  // knowing the tap was not checked, rather than losing the other targets' answers or waiting out its deadline.
+  'ui:reach:response': z.object({
+    type: z.literal('ui:reach:response'), sessionId, requestId,
+    results: z.array(z.discriminatedUnion('state', [
+      z.object({
+        state: z.literal('reachable'), point: z.tuple([z.number(), z.number()]), atCentre: z.boolean(),
+        frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+      }),
+      z.object({ state: z.literal('occluded'), by: z.string().optional() }),
+      z.object({ state: z.literal('offscreen') }),
+      z.object({ state: z.literal('missing'), candidates: z.number().int() }),
+      z.object({ state: z.literal('unknown'), reason: z.string() }),
+    ]).catch({ state: 'unknown' as const, reason: 'unreadable answer' })).default([]),
+  }),
+  'ui:field:response': z.object({
+    type: z.literal('ui:field:response'), sessionId, requestId,
+    // A field the relay cannot read is no field, not a dropped frame: the capture then says the value was not read.
+    field: z.object({
+      identifier: z.string(),
+      placeholder: z.string(),
+      frame: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+      value: z.string().optional(),
+      secure: z.boolean(),
+    }).nullable().catch(null),
+    reason: z.enum(['no-app', 'no-focus', 'ambiguous', 'secure', 'failed']).optional().catch('failed'),
+    keyboard: keyboardState.optional().catch(undefined),
+    language: z.string().optional().catch(undefined),
+  }),
+  // A touch the relay cannot read is no observation: dropped, and Capture judges that touch as before.
+  'capture:touched': z.object({
+    type: z.literal('capture:touched'), sessionId, requestId,
+    observation: z.object({
+      point: z.object({ x: z.number(), y: z.number() }),
+      moving: z.boolean(),
+      surface: z.enum(['keyboard', 'web', 'flutter']).optional(),
+      element: observedElement.optional(),
+      button: observedElement.optional(),
+      // A field the relay cannot read is dropped, not the observation: the rest still says what was touched.
+      tapCount: z.number().int().positive().optional().catch(undefined),
+      acted: z.boolean().optional().catch(undefined),
+      seq: z.number().int().positive().optional().catch(undefined),
+    }),
+  }),
+  // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.
+  'ui:keyboard:response': z.object({
+    type: z.literal('ui:keyboard:response'), sessionId, requestId,
+    keyboard: keyboardState.catch({ shown: null }),
+  }),
 } as const
 
-/** The 26 the relay only forwards. Envelope tier — see the header for why there is no exception. */
+/** The 30 the relay only forwards. Envelope tier — see the header for why there is no exception. */
 const AGENT_FORWARDED = {
   'session:chrome': env('session:chrome'),
   'session:deviceInfo': env('session:deviceInfo'),
@@ -367,6 +457,10 @@ const AGENT_FORWARDED = {
   'app:launch-error': envC('app:launch-error'),
   'app:clear-state-done': envC('app:clear-state-done'),
   'app:clear-state-error': envC('app:clear-state-error'),
+  'device:keyboard-set-done': envC('device:keyboard-set-done'),
+  'device:keyboard-set-error': envC('device:keyboard-set-error'),
+  'device:run-reset-done': envC('device:run-reset-done'),
+  'device:run-reset-error': envC('device:run-reset-error'),
   'open-url:done': envC('open-url:done'),
   'open-url:error': envC('open-url:error'),
   'input:done': envC('input:done'),
@@ -420,6 +514,8 @@ const ANSWERABLE = {
   'app:install': envC('app:install'),
   'app:launch': envC('app:launch'),
   'app:clear-state': envC('app:clear-state'),
+  'device:keyboard-set': envC('device:keyboard-set'),
+  'device:run-reset': envC('device:run-reset'),
   'open-url': envC('open-url'),
   'input:touch:end': envC('input:touch:end'),
   'input:pinch:end': envC('input:pinch:end'),
@@ -602,10 +698,13 @@ type _DeviceShutdown = Assert<V<'device:shutdown', DeviceShutdown>>
 type _AppInstall = Assert<V<'app:install', AppInstallToRelay>>
 type _AppLaunch = Assert<V<'app:launch', AppLaunchToRelay>>
 type _AppClearState = Assert<V<'app:clear-state', AppClearState>>
+type _DeviceKeyboardSet = Assert<V<'device:keyboard-set', DeviceKeyboardSet>>
+type _DeviceRunReset = Assert<V<'device:run-reset', DeviceRunReset>>
 type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>
 type _InputTouchEnd = Assert<V<'input:touch:end', InputTouchEnd>>
+type _InputTouchCancel = Assert<V<'input:touch:cancel', InputTouchCancel>>
 type _InputPinchStart = Assert<V<'input:pinch:start', InputPinchStart>>
 type _InputPinchMove = Assert<V<'input:pinch:move', InputPinchMove>>
 type _InputPinchEnd = Assert<V<'input:pinch:end', InputPinchEnd>>
@@ -628,7 +727,11 @@ type _AgentDevices = Assert<V<'agent:devices', AgentDevices>>
 type _ScreenshotDone = Assert<V<'screenshot:done', ScreenshotDone>>
 type _ScreenshotError = Assert<V<'screenshot:error', ScreenshotError>>
 type _UiTreeResponse = Assert<V<'ui:tree:response', UiTreeResponse>>
+type _UiReachResponse = Assert<V<'ui:reach:response', UiReachResponse>>
 type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
+type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
+type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>
+type _CaptureTouched = Assert<V<'capture:touched', CaptureTouched>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 
@@ -645,6 +748,10 @@ type _AppLaunchDone = Assert<E<'app:launch-done', AppLaunchDone>>
 type _AppLaunchError = Assert<E<'app:launch-error', AppLaunchError>>
 type _AppClearStateDone = Assert<E<'app:clear-state-done', AppClearStateDone>>
 type _AppClearStateError = Assert<E<'app:clear-state-error', AppClearStateError>>
+type _DeviceKeyboardSetDone = Assert<E<'device:keyboard-set-done', DeviceKeyboardSetDone>>
+type _DeviceKeyboardSetError = Assert<E<'device:keyboard-set-error', DeviceKeyboardSetError>>
+type _DeviceRunResetDone = Assert<E<'device:run-reset-done', DeviceRunResetDone>>
+type _DeviceRunResetError = Assert<E<'device:run-reset-error', DeviceRunResetError>>
 type _OpenUrlDone = Assert<E<'open-url:done', OpenUrlDone>>
 type _OpenUrlError = Assert<E<'open-url:error', OpenUrlError>>
 type _InputDone = Assert<E<'input:done', InputDone>>

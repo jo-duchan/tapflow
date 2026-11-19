@@ -448,6 +448,20 @@ describe('Run detail', () => {
     await waitFor(() => expect(document.activeElement).toBe(line))
   })
 
+  // #1125: a passed flow whose touches were not all checked says so, since a covered row once passed that way.
+  it('says a passed flow has touches that were not checked to land on their element', async () => {
+    stubRelay(() => Response.json(detail({
+      flows: [{ idx: 0, name: 'login', file: null, status: 'passed', device: null, failureKind: null, failureMessage: null, durationMs: 10, hasScreenshot: false,
+        steps: [
+          { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 5, reach: 'unchecked', reachNote: 'this relay predates reach' },
+          { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 5, reach: 'verified' },
+        ] }],
+    })))
+    renderAt('/automation/runs/r1')
+    expect(await screen.findByText(/1 touch was not checked to land on its element/)).toHaveTextContent('tapOn("Row 13")')
+    expect(screen.getByText(/1 touch was not checked/)).toHaveTextContent('this relay predates reach')
+  })
+
   it('shows no suggestions where a step has none', async () => {
     stubRelay(() => Response.json(detail({
       status: 'failed', exitCode: 1, failureKind: 'product',

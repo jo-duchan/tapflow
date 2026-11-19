@@ -3,7 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { EnvironmentStepError, isEligible, parseFlow, runFlow, type FlowDriver } from '@tapflowio/flow-runner'
+import { fromFramePoint, toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
+import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, reachTargetOf, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
 import { TESTING_GUIDE } from './guide.js'
 import { compactLaunchOptions, launchOptionsProblem, type LaunchApplied } from '@tapflowio/protocol/launch'
@@ -34,6 +35,8 @@ const SESSION_NOTE_MARKERS = [
 // a typed error, so they carry no class to branch on — but the prefix is the
 // contract this package's own tests hold (see client.test.ts), not free prose.
 const UNCONFIRMED_INPUT_PREFIX = 'Could not confirm the input reached the device'
+/** How long a tap on an element waits for it, in seconds: a screen the agent just read, so shorter than a flow's 10 s. */
+const ELEMENT_WAIT_S = 5
 
 function toEnvironmentError(e: unknown): unknown {
   if (e instanceof EnvironmentStepError) return e
@@ -78,12 +81,32 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
       throw toEnvironmentError(e)
     }
   }
+  // The app's interface turn from the latest tree this driver read, held by this driver — one `run_flow` call — so a
+  // value from another call or from `query_ui_tree` is never applied. Every point a flow sends is turned by it, the way
+  // flow-runner's `RelayDriver` does; undefined (Android, an older agent) turns nothing.
+  let turn: InterfaceTurn | undefined
+  const at = (x: number, y: number) => toFramePoint(turn, [x, y])
   return {
-    queryUITree: (signal) => guard(() => client.queryUITree(sessionId, signal)),
-    tap: async (x, y) => guard(() => client.tap(sessionId, x, y)),
-    swipe: (from, to, durationMs) => guard(() => client.swipe(sessionId, from[0], from[1], to[0], to[1], durationMs)),
+    queryUITree: async (signal) => {
+      const read = await guard(() => client.queryUITreeWithTurn(sessionId, signal))
+      turn = read.interfaceTurn
+      return read.elements
+    },
+    tap: async (x, y) => { const [fx, fy] = at(x, y); return guard(() => client.tap(sessionId, fx, fy)) },
+    // Points come back in the app's interface, as a selector's centre is, so `tap` turns them as it turns any point.
+    reach: async (targets, signal) => {
+      const results = await guard(() => client.reach(sessionId, targets.map(reachTargetOf), signal))
+      return results.map((r) => (r.state === 'reachable' ? { ...r, point: fromFramePoint(turn, r.point) } : r))
+    },
+    // `holdMs` passed on, for `scroll { until }`'s drags (see `holdStill`).
+    swipe: (from, to, durationMs, holdMs) => {
+      const [fx, fy] = at(...from), [tx, ty] = at(...to)
+      return guard(() => client.swipe(sessionId, fx, fy, tx, ty, durationMs, holdMs))
+    },
     inputText: async (text) => guard(() => client.typeText(sessionId, text)),
-    pressKey: async (code) => guard(() => client.pressKey(sessionId, code)),
+    // Names the modifiers for the reason `launchApp` names its options below: a function that drops the second
+    // parameter still satisfies `FlowDriver.pressKey`, and would press Cmd+A as a plain A with nothing failing.
+    pressKey: async (code, modifiers) => guard(() => client.pressKey(sessionId, code, modifiers)),
     openUrl: (url) => guard(() => client.openUrl(sessionId, url)),
     // Takes the options explicitly: a function with no parameter still satisfies `FlowDriver.launchApp`, and would
     // have run a flow's launch arguments as a plain launch with nothing failing to compile. The return type is spelled
@@ -96,6 +119,65 @@ export function makeFlowDriver(client: TapflowClient, sessionId: string, buildId
     },
     clearState: (appId) => guard(() => client.clearState(sessionId, appId)),
     screenshot: (signal) => guard(() => client.screenshot(sessionId, 'png', signal)),
+    pressButton: (name) => guard(() => client.pressButton(sessionId, name)),
+    longPress: (x, y, durationMs) => { const [fx, fy] = at(x, y); return guard(() => client.longPress(sessionId, fx, fy, durationMs)) },
+    // `unsupported` stays product for every other input (it names the request), but a pinch refused as unsupported
+    // is Android's adb fallback — the device's backend, not the app. Same rule as flow-runner's `RelayDriver.pinch`.
+    pinch: async (start, end, durationMs) => {
+      try {
+        const turned = (f: [[number, number], [number, number]]): [[number, number], [number, number]] => [at(...f[0]), at(...f[1])]
+        await guard(() => client.pinch(sessionId, turned(start), turned(end), durationMs))
+      } catch (e) {
+        if (!(e instanceof EnvironmentStepError) && e instanceof Error && e.message.includes('(unsupported)')) {
+          throw new EnvironmentStepError(e.message, { cause: e })
+        }
+        throw e
+      }
+    },
+    chrome: (timeoutMs) => guard(() => client.chrome(sessionId, timeoutMs)),
+    // After the device turns, read which way the app stands until two reads agree (at most 2 s), as `RelayDriver`
+    // does: the chrome answers before the app has finished turning. Where a turn is expected (an iOS chrome, or one
+    // already read), a read with none is a turn caught mid-way and is passed over; elsewhere (Android) it ends the loop.
+    setOrientation: async (orientation, timeoutMs) => {
+      await guard(() => client.setOrientation(sessionId, orientation, timeoutMs))
+      const chrome = await client.chrome(sessionId, 1).catch(() => null)
+      const expected = turn !== undefined || (chrome !== null && 'framePng' in chrome)
+      // The turn from before the call is wrong now; a loop that never settles leaves none rather than that one.
+      turn = undefined
+      const until = Date.now() + 2_000
+      let previous: InterfaceTurn | null = null
+      while (Date.now() < until) {
+        let read: InterfaceTurn | undefined
+        try {
+          read = (await client.queryUITreeWithTurn(sessionId, AbortSignal.timeout(Math.max(1, until - Date.now())))).interfaceTurn
+        } catch {
+          return
+        }
+        if (read === undefined) {
+          if (!expected) {
+            turn = undefined
+            return
+          }
+        } else {
+          turn = read
+          if (read === previous) return
+          previous = read
+        }
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    },
+    setPosture: (posture, timeoutMs) => guard(() => client.setPosture(sessionId, posture, timeoutMs)),
+  }
+}
+
+/** The platform of the agent holding `sessionId`, or undefined when the listing does not say — then nothing is
+ *  checked against the platform, as before. */
+async function platformOf(client: TapflowClient, sessionId: string): Promise<string | undefined> {
+  try {
+    const agents = await client.listDevices()
+    return agents.find((a) => a.devices.some((d) => d.sessionId === sessionId))?.platform
+  } catch {
+    return undefined
   }
 }
 
@@ -383,11 +465,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     {
       description:
         'Query the accessibility tree of the current screen: interactive, text-bearing or identified elements as ' +
-        '{ role, label, identifier, placeholder, frame, enabled, rawRole }. placeholder is a text field\'s hint, present only ' +
+        '{ role, label, identifier, placeholder, frame, enabled, rawRole, secure, focused }. placeholder is a text field\'s hint, present only ' +
         'when it has one; a bare-text selector falls back to it after label. Frames are normalized 0-1 relative to the screen. ' +
-        'Prefer this over guessing coordinates from a screenshot: to tap an element, multiply the frame center by the ' +
-        'screenshot pixel size — x = (frame.x + frame.width / 2) * screenshotWidth, y = (frame.y + frame.height / 2) * screenshotHeight — ' +
-        'and pass those pixel coordinates to the tap tool.',
+        'Prefer this over a screenshot; tap an element through tap\'s element.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
       },
@@ -402,6 +482,25 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
   )
 
+  function flowResponse(result: FlowResult, appCheckSkipped?: string): Record<string, unknown> {
+    let screenshotPath: string | undefined
+    if (result.failureScreenshot) {
+      screenshotPath = path.join(os.tmpdir(), `tapflow-flow-failure-${Date.now()}.png`)
+      fs.writeFileSync(screenshotPath, result.failureScreenshot)
+    }
+    return {
+      name: result.name,
+      status: result.status,
+      durationMs: result.durationMs,
+      steps: result.steps,
+      ...(result.failureMessage ? { failureMessage: result.failureMessage } : {}),
+      ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+      ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
+      // The flow ran without its appId being compared with the build's, and why.
+      ...(appCheckSkipped ? { appCheckSkipped } : {}),
+    }
+  }
+
   register(
     'run_flow',
     {
@@ -409,7 +508,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'Replay a tapflow flow (YAML) deterministically — no LLM in the loop. Use this for verified scenarios instead of ' +
         'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
-        'inputText / pressKey / swipe / scroll / openUrl / assertVisible / assertNotVisible. launchApp launches the ' +
+        'inputText / pressKey / imeAction / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
+        'longPressOn / pinch / setOrientation / setPosture; scroll: { until: <selector> } scrolls to an element. launchApp launches the ' +
         'buildId argument. When buildId is set, the build is installed before replaying (like `tapflow flow run --build`) ' +
         'so clearState/launchApp have the app present — pass install:false to skip. A flow whose appId differs from ' +
         "the build's bundle id is not run and returns an error naming both. Returns per-step results; on failure " +
@@ -440,6 +540,19 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           yamlText = fs.readFileSync(resolved, 'utf-8')
         }
         const parsed = parseFlow(yamlText, flowPath ?? 'inline-flow.yaml')
+        const platform = await platformOf(client, sessionId)
+        // A button the platform has none of, refused before anything is installed — the same verdict `flow run`
+        // reaches before it picks a device, and reported as the same result a run would give.
+        if (platform !== undefined) {
+          const missing = unavailableButton(parsed, platform)
+          if (missing !== null && missing !== 'needs-chrome') {
+            return ok(JSON.stringify(flowResponse(refusedFlow(parsed, missing.index, unavailableButtonMessage(missing, platform), { beforeRun: true })), null, 2))
+          }
+        }
+        // run_flow is given no secrets (a server's environment holds its relay token), so a flow that types one is
+        // refused here, before the install, as the engine would refuse it after.
+        const secret = missingSecret(parsed, undefined)
+        if (secret) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, secret.index, missingSecretMessage(secret.name), { beforeRun: true })), null, 2))
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
         let appCheckSkipped: string | undefined
@@ -461,24 +574,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // Each step as it starts, for whoever watches this session (A2); named without anything it types.
         const result = await runFlow(parsed, driver, {
           onStep: (mark) => { if (mark.phase === 'start' && mark.label) client.activity(sessionId, `step ${mark.index + 1}: ${mark.label}`) },
+          ...(platform !== undefined ? { platform } : {}),
         })
-
-        let screenshotPath: string | undefined
-        if (result.failureScreenshot) {
-          screenshotPath = path.join(os.tmpdir(), `tapflow-flow-failure-${Date.now()}.png`)
-          fs.writeFileSync(screenshotPath, result.failureScreenshot)
-        }
-        return ok(JSON.stringify({
-          name: result.name,
-          status: result.status,
-          durationMs: result.durationMs,
-          steps: result.steps,
-          ...(result.failureMessage ? { failureMessage: result.failureMessage } : {}),
-          ...(result.failureKind ? { failureKind: result.failureKind } : {}),
-          ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
-          // The flow ran without its appId being compared with the build's, and why.
-          ...(appCheckSkipped ? { appCheckSkipped } : {}),
-        }, null, 2))
+        return ok(JSON.stringify(flowResponse(result, appCheckSkipped), null, 2))
       } catch (e) {
         return err(`run_flow failed: ${(e as Error).message}`)
       }
@@ -535,24 +633,76 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   register(
     'tap',
     {
-      description: 'Tap at a pixel coordinate matching the screenshot. Use the width and height from the screenshot tool response.',
+      description:
+        'Tap an element query_ui_tree lists, where the device reaches it (fails naming what covers it), or, where the ' +
+        'tree names nothing, a screenshot pixel with the screenshot size.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        x: z.number().describe('X pixel coordinate (from screenshot)'),
-        y: z.number().describe('Y pixel coordinate (from screenshot, 0 = top)'),
-        screenshotWidth: z.number().int().describe('Screenshot width in pixels (from screenshot tool)'),
-        screenshotHeight: z.number().int().describe('Screenshot height in pixels (from screenshot tool)'),
+        element: z.object({
+          id: z.string().optional(),
+          label: z.string().optional(),
+          role: z.string().optional(),
+          index: z.number().int().optional(),
+        }).optional().describe('identifier, else label; role or index picks one of several'),
+        x: z.number().optional().describe('Pixel x in the screenshot'),
+        y: z.number().optional().describe('Pixel y, 0 = top'),
+        screenshotWidth: z.number().int().optional().describe('From the screenshot tool'),
+        screenshotHeight: z.number().int().optional().describe('From the screenshot tool'),
+        holdMs: z.number().optional().describe('Hold before releasing, ms: a long press (1000 typical)'),
       },
     },
-    async ({ sessionId, x, y, screenshotWidth, screenshotHeight }) => {
+    // A long press is a held tap rather than a tool of its own, and so is a tap on an element: every tool's schema
+    // rides in every session (the budget in guide.test.ts), and a pinch is reachable through run_flow's `pinch` step.
+    async ({ sessionId, element, x, y, screenshotWidth, screenshotHeight, holdMs }) => {
+      const point = [x, y, screenshotWidth, screenshotHeight]
+      const hasPoint = point.some((v) => v !== undefined)
+      if (element !== undefined && hasPoint) return err('tap takes an element or a point, not both')
+      if (element !== undefined) return tapElement(sessionId, element, holdMs)
+      if (x === undefined || y === undefined || screenshotWidth === undefined || screenshotHeight === undefined) {
+        return err('tap needs an element, or x, y, screenshotWidth and screenshotHeight')
+      }
       try {
-        await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
-        return ok(JSON.stringify({ tapped: true, x, y }))
+        if (holdMs !== undefined) await client.longPress(sessionId, x / screenshotWidth, y / screenshotHeight, holdMs)
+        else await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
+        return ok(JSON.stringify({ tapped: true, x, y, ...(holdMs !== undefined ? { holdMs } : {}) }))
       } catch (e) {
         return err(`tap failed: ${(e as Error).message}`)
       }
     },
   )
+
+  /**
+   * A tap on an element (#1147), as `run_flow`'s `tapOn` makes it, on the same engine and driver: it waits for the
+   * element, taps where the device reaches it, fails naming what covers it, and says when the device could not judge.
+   * The frame centre the agent would have computed is what a tab bar or a scrim covers.
+   */
+  async function tapElement(sessionId: string, element: { id?: string; label?: string; role?: string; index?: number }, holdMs: number | undefined): Promise<ToolResult> {
+    const selector = { ...element, timeout: ELEMENT_WAIT_S }
+    const step = holdMs === undefined ? { tapOn: selector } : { longPressOn: { on: selector, durationMs: holdMs } }
+    try {
+      // JSON is YAML, and the parser `run_flow` uses is what says an element names nothing.
+      const flow = parseFlow(JSON.stringify({ steps: [step] }), 'tap')
+      const result = await runFlow(flow, makeFlowDriver(client, sessionId), {})
+      const done = result.steps[0]
+      if (!done || done.status !== 'passed') {
+        // What `run_flow` reports of the same failure: whose it was, and the screen it failed on.
+        let screenshotPath: string | undefined
+        if (result.failureScreenshot) {
+          screenshotPath = path.join(os.tmpdir(), `tapflow-tap-failure-${Date.now()}.png`)
+          fs.writeFileSync(screenshotPath, result.failureScreenshot)
+        }
+        return err(JSON.stringify({
+          tapped: false, element: done?.name, message: done?.message ?? 'not tapped',
+          ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+          ...(done?.suggestions ? { suggestions: done.suggestions } : {}),
+          ...(screenshotPath ? { failureScreenshotPath: screenshotPath } : {}),
+        }, null, 2))
+      }
+      return ok(JSON.stringify({ tapped: true, element: done.name, reach: done.reach, ...(done.reachNote ? { reachNote: done.reachNote } : {}), ...(holdMs !== undefined ? { holdMs } : {}) }))
+    } catch (e) {
+      return err(`tap failed: ${(e as Error).message}`)
+    }
+  }
 
   register(
     'swipe',
@@ -591,7 +741,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     {
       description:
         'Type text into the currently focused input field (tap the field first). ' +
-        'iOS supports arbitrary Unicode (pasted); Android supports ASCII only.',
+        'Any text; on Android, text other than ASCII needs a focused field.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
         text: z.string().describe('Text to type into the focused field'),

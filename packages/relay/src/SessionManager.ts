@@ -45,6 +45,8 @@ export interface Session {
   /** Where the holder's current touch began and last was, so its end can be told to watchers as a tap or a swipe
    *  (A2). Kept whether or not anyone watches: a watcher can arrive mid-gesture. Cleared at the end and with the holder. */
   gesture: { start: Point; last: Point } | null
+  /** A `input:touch:cancel` reached an agent that cancels, so the end following it completed nothing to tell. */
+  touchCancelled: boolean
   streamSocket: WebSocket | null
   deviceId: string
   deviceName: string
@@ -72,6 +74,12 @@ export interface Session {
    *  running for a person is theirs to come back to, and a lease must not take it and wipe it. `lastBoot` cannot
    *  say so — it names whoever cold-booted the device, and a person picks up automation's devices warm. */
   lastHolderWasAi?: boolean
+  /** The last signed-in person to hold the device. Not cleared when they leave: the next person is compared with it.
+   *  AI clients, `anon` and `unidentified:*` never set it or change it — a loopback MCP or flow run is `anon`, and the
+   *  person coming back from one is not someone new. Unknown after a relay restart, which counts as no change. */
+  lastPersonUser?: string
+  /** A different person took the device and its keyboard has not been reset yet: sent with their next boot. */
+  keyboardResetOwed?: boolean
   /** Who cold-booted the device this session drives, and when — kept after the holder leaves, since that is when
    *  it matters: it is what the per-Mac automation cap counts and shuts down (`admission/capacity.ts`). Set when
    *  the relay forwards a cold boot, undone if that boot fails or turns out warm, cleared on `shutdown-done`.
@@ -134,7 +142,9 @@ export type InstalledBuild = { buildId: number; filePath: string }
  * exceptions for that reason — see `join()`. Anything else that goes wrong in there is a bug and still
  * throws, which keeps the two apart at the call site instead of at a `catch`.
  */
-export type JoinResult = { ok: true } | { ok: false; failure: 'not-found' | 'held-by-another' }
+/** `personChanged`: a signed-in person took the device after a different one had it — the device's keyboard language
+ *  is the last person's, and the relay puts it back (#1134). */
+export type JoinResult = { ok: true; personChanged: boolean } | { ok: false; failure: 'not-found' | 'held-by-another' }
 
 type AgentField = 'agentId' | 'agentName' | 'agentPlatform' | 'agentCapabilities'
 type DeviceField = 'deviceName' | 'devicePlatform' | 'deviceStatus' | 'deviceOsVersion' | 'deviceFormFactor' | 'deviceServiceTier'
@@ -277,6 +287,7 @@ export class SessionManager {
         holderLabel: null,
         holderStream: true,
         gesture: null,
+        touchCancelled: false,
         streamSocket: null,
         deviceId: d.id,
         readySent: false,
@@ -420,6 +431,7 @@ export class SessionManager {
     session.holderStream = holder.stream !== false
     // A touch the previous holder began is not this one's to end.
     session.gesture = null
+    session.touchCancelled = false
     // A person taking the device ends the wait, and if it was not theirs, the one waiting is told who. An AI client
     // only borrows it: the wait is kept and comes back when the client leaves.
     if (!isAiClientKind(holder.kind)) {
@@ -430,13 +442,18 @@ export class SessionManager {
       if (session.endedBy?.ownerUser === owner.user) session.endedBy = undefined
       session.waitingOwner = undefined
     }
+    let personChanged = false
+    if (!isAiClientKind(holder.kind) && /^\d+$/.test(owner.user)) {
+      personChanged = session.lastPersonUser !== undefined && session.lastPersonUser !== owner.user
+      session.lastPersonUser = owner.user
+    }
     // Also when the same client re-joins as something that is not an AI client: a watch is admitted to an
     // AI client's session, and only that kind may be watched.
     this.evictWatchers(sessionId, 'holder-changed', (admitted) => admitted !== owner.key || !isAiClientKind(holder.kind))
     let held = this.browserSocketIndex.get(browserSocket)
     if (!held) { held = new Set(); this.browserSocketIndex.set(browserSocket, held) }
     held.add(session)
-    return { ok: true }
+    return { ok: true, personChanged }
   }
 
   remove(sessionId: string): void {
@@ -475,6 +492,7 @@ export class SessionManager {
     session.holderName = null
     session.holderStream = true
     session.gesture = null
+    session.touchCancelled = false
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (onTimeout) {
       session.idleTimer = setTimeout(() => {

@@ -8,7 +8,13 @@ import XCTest
 //
 // Routes:
 //   GET /health                     → the token the host passed, or "ok" without one (readiness probe)
-//   GET /tree?bundleId=<id>         → the app's XCUIApplication.debugDescription (text)
+//   GET /tree?bundleId=<id>         → `TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation or 0>`, then the app's
+//                                     XCUIApplication.debugDescription (text)
+//   GET /field?bundleId=<id>        → the keyboard-focused text field as JSON, or `{"reason": …}` (Flow Capture, #1135),
+//                                     with the soft keyboard beside it
+//   GET /keyboard?bundleId=<id>     → the soft keyboard as JSON: `{"shown", "rect"?, "orientation"}` (#1135)
+//   GET /reach?bundleId=<id>&targets=<base64 JSON>
+//                                   → `{"results": [ReachResult]}`: where a touch meant for each element lands (#1125)
 final class TreeServer {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "dev.tapflow.treeserver")
@@ -93,9 +99,182 @@ final class TreeServer {
                 return ("400 Bad Request", "missing bundleId")
             }
             let app = XCUIApplication(bundleIdentifier: bundleId)
-            return ("200 OK", app.debugDescription)
+            // The app's own interface orientation, which the tree's frames are in. Touches go to the portrait
+            // framebuffer, so this — not the device's held orientation — is what turns a tree point into a touch
+            // point (a portrait-locked app stays portrait on a turned device). Read as WebDriverAgent does, through a
+            // private XCUIApplication property, and only once the app is up: while it is still starting, the tree is
+            // a "not found" query chain and the getter has no app to ask. Read on both sides of the tree, and 0 when
+            // the two differ — a turn caught mid-way is no information, not the wrong one. One line ahead of the tree.
+            // `state` is public and asks nothing of the app; the private getter is only reached past it.
+            let up = app.state == .runningForeground
+            let before = up ? Self.interfaceOrientation(app) : 0
+            let tree = app.debugDescription
+            let orientation = up && tree.contains("Element subtree:") && before == Self.interfaceOrientation(app) ? before : 0
+            return ("200 OK", "TAPFLOW_INTERFACE_ORIENTATION \(orientation)\n" + tree)
+        }
+        if path.hasPrefix("/field") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else {
+                return ("400 Bad Request", "missing bundleId")
+            }
+            return ("200 OK", Self.field(XCUIApplication(bundleIdentifier: bundleId)))
+        }
+        if path.hasPrefix("/keyboard") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else {
+                return ("400 Bad Request", "missing bundleId")
+            }
+            return ("200 OK", json(Self.keyboard(XCUIApplication(bundleIdentifier: bundleId))))
+        }
+        if path.hasPrefix("/reach") {
+            guard let bundleId = query(path, "bundleId"), !bundleId.isEmpty else { return ("400 Bad Request", "missing bundleId") }
+            guard let raw = query(path, "targets"), let data = Data(base64Encoded: raw),
+                  let targets = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+                return ("400 Bad Request", "targets must be base64 JSON")
+            }
+            let app = XCUIApplication(bundleIdentifier: bundleId)
+            guard app.state == .runningForeground else {
+                return ("200 OK", json(["results": targets.map { _ in ["state": "unknown", "reason": "the app is not in front"] }]))
+            }
+            return ("200 OK", json(["results": targets.map { Self.reach(app, $0) }]))
         }
         return ("404 Not Found", "unknown route")
+    }
+
+    /**
+     * Where a touch meant for `target` lands (#1125), judged by XCTest, not by the frame's centre, which a tab bar or a
+     * scrim can cover: measured, a SwiftUI row under the tab bar is hittable at (0.10, 0.885) while its centre is the
+     * Hard tab's button. The element is found again by identifier, else label, and the candidate whose frame — clipped
+     * to the window and normalized as the tree's are (`xcuiTree.ts`) — is nearest the one the client read.
+     *
+     * The point is `hitPointCoordinate.screenPoint` over the portrait screen: measured on a landscape app, that point is
+     * in the portrait screen's space, not the window's, which is the space a touch is sent in — so a client never turns
+     * it. `hitPointCoordinate` is private (WebDriverAgent reads it too); without it the answer is `unknown`, never the
+     * centre, which is the false pass this exists to end.
+     */
+    private static func reach(_ app: XCUIApplication, _ target: [String: Any]) -> [String: Any] {
+        let window = app.windows.firstMatch.frame
+        guard window.width > 0, window.height > 0 else { return ["state": "unknown", "reason": "no window"] }
+        let f = target["frame"] as? [String: Double] ?? [:]
+        let want = CGRect(x: f["x"] ?? 0, y: f["y"] ?? 0, width: f["width"] ?? 0, height: f["height"] ?? 0)
+        let all = app.descendants(matching: .any)
+        let query: XCUIElementQuery
+        if let id = target["identifier"] as? String, !id.isEmpty {
+            query = all.matching(identifier: id)
+        } else {
+            query = all.matching(NSPredicate(format: "label == %@", target["label"] as? String ?? ""))
+        }
+        let count = query.count
+        var best: (element: XCUIElement, frame: CGRect, distance: Double)?
+        var runnerUp = Double.infinity
+        var onScreen = 0
+        // A long list can repeat one label past the cap, so a match beyond it may be the one on screen: then nothing
+        // below may say it is not there, only that it cannot judge.
+        let inspected = min(count, 24)
+        let truncated = count > inspected
+        for i in 0..<inspected {
+            let element = query.element(boundBy: i)
+            guard let frame = clipped(element.frame, to: window) else { continue }
+            onScreen += 1
+            // Double, not CGFloat: Xcode 26.6 refused a CGFloat for the tuple's Double below and the runner failed to build.
+            let d = Double(abs(frame.minX - want.minX) + abs(frame.minY - want.minY) + abs(frame.width - want.width) + abs(frame.height - want.height))
+            if let b = best, d >= b.distance { runnerUp = min(runnerUp, d); continue }
+            if let b = best { runnerUp = b.distance }
+            best = (element, frame, d)
+        }
+        if count > 0 && onScreen == 0 {
+            return truncated ? ["state": "unknown", "reason": "too many matches to judge"] : ["state": "offscreen"]
+        }
+        // Not the element the client read: gone, moved past rounding, or two equally near. Read again, never guess.
+        guard let found = best, found.distance < 0.02, runnerUp - found.distance > 0.002 else {
+            return truncated ? ["state": "unknown", "reason": "too many matches to judge"] : ["state": "missing", "candidates": onScreen]
+        }
+        guard found.element.isHittable else { return ["state": "occluded"] }
+        guard found.element.responds(to: NSSelectorFromString("hitPointCoordinate")),
+              let hit = found.element.value(forKey: "hitPointCoordinate") as? XCUICoordinate else {
+            return ["state": "unknown", "reason": "this Xcode gives no hit point"]
+        }
+        let portrait = CGSize(width: min(window.width, window.height), height: max(window.width, window.height))
+        let centre = found.element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).screenPoint
+        let p = hit.screenPoint
+        return [
+            "state": "reachable",
+            "point": [p.x / portrait.width, p.y / portrait.height],
+            "atCentre": hypot(p.x - centre.x, p.y - centre.y) < 1.5,
+            "frame": ["x": found.frame.minX, "y": found.frame.minY, "width": found.frame.width, "height": found.frame.height],
+        ]
+    }
+
+    /// `frame` clipped to `window` and normalized by it, as `xcuiTree.ts` does; nil when no part is on screen.
+    private static func clipped(_ frame: CGRect, to window: CGRect) -> CGRect? {
+        let x1 = max(0, (frame.minX - window.minX) / window.width), y1 = max(0, (frame.minY - window.minY) / window.height)
+        let x2 = min(1, (frame.maxX - window.minX) / window.width), y2 = min(1, (frame.maxY - window.minY) / window.height)
+        guard x2 > x1, y2 > y1 else { return nil }
+        return CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
+    }
+
+    private static let textInputTypes: [XCUIElement.ElementType] = [.textField, .secureTextField, .searchField, .textView]
+
+    /// The text field that has keyboard focus, as JSON — what Flow Capture records as the text a person really typed
+    /// (#1135). Not the tree's `value:`, which debugDescription prints unquoted and cuts at 18 characters (measured).
+    /// A secure field's value never leaves this process: it reads `•••` anyway, and its length is a secret too.
+    private static func field(_ app: XCUIApplication) -> String {
+        guard app.state == .runningForeground else { return json(["reason": "no-app"]) }
+        let keyboard = Self.keyboard(app)
+        let inputs = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "elementType IN %@", textInputTypes.map { $0.rawValue }))
+            .matching(NSPredicate(format: "hasKeyboardFocus == YES"))
+        let found = inputs.allElementsBoundByIndex
+        // Exactly one, or nothing is claimed: a second focused input means the read cannot say which one was typed in.
+        guard found.count == 1, let snapshot = try? found[0].snapshot() else {
+            return json(["reason": found.isEmpty ? "no-focus" : "ambiguous", "keyboard": keyboard])
+        }
+        let frame = snapshot.frame
+        var out: [String: Any] = [
+            "identifier": snapshot.identifier,
+            "placeholder": snapshot.placeholderValue ?? "",
+            "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.size.width, "height": frame.size.height],
+            "type": snapshot.elementType == .secureTextField ? "secure" : "text",
+            "keyboard": keyboard,
+        ]
+        if snapshot.elementType == .secureTextField { out["reason"] = "secure"; return json(out) }
+        let value = (snapshot.value as? String) ?? ""
+        // UIKit puts the placeholder in an empty field's value (measured; SwiftUI does not). A field whose typed text
+        // equals its placeholder reads as empty here — the one case this cannot tell apart.
+        out["value"] = !value.isEmpty && value == snapshot.placeholderValue ? "" : value
+        return json(out)
+    }
+
+    /// The soft keyboard, as fractions of the app's window in its interface orientation (the tree's space), with that
+    /// orientation so the host can turn it into the framebuffer a touch lands in. Its bottom row (globe, dictation) sits
+    /// below the `Keyboard` element (measured), so the rect runs to the window's bottom edge. Not shown with a hardware
+    /// keyboard connected, where there is no soft one.
+    private static func keyboard(_ app: XCUIApplication) -> [String: Any] {
+        let orientation = Self.interfaceOrientation(app)
+        guard app.state == .runningForeground else { return ["shown": NSNull(), "orientation": orientation] }
+        let element = app.keyboards.firstMatch
+        guard element.exists else { return ["shown": false, "orientation": orientation] }
+        let window = app.frame
+        let frame = element.frame
+        guard window.width > 0, window.height > 0, !frame.isEmpty else { return ["shown": true, "orientation": orientation] }
+        let top = max(frame.minY, window.minY)
+        let rect: [String: Double] = [
+            "x": Double((frame.minX - window.minX) / window.width),
+            "y": Double((top - window.minY) / window.height),
+            "width": Double(frame.width / window.width),
+            "height": Double((window.maxY - top) / window.height),
+        ]
+        return ["shown": true, "rect": rect, "orientation": orientation]
+    }
+
+    private static func json(_ object: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: object), let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+
+    /// UIInterfaceOrientation (1 portrait, 2 upside down, 3 landscape right, 4 landscape left), or 0 when the
+    /// runtime has no such property — guarded, so a missing getter answers 0 rather than raising.
+    private static func interfaceOrientation(_ app: XCUIApplication) -> Int {
+        guard app.responds(to: NSSelectorFromString("interfaceOrientation")) else { return 0 }
+        return (app.value(forKey: "interfaceOrientation") as? Int) ?? 0
     }
 
     private static func query(_ path: String, _ key: String) -> String? {

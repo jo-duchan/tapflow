@@ -70,6 +70,22 @@ export const INBOUND_DISPOSITION = {
 
   // ── deliberately not read ─────────────────────────────────────────────────────────────────────────
 
+  'device:keyboard-set-done': {
+    ignored: 'Never requested: an agent drives the device as it finds it, and `run_flow` resets nothing beyond the '
+      + 'flow\'s own clearState (the guide says so). The dashboard\'s replay asks for it; a `flow run` boot resets it '
+      + 'with the rest of its run reset, in the agent.',
+  },
+  'device:keyboard-set-error': {
+    ignored: 'Never requested, for the reason its `-done` is not read.',
+  },
+  'device:run-reset-done': {
+    ignored: 'Never requested: an agent drives the device as it finds it. Flow Capture\'s dialog asks for it before a '
+      + 'replay (#1139), and a `flow run` boot carries its own.',
+  },
+  'device:run-reset-error': {
+    ignored: 'Never requested, for the reason its `-done` is not read.',
+  },
+
   'device:booting': {
     ignored: 'Not "no consumer" — it is the only signal separating "the agent picked the boot up" from '
       + '"nothing happened" during `bootDevice`\'s wait. It is ignored because it settles nothing: the '
@@ -98,12 +114,13 @@ export const INBOUND_DISPOSITION = {
       + 'which is a viewer concern — this client has no surface to reflect it on.',
   },
   'device:postures': {
-    ignored: 'Which postures a foldable offers, and which it is in. No tool changes a device\'s '
-      + 'posture, so there is nothing here that would act on the list.',
+    does: 'kept per session for `run_flow`\'s `setPosture`, which picks the end of the list it names and waits '
+      + 'for a later one whose current posture is that id. No tool of its own changes a posture.',
   },
   'session:chrome': {
-    ignored: 'Bezel geometry and device model, for drawing a device frame around a video stream. This '
-      + 'client renders nothing; `list_devices` already carries the name and platform a model needs.',
+    does: 'kept per session for `run_flow`, which checks a flow\'s `pressButton` steps against the buttons the device '
+      + 'declares before replaying it, and reads which way the device is held for `setOrientation`. The bezel '
+      + 'geometry it also carries is for drawing a frame, which this client does not.',
   },
   'session:deviceInfo': {
     ignored: 'Nothing here displays a device; `list_devices` already carries its name and platform. The only '

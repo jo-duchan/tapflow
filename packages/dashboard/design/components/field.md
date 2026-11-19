@@ -34,9 +34,9 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
 - **Stack** — label, control, line, 8px apart (`gap-2`), full width of the form. Measured: 62px without a line, 90px
   with one.
 - **Label** — [label.md](./label.md): 14px medium, `--foreground`, with an optional inline hint in parentheses.
-- **Control** — one of the five under `control`.
-- **Line** (optional) — a hint (`--muted-foreground`) or a message (`--destructive`, or amber for the one warning),
-  14px regular on a 20px line. It wraps rather than truncating.
+- **Control** — one of the controls in the `control` table.
+- **Line** (optional) — a hint (`--muted-foreground`) or an error (`--destructive`), 14px regular on a 20px line. It
+  wraps rather than truncating. The one warning is a notice box instead of a line (`message` below).
 - **The error slot takes no space while it is empty.** `FieldError` is always in the page, so an error is announced
   into a region that already existed, but while it has no text it is `absolute` and the field is 62px, as if it
   were not there. Do not draw a reserved blank line.
@@ -54,6 +54,10 @@ Use at least 8 characters             line: hint or message, 14px on a 20px line
 | `slider` | Slider, with its current value at the right end of the label row (below) | 2 |
 | `image` | Image picker: a preview with a 24px round edit button on its corner (below) | 3 |
 | `file` | File drop zone, 96px (below) | 1 |
+| `textarea` | [Textarea](./textarea.md) | 0 |
+
+This table is the list of controls a field may hold, not only the ones in use: `textarea` has no call site yet,
+and a field takes no other control without a row here first.
 
 **Slider** (Flow run videos, Settings). The label row puts the label on the left and the value on the right
 (`3 days`, `20 GB`), 14px regular, figures at fixed width, on one baseline. The gaps are 12px, not 8px
@@ -77,6 +81,8 @@ saved with the form.
 **File drop zone** (Upload build). 96px high, full width, `rounded-md`, a 2px dashed `--border`, centered text
 14px `--muted-foreground`: `Click or drag to upload`, replaced by the chosen file's name once one is picked. On hover the border turns
 `--primary`. Click or drop a file on it.
+Long file names truncate in the middle, keeping the final 16 characters visible to distinguish builds.
+The full file name is available in the hover tooltip and the control's accessible description.
 
 ### `hint`
 
@@ -100,7 +106,7 @@ saved with the form.
 |-------|------------|-----------:|
 | `none` | No line. Either the slot is empty or the field has none | 32 — every field at rest |
 | `error` | `FieldError`: 14px regular `--destructive` (`#f00000` / `#e25a5a`) | 19 — one cannot fire (below) |
-| `warning` | 14px regular, Tailwind amber (`#b45309` / `#fcd34d`), not a token | 1 |
+| `warning` | A notice box: `--warning` fill, `--warning-border`, a `--warning-foreground` title and a `--foreground` body ([DESIGN.md](../DESIGN.md#semantic)) | 1 |
 
 - **`error` replaces a `below` hint**, in the same place and size, so the field keeps its 90px. Only the
   new-password fields have both, and their error says the rule itself (`Password must be at least 8 characters`).
@@ -112,11 +118,12 @@ saved with the form.
   the toast `Image must be 2MB or less`, while the invite page's avatar says `Max 2MB for avatar` under the field.
 - The invite dialog's Role field has a slot, but its Select starts on `QA` and has no empty choice, so it never
   shows an error.
-- **`warning`** is on the token's Expiration field when `No expiration` is picked: `A token without an expiry stays
-  valid until you revoke it. For CI, 90 days or less is recommended.` It is advice, not a refusal, and the form
-  still submits.
-- Error text on `--card` is 4.46:1 in light mode and 4.74:1 in dark (4.28:1 and 4.99:1 on `--background`). Warning
-  is 5.02:1 and 11.82:1 on `--card`. The light error is under 4.5:1; that is left to the designer's color pass, not
+- **`warning`** is on the token's Expiration field when `No expiration` is picked: the title `This token never
+  expires.` over `It stays valid until you revoke it. For CI, 90 days or less is recommended.` The whole box is
+  the field's description. It is advice, not a refusal, and the form still submits. Being two lines in a padded
+  box, it is taller than the 90px a one-line field measures.
+- Error text on `--card` is 4.46:1 in light mode and 4.74:1 in dark (4.28:1 and 4.99:1 on `--background`). The
+  warning's title is 7.93:1 and 10.75:1 on its fill, its body 17.29:1 and 14.04:1. The light error is under 4.5:1; that is left to the designer's color pass, not
   a value to aim for.
 
 Call-site counts are a snapshot (2026-10-21).
@@ -181,7 +188,8 @@ underlined.
 
 ## Figma
 
-Component set **Field** (`75:335`) in the `Design System` page — `control` × `hint` × `message`, 12 variants
-(3 × 2 × 2). It was made before `FieldHint` existed, so its `hint` axis likely means the inline hint only. The value
-names were not checked against this spec, and it has no slider, image picker, file drop zone or warning. Matching
-it is one of the items for the Figma sync.
+Component set **Field** (`20:650`) on the `Forms` page of tapflow-design-system — `hint` × `message`, 9 variants,
+with one **Control** slot. The slot accepts only the controls in the `control` table above, one at a time, so
+`control` is not an axis there. Slider (`19:577`), ImagePicker (`19:613`) and FileDrop (`19:622`) are their own
+component sets on the same page. Text properties carry the label, hints, error and warning, and `Value` shows a
+slider's value.

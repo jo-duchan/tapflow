@@ -91,5 +91,6 @@ selection color, not a token of ours. Draw them in that state.
 
 ## Figma
 
-Component set **Input** (`63:123`) in the `Design System` page — `state` × `content`, 9 variants. The Figma
-value names were not checked against this spec. A read-only variant drawn at 12px is out of date: it is 14px.
+Component set **Input** (`1:1931`) on the `Forms` page of tapflow-design-system — `state` × `content`, 9 variants.
+`content` there is `placeholder`, `filled` and `mono`: `mono` is the read-only copy field above, at 14px, and
+`empty` is not drawn.

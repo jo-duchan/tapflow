@@ -1,6 +1,6 @@
 'use client';
 
-import { Camera, FoldHorizontal, Link2, Loader2, Radio, RadioOff, RefreshCw, RotateCw, Square, UnfoldHorizontal, Video } from 'lucide-react';
+import { Camera, FoldHorizontal, Link2, Loader2, Radio, RadioOff, RefreshCw, RotateCw, Route, Square, UnfoldHorizontal, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -79,6 +79,14 @@ interface SimulatorToolbarProps {
    * comes back; `DeviceViewer` puts them on this button again once it returns.
    */
   reboot?: { pending: boolean; onReboot: () => void; buttonRef?: MutableRefObject<HTMLButtonElement | null> };
+  /**
+   * Flow Capture (#1125): opens the dialog that turns the steps taken here into a flow. A prop rather than a slot because
+   * both platforms draw the same button. The dialog is opened by state, not by a `DialogTrigger`: this button is a
+   * `TooltipTrigger` already and the two would fight over the same child, as the restart's would.
+   */
+  onCaptureFlow?: () => void;
+  /** Where focus returns when the Capture flow dialog closes. Its own prop: an object holding a ref reads as a ref. */
+  captureButtonRef?: MutableRefObject<HTMLButtonElement | null>;
 }
 
 export interface NetworkControl {
@@ -354,6 +362,8 @@ export function SimulatorToolbar({
   launchSlot,
   network,
   reboot,
+  onCaptureFlow,
+  captureButtonRef,
 }: SimulatorToolbarProps) {
   // Per instance, not a literal: this component takes all its state through props and is rendered per
   // device viewer, so two toolbars on screen would point both buttons' `aria-describedby` at the first
@@ -630,6 +640,16 @@ export function SimulatorToolbar({
               : recordState === 'done' ? 'Recording saved' : 'Processing the recording'}
           </TooltipContent>
         </Tooltip>
+        {onCaptureFlow && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button ref={captureButtonRef} variant="ghost" size="icon" className="h-8 w-8" aria-label="Capture flow" onClick={onCaptureFlow}>
+              <Route className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Capture flow</TooltipContent>
+        </Tooltip>
+        )}
         {/* `uploading` and `done` arrive asynchronously, and a name change on a focused button is not
             re-announced — so without this a screen-reader user hears the recording start and never
             hears that it was saved. Mounted unconditionally with only the text toggled, as the

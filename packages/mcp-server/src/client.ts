@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  BootRefusalReason, BrowserToRelay, DeviceSummary, InputErrorReason, LaunchApplied, LaunchOptions, SessionTerminatedReason, UIElement,
+  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, tokenRefusal, type BuildLookup, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, MAX_HOLD_MS, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
 // package's public name for it.
 export type { DeviceSummary as DeviceInfo }
 import { WebSocket } from 'ws'
+import { chromeOrientation, interfaceTurnOf, type InterfaceTurn } from '@tapflowio/protocol/screen'
 
 export interface AgentSession {
   agentName?: string
@@ -113,6 +114,9 @@ type RelayMsg = Record<string, unknown>
 const UI_ROLES = new Set(['button', 'text', 'input', 'image', 'checkbox', 'switch', 'slider', 'list', 'cell', 'tab', 'other'])
 const PERMANENT_QUERY_STATUSES = new Set([400, 401, 403, 404, 409])
 const MAX_TIMER_MS = 2_147_483_647
+// Same cap as a flow's `durationMs`: a hold or a pinch keeps a pointer down for its whole length, and nothing lifts one
+// a client left open.
+const MAX_GESTURE_MS = 60_000
 
 function isUIElement(value: unknown): value is UIElement {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
@@ -124,6 +128,8 @@ function isUIElement(value: unknown): value is UIElement {
   if (record.identifier !== undefined && typeof record.identifier !== 'string') return false
   if (record.rawRole !== undefined && typeof record.rawRole !== 'string') return false
   if (record.placeholder !== undefined && typeof record.placeholder !== 'string') return false
+  if (record.secure !== undefined && typeof record.secure !== 'boolean') return false
+  if (record.focused !== undefined && typeof record.focused !== 'boolean') return false
   const x = rect.x
   const y = rect.y
   const width = rect.width
@@ -181,6 +187,9 @@ interface Waiter {
    *  keying per session "is not available"; it is available now, by putting the id on the record rather than
    *  by guessing it. */
   sessionId?: string
+  /** The socket the request went out on: a socket's close settles its own waiters, not those of the socket that
+   *  replaced it, whose answers can still arrive (CodeRabbit on #1190). Null when none was open. */
+  socket: WebSocket | null
 }
 
 /** What a refused boot tells the calling agent, per `BootRefusalReason`: a reason added to the union is a compile
@@ -208,6 +217,14 @@ const BOOT_REFUSALS: Record<BootRefusalReason, string> = {
  */
 
 export class SessionLeftError extends Error {}
+
+function leftError(sessionId: string): SessionLeftError {
+  return new SessionLeftError(
+    `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
+    'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
+    'the request blindly. Call connect_device again if you still want this session.',
+  )
+}
 
 /**
  * The relay said this session ended while a request was still in flight (#512, finding 4).
@@ -457,6 +474,12 @@ export class TapflowClient {
   private readonly held = new Set<string>()
   /** Sessions held on a socket a reconnect replaced: the relay released them when that socket closed. */
   private readonly released = new Set<string>()
+  /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
+  private readonly leaves = new Map<string, number>()
+  /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. Each
+   *  swipe owns its record and clears only that one, so a swipe left behind by a replaced socket cannot clear the
+   *  record of a newer swipe on the same session (CodeRabbit on #1190). */
+  private readonly openTouches = new Map<string, { x: number; y: number }>()
 
   constructor(
     private readonly relayUrl: string,
@@ -538,10 +561,12 @@ export class TapflowClient {
       ws.on('close', (code: number, reason: Buffer) => {
         // `disconnect()` lets go of the socket first, so a close this client asked for is not recorded.
         if (this.ws === ws) this.lastClose = { code, reason: reason.toString() }
-        this.ws = null
+        // An old socket's close can land after a reconnect opened its replacement: it must not let go of that one.
+        if (this.ws === ws) this.ws = null
         const detail = this.closeDetail()
         const closed = `WebSocket closed${detail}`
-        const pending = this.waiters.splice(0)
+        const pending = this.waiters.filter((w) => w.socket === ws || w.socket === null)
+        this.waiters = this.waiters.filter((w) => !pending.includes(w))
         for (const w of pending) {
           clearTimeout(w.timer)
           // The other place a waiter is settled without an answer, so the other place the note belongs. A
@@ -574,6 +599,11 @@ export class TapflowClient {
    *  device per agent registration — slow enough that this does not become the never-shrinking set the ack
    *  ledger above rules out, because that one would have grown per *request*. */
   private readonly lifecycle = new Map<string, SessionLifecycle>()
+  /** The latest chrome the relay sent for each session — the device's buttons, which `run_flow` checks a
+   *  `pressButton` against before replaying. Same lifetime as `lifecycle`. */
+  private readonly chromes = new Map<string, ChromePayload>()
+  /** The latest postures the relay sent for each session — what `run_flow`'s `setPosture` picks an id from. */
+  private readonly postures = new Map<string, PosturesPayload>()
 
   private lifecycleOf(sessionId: string): SessionLifecycle {
     let s = this.lifecycle.get(sessionId)
@@ -657,6 +687,14 @@ export class TapflowClient {
   }
 
   private dispatch(msg: RelayMsg): void {
+    // Kept whether or not anything waits: the relay sends a session's chrome once, at join or boot, and `run_flow`
+    // asks afterwards.
+    if (msg['type'] === 'session:chrome' && typeof msg['sessionId'] === 'string' && typeof msg['payload'] === 'object' && msg['payload'] !== null) {
+      this.chromes.set(msg['sessionId'], msg['payload'] as ChromePayload)
+    }
+    if (msg['type'] === 'device:postures' && typeof msg['sessionId'] === 'string' && isPostures(msg['payload'])) {
+      this.postures.set(msg['sessionId'], msg['payload'])
+    }
     // Read before the waiter loop, and read whether or not anything is waiting — the same rule the ack
     // ledger below is written to, for the same reason. `terminated` settles every waiter for its session;
     // `rebound` settles nothing — the relay answers the stranded boots itself (#885) — and the copy that
@@ -781,7 +819,7 @@ export class TapflowClient {
         const note = sessionId ? this.sessionNote(sessionId) : undefined
         reject(new RequestTimeoutError(note ? `Request timed out — ${note}` : 'Request timed out'))
       }, timeoutMs)
-      this.waiters.push({ predicate, resolve, reject, timer, sessionId })
+      this.waiters.push({ predicate, resolve, reject, timer, sessionId, socket: this.ws })
     })
   }
 
@@ -877,14 +915,19 @@ export class TapflowClient {
    * call detached, so a model holding both calls open at once is ordinary rather than exotic.
    */
   disconnectDevice(sessionId: string): void {
+    // A finger this client put down is lifted before it leaves, as flow-runner's channel does: the relay stops routing
+    // this session's frames as it processes the leave, so the swipe itself can no longer end it (CodeRabbit on #1190).
+    const touch = this.openTouches.get(sessionId)
+    if (touch) {
+      this.send({ type: 'input:touch:cancel', sessionId })
+      this.send({ type: 'input:touch:end', sessionId, requestId: randomUUID(), payload: touch })
+      this.openTouches.delete(sessionId)
+    }
     this.send({ type: 'session:leave', sessionId })
+    this.leaves.set(sessionId, (this.leaves.get(sessionId) ?? 0) + 1)
     this.held.delete(sessionId)
     this.released.delete(sessionId)
-    this.settleSessionWaiters(sessionId, () => new SessionLeftError(
-      `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
-      'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
-      'the request blindly. Call connect_device again if you still want this session.',
-    ))
+    this.settleSessionWaiters(sessionId, () => leftError(sessionId))
   }
 
   // Correlated by `requestId` when the reply carries one, and by `sessionId` + type when it does not.
@@ -1000,7 +1043,7 @@ export class TapflowClient {
    * its own input had timed out was consumed by the next input's waiter — which then reported the previous
    * input's outcome. The predicate below now requires the id, with no fallback for an absent one.
    */
-  private async awaitInputAck(sessionId: string, requestId: string): Promise<void> {
+  private async awaitInputAck(sessionId: string, requestId: string, extraMs = 0): Promise<void> {
     const strict = this.ackedSessions.has(sessionId)
     let msg: RelayMsg
     try {
@@ -1013,7 +1056,7 @@ export class TapflowClient {
         (m) =>
           (m['type'] === 'input:done' || m['type'] === 'input:error') &&
           m['sessionId'] === sessionId && m['requestId'] === requestId,
-        2_000,
+        2_000 + extraMs,
         sessionId,
       )
     } catch (e) {
@@ -1095,34 +1138,63 @@ export class TapflowClient {
     endX: number,
     endY: number,
     durationMs = 300,
+    holdMs = 0,
   ): Promise<void> {
     // Fractional durations (e.g. 250.5) stay valid for 0.23.0 compatibility;
     // routed through failed() so a session-scoped failure carries the session note.
     if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_TIMER_MS) {
       throw this.failed(sessionId, `swipe duration must be a positive finite number no greater than ${MAX_TIMER_MS}ms`)
     }
+    if (!Number.isFinite(holdMs) || holdMs < 0 || holdMs > MAX_HOLD_MS) {
+      throw this.failed(sessionId, `swipe hold must be a finite number from 0 to ${MAX_HOLD_MS}ms`)
+    }
+    // Eight moves, the last on `to`, then the lift one interval later, nine intervals in all. The moves used to
+    // stop at 7/8 of the way, and every agent lifts where the last move was, so every swipe ended an eighth short — a
+    // drag-and-drop piece a replay dropped short of its slot (wdio demo app on
+    // Android: short of the end it failed at 300, 900 and 2000 ms; on the end it passed at 300 and 900).
     const STEPS = 8
-    const interval = durationMs / STEPS
+    const interval = durationMs / (STEPS + 1)
+    const leaves = this.leaves.get(sessionId) ?? 0
+    const ws = this.ws
+    // A leave ends the swipe as left (disconnectDevice lifted the finger); a dropped or replaced socket ends it as
+    // unconfirmed, since frames already sent may have reached the device (CodeRabbit on #1190).
+    const touch = { x: startX, y: startY }
+    const release = () => { if (this.openTouches.get(sessionId) === touch) this.openTouches.delete(sessionId) }
+    const left = () => (this.leaves.get(sessionId) ?? 0) !== leaves
+    const lost = () => this.ws !== ws || ws?.readyState !== WebSocket.OPEN
+    const stop = (): Error => {
+      if (left()) return leftError(sessionId)
+      release()
+      return this.failed(sessionId,
+      `Could not confirm the input reached the device: the relay connection dropped during the swipe${this.closeDetail()}. ` +
+        'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
+    }
+    const at = (point: { x: number; y: number }) => {
+      if (left() || lost()) throw stop()
+      this.send({ type: 'input:touch:move', sessionId, payload: point })
+      touch.x = point.x
+      touch.y = point.y
+    }
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
-    for (let i = 1; i < STEPS; i++) {
+    this.openTouches.set(sessionId, touch)
+    for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
       // coordinates here are normalized 0-1 — rounding would snap every
       // intermediate move to a screen edge
-      this.send({
-        type: 'input:touch:move',
-        sessionId,
-        payload: {
-          x: startX + (endX - startX) * t,
-          y: startY + (endY - startY) * t,
-        },
-      })
+      // The last is the end itself, not 1 × the path, which floating point can leave a hair off.
+      at(i === STEPS ? { x: endX, y: endY } : { x: startX + (endX - startX) * t, y: startY + (endY - startY) * t })
     }
     await delay(interval)
+    // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
+    if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, at, () => !left() && !lost()))) throw stop()
+    if (left() || lost()) throw stop()
+    release()
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
-    await this.awaitInputAck(sessionId, requestId)
+    // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
+    await this.awaitInputAck(sessionId, requestId, durationMs + holdMs)
   }
 
   // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent
@@ -1152,10 +1224,10 @@ export class TapflowClient {
 
   // Agents consume KeyboardEvent.code names ({ code, modifiers }) on input:key.
   // 'Return' is accepted as an alias — neither platform maps it, 'Enter' is the code.
-  async pressKey(sessionId: string, key: string): Promise<void> {
+  async pressKey(sessionId: string, key: string, modifiers?: readonly KeyModifier[]): Promise<void> {
     const code = key === 'Return' ? 'Enter' : key
     const requestId = randomUUID()
-    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: 0 } })
+    this.send({ type: 'input:key', sessionId, requestId, payload: { code, modifiers: keyModifierBits(modifiers) } })
     await this.awaitInputAck(sessionId, requestId)
   }
 
@@ -1166,6 +1238,131 @@ export class TapflowClient {
     const requestId = randomUUID()
     this.send({ type: 'input:button', sessionId, requestId, payload: { name: button } })
     await this.awaitInputAck(sessionId, requestId)
+  }
+
+  /**
+   * A touch held still for `durationMs` — no moves: the app's own timer is what sees a long press. The ack may come up
+   * to `durationMs` later than a tap's, because Android's adb path replays the hold after the end arrives.
+   *
+   * Unlike flow-runner's `RelayClient`, a leave does not close a gesture this method left open: a tool call is
+   * awaited before the next, so nothing here leaves a session mid-hold. A client that killed the process mid-hold
+   * would leave the pointer down until the next touch, as a killed swipe always has.
+   */
+  async longPress(sessionId: string, x: number, y: number, durationMs: number): Promise<void> {
+    if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_GESTURE_MS) {
+      throw this.failed(sessionId, `long press duration must be a positive finite number no greater than ${MAX_GESTURE_MS}ms`)
+    }
+    const payload = { x, y }
+    this.send({ type: 'input:touch:start', sessionId, payload })
+    await delay(durationMs)
+    const requestId = randomUUID()
+    this.send({ type: 'input:touch:end', sessionId, requestId, payload })
+    await this.awaitInputAck(sessionId, requestId, durationMs)
+  }
+
+  /**
+   * Two fingers from `start` to `end` over `durationMs`, each `[x, y]` normalized. Both agents inject a move the
+   * moment it arrives, so the pace is set here; the last move is the end position, since `input:pinch:end` carries
+   * none.
+   */
+  async pinch(
+    sessionId: string,
+    start: [[number, number], [number, number]],
+    end: [[number, number], [number, number]],
+    durationMs: number,
+  ): Promise<void> {
+    if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_GESTURE_MS) {
+      throw this.failed(sessionId, `pinch duration must be a positive finite number no greater than ${MAX_GESTURE_MS}ms`)
+    }
+    const STEPS = 8
+    const interval = durationMs / STEPS
+    const at = (t: number) => ({
+      f0: { x: start[0][0] + (end[0][0] - start[0][0]) * t, y: start[0][1] + (end[0][1] - start[0][1]) * t },
+      f1: { x: start[1][0] + (end[1][0] - start[1][0]) * t, y: start[1][1] + (end[1][1] - start[1][1]) * t },
+    })
+    this.send({ type: 'input:pinch:start', sessionId, payload: at(0) })
+    for (let i = 1; i <= STEPS; i++) {
+      await delay(interval)
+      this.send({ type: 'input:pinch:move', sessionId, payload: at(i / STEPS) })
+    }
+    const requestId = randomUUID()
+    this.send({ type: 'input:pinch:end', sessionId, requestId })
+    await this.awaitInputAck(sessionId, requestId)
+  }
+
+  /**
+   * Turn the device to `orientation`, resolving once a chrome names it; nothing is sent when the latest already does.
+   * The same rules as flow-runner's `RelayClient.setOrientation`, which documents why (this client is a deliberate copy).
+   */
+  async setOrientation(sessionId: string, orientation: 'portrait' | 'landscape', timeoutMs: number): Promise<void> {
+    const chrome = await this.chrome(sessionId, timeoutMs)
+    if (!chrome) throw new EnvironmentStepError(this.failed(sessionId, `setOrientation: the device sent no chrome within ${timeoutMs / 1000}s, so which way it is held is unknown`).message)
+    const now = chromeOrientation(chrome)
+    if (now === undefined) {
+      const which = 'framePng' in chrome ? 'a multi-panel iOS device, whose turn includes its panel\'s own (#1116)' : 'an Android backend without a body turn (scrcpy)'
+      throw new DeviceLacksError(this.failed(sessionId, `setOrientation: this is ${which}, which does not report which way it is held, so a turn could not be confirmed`).message)
+    }
+    if (now === orientation) return
+    const turned = this.waitFor(
+      (m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId && typeof m['payload'] === 'object' && m['payload'] !== null
+        && chromeOrientation(m['payload'] as ChromePayload) === orientation,
+      timeoutMs, sessionId,
+    )
+    this.send({ type: 'input:rotate', sessionId, payload: { orientation } })
+    try {
+      await turned
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw new EnvironmentStepError(this.failed(sessionId, `setOrientation: the device did not report ${orientation} within ${timeoutMs / 1000}s`).message)
+      throw e
+    }
+  }
+
+  /** Fold or unfold to the end of the device's posture list. Same rules as flow-runner's `RelayClient.setPosture`. */
+  async setPosture(sessionId: string, posture: 'folded' | 'unfolded', timeoutMs: number): Promise<void> {
+    let list = this.postures.get(sessionId)
+    if (!list || list.postures.length === 0) {
+      try {
+        const msg = await this.waitFor(
+          (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].postures.length > 0,
+          timeoutMs, sessionId,
+        )
+        list = msg['payload'] as PosturesPayload
+      } catch (e) {
+        if (e instanceof RequestTimeoutError) {
+          throw new DeviceLacksError(this.failed(sessionId, `setPosture: this device reported no postures within ${timeoutMs / 1000}s — it does not fold`).message)
+        }
+        throw e
+      }
+    }
+    if (list.postures.length !== 2) {
+      throw new EnvironmentStepError(this.failed(sessionId, `setPosture: the device offers ${list.postures.length} postures, so which is ${posture} is not certain (expected two)`).message)
+    }
+    const target = (posture === 'folded' ? list.postures[0] : list.postures[1])!.id
+    if (list.currentId === target) return
+    const arrived = this.waitFor(
+      (m) => m['type'] === 'device:postures' && m['sessionId'] === sessionId && isPostures(m['payload']) && m['payload'].currentId === target,
+      timeoutMs, sessionId,
+    )
+    this.send({ type: 'input:posture', sessionId, payload: { postureId: target } })
+    try {
+      await arrived
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) throw new EnvironmentStepError(this.failed(sessionId, `setPosture: the device did not report ${posture} within ${timeoutMs / 1000}s`).message)
+      throw e
+    }
+  }
+
+  /** The session's chrome, or the next to arrive within `timeoutMs`; `null` when none did. */
+  async chrome(sessionId: string, timeoutMs: number): Promise<ChromePayload | null> {
+    const known = this.chromes.get(sessionId)
+    if (known) return known
+    try {
+      const msg = await this.waitFor((m) => m['type'] === 'session:chrome' && m['sessionId'] === sessionId, timeoutMs, sessionId)
+      return msg['payload'] as ChromePayload
+    } catch (e) {
+      if (e instanceof RequestTimeoutError) return null
+      throw e
+    }
   }
 
   async openUrl(sessionId: string, url: string): Promise<void> {
@@ -1269,7 +1466,39 @@ export class TapflowClient {
     return Buffer.from(await res.arrayBuffer())
   }
 
+  /**
+   * Where touches meant for `targets` land, as the device's agent judges them (#1125), for `run_flow`'s taps. Failures
+   * are classed as a tree read's are, so a blip is retried until the step's deadline rather than taken as a tap nobody
+   * checked; a relay that predates the route (404) answers every target `unknown`, and the flow taps the centre unchecked.
+   */
+  async reach(sessionId: string, targets: ReachTarget[], signal?: AbortSignal): Promise<ReachResult[]> {
+    const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
+    const ended = () => { const s = this.lifecycle.get(sessionId); return !!(s?.terminated || s?.needsReboot) }
+    let res: Response
+    try {
+      res = await fetchWithToken(this.tokens, new URL(`/api/v1/sessions/${sessionId}/reach`, httpBase).toString(), reachRequest(targets, signal))
+    } catch (e) {
+      const message = `reach query failed: ${(e as Error).message}`
+      if (ended()) throw new EnvironmentStepError(`reach query failed: ${this.failed(sessionId, message).message}`)
+      throw new TransientQueryError(message, { cause: e })
+    }
+    if (!res.ok) {
+      const error = ((await res.json().catch(() => null)) as { error?: unknown } | null)?.error
+      // The route's 404, not the session's: a relay with the route answers an unknown session `Session not found`.
+      if (res.status === 404 && error !== 'Session not found') return targets.map(() => ({ state: 'unknown', reason: 'this relay predates reach' }))
+      const cause = this.failed(sessionId, res.status === 401 ? tokenRefusal(this.tokens) : typeof error === 'string' ? error : `reach query failed: ${res.status}`)
+      if (ended() || PERMANENT_QUERY_STATUSES.has(res.status)) throw new EnvironmentStepError(`reach query failed: ${cause.message}`, { cause })
+      throw new TransientQueryError(cause.message, { cause })
+    }
+    return readReachResults(await res.json().catch(() => null), targets.length)
+  }
+
   async queryUITree(sessionId: string, signal?: AbortSignal): Promise<UIElement[]> {
+    return (await this.queryUITreeWithTurn(sessionId, signal)).elements
+  }
+
+  /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const url = new URL(`/api/v1/sessions/${sessionId}/ui-tree`, httpBase)
     let res: Response
@@ -1311,7 +1540,8 @@ export class TapflowClient {
       const cause = this.failed(sessionId, 'UI tree query returned an invalid response shape')
       throw new EnvironmentStepError(`UI tree query failed: ${cause.message}`, { cause })
     }
-    return body.elements
+    const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
+    return interfaceTurn === undefined ? { elements: body.elements } : { elements: body.elements, interfaceTurn }
   }
 
   /**
@@ -1481,4 +1711,8 @@ export class TapflowClient {
 function isLaunchApplied(v: unknown): v is LaunchApplied {
   const names = (x: unknown) => Array.isArray(x) && x.every((s) => typeof s === 'string')
   return typeof v === 'object' && v !== null && names((v as Record<string, unknown>)['arguments']) && names((v as Record<string, unknown>)['env'])
+}
+
+function isPostures(v: unknown): v is PosturesPayload {
+  return typeof v === 'object' && v !== null && Array.isArray((v as PosturesPayload).postures)
 }

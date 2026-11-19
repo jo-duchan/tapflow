@@ -86,7 +86,7 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   `ANSWERABLE` in the protocol and the replies in `refuseMalformed` are held to one derived set by
   `scripts/__tests__/correlatedRequestsGated.test.mjs`.
 
-  Agent payloads are **deliberately not validated**, and the reason is not a deferral. `AgentRegister.platform` is `string`, open so a third-party platform can register through `AgentRegistry.register()` (OCP), while `ChromePayload` is a closed two-member union — so a platform this repo promises to support has no valid `session:chrome` variant, and refusing one would cost it bezel and buttons for the life of the session. The six messages the relay *consumes* (`agent:register`, `agent:resources`, the screenshot and ui-tree replies) are validated, with a `.default()` for every field the relay used to read through a `??`.
+  Agent payloads are **deliberately not validated**, and the reason is not a deferral. `AgentRegister.platform` is `string`, open so a third-party platform can register through `AgentRegistry.register()` (OCP), while `ChromePayload` is a closed two-member union — so a platform this repo promises to support has no valid `session:chrome` variant, and refusing one would cost it bezel and buttons for the life of the session. The eight messages the relay *consumes* (`agent:register`, `agent:devices`, `agent:resources`, the screenshot and ui-tree replies, `ui:field:response`) are validated, with a `.default()` for every field the relay used to read through a `??`.
 - **Clipboard bridge** (`clipboard:*`): browser→agent `clipboard:read` (`payload.press`: `'copy' | 'cut'` presses that chord on the device first) and `clipboard:write` (`payload.text`, `payload.pasteAfter`); agent→browser `clipboard:data` / `clipboard:write-done` / `clipboard:error`, correlated by `requestId`. Unlike the other agent→browser replies these are **bound to the session's own `agentSocket`** — their payload lands on the viewer's host OS clipboard, so a second agent must not be able to address someone else's session. An undeliverable request answers `clipboard:error` immediately rather than letting the caller's deadline expire. Agents advertise `capabilities: ['clipboard']` in `agent:register`; the relay echoes them on `session:joined` so a viewer can tell a capable agent from one that predates the feature instead of inferring it from silence.
 - **An input the relay cannot dispatch is answered here, with a reason.** The four terminal frames get an
   `input:error` and `input:type` gets an `input:type-error`, so an MCP or browser caller fails now instead of
@@ -102,8 +102,9 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   and both want a reconnect or a re-join; the machine field was right for both while the prose was
   wrong for one, which is the concrete case for reading `reason` rather than `message` (#492).
   **Everything else gets nothing, and that is the contract**: opening and move frames, `input:rotate`,
-  `input:posture` and `input:keyboard:toggle` have no waiter, so a reply would be one nobody is listening for.
-  The twelve `input:*` cases are **two clauses**, split by whether an ack answers them, and the split is
+  `input:posture`, `input:keyboard:toggle` and `input:touch:cancel` (whose sender is leaving, #1115) have no
+  waiter, so a reply would be one nobody is listening for.
+  The thirteen `input:*` cases are **two clauses**, split by whether an ack answers them, and the split is
   load-bearing rather than tidy — the correlator gate belongs on the answered five, and written into the
   shared body it would have dropped every opening and move frame with it.
 - **A browser-role command is acted on only from the client the session is bound to** — one client's several sockets are one holder, which is what a browser tab needs and what a socket could not express. The mirror of the
@@ -249,6 +250,76 @@ Device prefs and favourites (`api/devicePrefs.ts`, migration 021) are laid over 
 `withDevicePrefs`, keyed by `SessionInfo.agentKey` (`agentId ?? agentName`) and the device id. **Nothing is removed
 from the listing**: an MCP client and the lease read the same one, and a hidden device must stay usable to them.
 
+### Flow Capture's record (`capture/`, #1125)
+
+The relay keeps, in memory, every input a person's dashboard sent to the agent — the parse product, stamped with the
+relay's clock — so the dashboard can later turn a stretch of it into a flow; its shape is `@tapflowio/protocol/capture`.
+It holds **what was typed** (`input:key`, `input:type`, a pasted `clipboard:write`), which the relay otherwise never
+keeps: watchers get a character count. Most of what follows exists because of that.
+
+**Beside the inputs, a picture of the screen each step began on** (1b-3b), sent by the person's dashboard over REST after
+the input, keyed by the step's first `requestId` (flow-runner's `thumbnailKey`): see the third exception under HOW NOT.
+A picture is never ahead of its input (409 until the input is recorded and the reads it waits on are back; the dashboard
+asks again every 500 ms for 6 s, as long as one read can be out; a read queued behind another may outlast that and leave
+the step without a picture), never replaced,
+and goes with the input when a trim cuts it — unless the dialog's snapshot still shows that step. The snapshot lists the
+ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:requestId`, `private, no-store`.
+
+- **Recorded after the send, never before.** One `captures.recordInput` call follows each `agentSocket.send` in the
+  input, app-command, clipboard and network paths, so a refused input is not recorded. `CaptureStore` never throws into
+  that path. The agent's ack is recorded too (`recordAck`), so a refused or failed input reads differently from one that
+  landed, and so is each chrome change (a turn or fold: points on either side are in different frames) — its geometry
+  only: the bezel and button images are emptied (`withoutImages`), keeping `framePng` as a key since it marks iOS chrome.
+- **Who is recorded**: a holder that declared `clientKind: 'dashboard'`, whose user is a real user id (not `anon` or
+  `unidentified:*` — nobody could read that back with a cookie), and whose own setting is on (`users.flow_capture`,
+  migration 023). The setting is read from `FlowCapturePreference`, a memory map the preferences route writes through,
+  so the input path never reads the database and turning it back on takes effect at the next input, not the next join.
+- **When a capture ends** (`seal`, which for a Manual capture means discarded): any join that is not the same user in a
+  dashboard — the person's own `flow run` or MCP client borrowing the device included, since the record would otherwise
+  have a hole in it; a `device:shutdown` forwarded to the agent (the dashboard sends one on Back and on unmount, and
+  `settleShutdown` then cancels the countdown, so hanging the seal on the countdown alone left it alive for days); a
+  cold `device:ready`; `idleShutdown`; a member removed under Settings → Team; `removeSession` — **not** `forgetSessionState`, which `session:leave` also runs, so
+  a borrowing MCP client leaving would take the person's record with it. A reload or a dropped socket keeps it.
+- **Read back with the browser cookie only** (`api/captures.ts`, `requireAuth`). `requireViewAuth` would take the
+  person's own `view` PAT, which is what their MCP server and CI hold, and hand typed passwords to a model. Anyone but the
+  owner gets `404`, so the routes do not say whose sessions are being recorded.
+- **The replay pause is a lease, not a flag on a socket**: `PUT …/capture/pause` stops recording for 30 s and is renewed
+  by calling it again. A Wi-Fi blink in the middle of the dialog's replay keeps it; a tab that dies lets it run out. The
+  dialog reads a snapshot (`POST …/capture/snapshot`), a copy, so recording can go on beside it.
+- **Bounded per capture and across the relay.** Over budget, moves are thinned first (a drag keeps its start and its
+  first and last moves — the dashboard's end carries no point, so the last move is where the finger lifted, and the
+  first move's time tells a swipe from a drag after a hold), then whole gestures are
+  cut off the head — never `app:launch`, `app:clear-state` or `app:install`, which anchor where a flow
+  starts, and never the last chrome before the cut, which says which frame the points after it are in (a capture also
+  starts with the chrome the relay holds). Trimmed to three quarters, so the next input does not trim again. Sizes are
+  JSON characters, an estimate; a dialog's snapshot shares entries and is not counted, so a capture can hold up to twice
+  its budget while one is open.
+- **The field typed into is read around each run of typing** (#1135), because the keys alone cannot say what the
+  device's IME made of them. At a run's first `input:key`/`input:type`, or its first tap on the soft keyboard, the
+  relay asks the session's agent for the focused field (`ui:field:request`), and again `FIELD_IDLE_MS` (250 ms) after
+  the run's last key — any key extends the run, any other input ends it. **No input waits for a read**: an input is
+  sent as before (only a step's picture waits, `putThumbnail`), and `requestedAt` and `at` on the recorded entry let the reader drop a read that raced one. Only an
+  agent naming `field-value` is asked (both platforms do), only for a recorded holder, and the answer is kept only if
+  the person is still recorded when it comes. A snapshot first reads a field still being typed in and waits up to
+  `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
+  `ui:field:response` is consumed here and **never forwarded**: it is the field's whole contents — what the person
+  typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
+  session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. **Neither read,
+  nor watching the person, is gated by the Mac's memory.** No agent that names `field-value` or `keyboard-state` starts
+  anything on the Mac to answer: iOS reads from inside the app (ios-agent AGENTS.md, "App observer"), Android through a
+  server on the device. A gate was drawn for an iOS read through the XCUITest runner (110–360 MB), which never shipped,
+  and it left every typed step unread and every touch unobserved on a busy Mac. The boot carries `observed` (the person
+  is recorded, no other check), which the iOS agent turns touch observation and app accessibility on by.
+- **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
+  switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
+  person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone
+  new — and `join` reports `personChanged`; the relay then owes the session a `device:keyboard-reset` and sends it ahead of
+  that person's next `device:boot` to an agent naming `keyboard-reset` — at the join, an agent away for the moment
+  would never hear it, and the next join would be the same person. A relay restart forgets the last person, which counts as no change. Same person re-joining (a
+  reload, a dropped Wi-Fi) resets nothing.
+- **Never on disk and never in a log line.** Not in the database, not in `logger`; a capture lives as long as the device
+  stays the person's.
+
 ### Flow run records (`/api/v1/runs`)
 
 What `tapflow flow run` did, for the dashboard's runs page (A3). The CLI writes with its `builds:write` token; anyone who may view reads.
@@ -304,9 +375,21 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
 
 ## HOW NOT
 
-- Do not store or analyze screen data in the relay. **Two exceptions, both uploaded by a flow runner to its own run** — bound to the run's creator, and deleted with the run:
+- Do not store or analyze screen data in the relay. **Two exceptions uploaded by a flow runner to its own run** — bound to the run's creator, and deleted with the run:
   - the screenshot (`api/runs.ts`) — at most one image per flow (the screen it failed on, or a passed flow's last screen), PNG or JPEG by its bytes, at most 5 MB, served back as its own type with `nosniff`;
   - the video (`api/runVideos.ts`) — capped per flow, kept by the retention policy and the disk cap below. The relay reads only the open call's JSON, never the frames.
+
+  **And one uploaded by a person's own dashboard to their own capture** (1b-3b): the screen each recorded step began on
+  (`api/captures.ts`, `CaptureStore.putThumbnail`) — a JPEG of at most 16 KB (160 px wide, about 5 KB), only for an input
+  that capture already holds and only once, in memory under a cap of its own (1.5 MB a capture, counted in the relay's
+  total), cookie-only and owner-only (404 to anyone else), gone with the capture's seal, its trim and the person turning
+  capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
+  keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
+  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
+  iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
+  none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
+  field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
+  Android).
 
   A stream the relay is forwarding on its own is still never stored.
 - Do not allow session routing without authentication.

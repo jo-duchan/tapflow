@@ -208,6 +208,7 @@ function FlowItem({ runId, flow }: { runId: string; flow: RunFlow }) {
           {flow.hasScreenshot && <LastScreen runId={runId} flow={flow} />}
         </>
       )}
+      {isReported(flow) && <UncheckedTouches steps={flow.steps} />}
       {/* A passed flow's last screen is the evidence that it passed — what the login landed on. */}
       {isReported(flow) && flow.status === 'passed' && flow.hasScreenshot && <LastScreen runId={runId} flow={flow} />}
       {/* The whole flow, passed or failed: the screenshot shows where it ended, the video how it got there. */}
@@ -215,6 +216,23 @@ function FlowItem({ runId, flow }: { runId: string; flow: RunFlow }) {
         <RunVideo runId={runId} idx={flow.idx} flowName={flow.name} summary={flow.video} running={!flow.video.ended} />
       )}
     </li>
+  )
+}
+
+
+/**
+ * Touches the device could not judge (#1125), for a flow that passed as well as one that failed: such a step touched its
+ * element's centre, which is how a covered row once passed as tapped, so a green flow says it has them.
+ */
+function UncheckedTouches({ steps }: { steps: RunStep[] }) {
+  const unchecked = steps.filter((s) => s.reach === 'unchecked')
+  if (unchecked.length === 0) return null
+  const why = [...new Set(unchecked.map((s) => s.reachNote).filter((n): n is string => !!n))]
+  return (
+    <p className="text-sm text-muted-foreground">
+      {unchecked.length === 1 ? `1 touch was` : `${unchecked.length} touches were`} not checked to land on {unchecked.length === 1 ? 'its element' : 'their elements'} and
+      went to the centre, which something on screen may cover ({unchecked.map((s) => s.name).join(', ')}){why.length > 0 ? `: ${why.join('; ')}` : ''}.
+    </p>
   )
 }
 

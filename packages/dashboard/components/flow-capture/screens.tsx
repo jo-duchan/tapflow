@@ -1,0 +1,1271 @@
+import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
+import { ChevronRight, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
+import {
+  askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
+  type RawStep, type ScreenRect, type Selector, type StepExpect,
+} from '@tapflowio/flow-runner/browser'
+import type { UIElement } from '@tapflowio/protocol'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { FieldError } from '@/components/ui/field-error'
+import { FieldHint } from '@/components/ui/field-hint'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { TechLabel } from '@/components/ui/tech-label'
+import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockLine, CodeBlockTitle } from '@/components/ui/code-block'
+import { useHighlightedCode } from '@/hooks/useHighlightedCode'
+import { useFollowBottom } from '@/hooks/useFollowBottom'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import { copy } from '@/lib/flowCapture/copy'
+import { compared } from '@/lib/flowCapture/runner'
+import { asSecret, fileNameOf, holdsSecret, moveEdge, secretValues, yamlOf, type Edge } from '@/lib/flowCapture/flow'
+import { askedReady, type CaptureEvent, type CaptureState, type Review } from '@/lib/flowCapture/machine'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import type { CaptureTap } from '@/lib/flowCapture/tap'
+import { markOf } from '@/lib/flowCapture/marks'
+import type { WatchMarks } from '@/lib/watchActions'
+import { SwipeStroke, TapMarks } from '@/components/watch/TapMarks'
+import { TraceStep } from '@/components/TraceStep'
+import { typedOnScreenKeyboard, type AfterTouch } from '@/lib/flowCapture/runner'
+
+type FlowFile = Omit<Flow, 'file'>
+
+/** Step numbers as the strip shows them, from ascending indices into the steps: `#4`, `#4–#6`, or `#2, #4–#6` when they
+ *  are not one run — a span across a gap would name a step that is not among them. */
+const spanOf = (indices: number[]): string => {
+  const runs: string[] = []
+  for (let i = 0; i < indices.length;) {
+    let j = i
+    while (j + 1 < indices.length && indices[j + 1] === indices[j]! + 1) j++
+    runs.push(i === j ? `#${indices[i]! + 1}` : `#${indices[i]! + 1}–#${indices[j]! + 1}`)
+    i = j + 1
+  }
+  return runs.join(', ')
+}
+
+/** The step's buttons, at the bottom of the dialog on every step. As tall as a row of buttons (h-10, its pt-4 and border)
+ *  even with none in it (a verification running), so the line above them does not jump when they appear. */
+function Footer({ children }: { children: React.ReactNode }) {
+  return <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:min-h-[calc(2.5rem+1rem+1px)] sm:flex-row sm:items-center sm:justify-end">{children}</div>
+}
+
+/** What the device reset before this replay did (#1139), said once it has answered; nothing while it runs. */
+function ResetReport({ reset }: { reset: CaptureState['reset'] }) {
+  if (reset === undefined) return null
+  if (reset === null) return <Notice title={copy.resetUnsupported} />
+  const named = (items: string[]) => items.map((i) => copy.resetItems[i] ?? i).join(', ')
+  return (
+    <>
+      {reset.done.length > 0 && <p className="text-sm text-muted-foreground">{copy.resetDone(named(reset.done))}</p>}
+      {reset.failed.length > 0 && <Notice title={copy.resetFailed(named(reset.failed))} />}
+    </>
+  )
+}
+
+function Notice({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
+      <p className="font-medium text-warning-foreground">{title}</p>
+      {children && <p className="mt-1">{children}</p>}
+    </div>
+  )
+}
+
+// ── Range ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf }: {
+  state: CaptureState
+  platform: string
+  /** Where the screen a step began on can be read (1b-3b), or `null` when the relay holds no picture of it. */
+  thumbnailOf?: (step: RawStep) => string | null
+  dispatch: Dispatch<CaptureEvent>
+  bundleId: string | null
+  onContinue: () => void
+  onCancel: () => void
+  continueRef: RefObject<HTMLButtonElement | null>
+}) {
+  const nameId = useId()
+  const tagsId = useId()
+  const tagsHintId = useId()
+  const { steps, range } = state
+  const warnings = rangeWarnings(steps, range)
+  const count = range.end - range.start
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      {/* Flex, not grid: a grid row holding something that scrolls on its own (the strip) shrinks to nothing when the
+          step is taller than the dialog, and the strip then scrolls inside itself. Nothing in here shrinks; the body scrolls.
+          The 4 px padding, given back by the margin, is room for a focused field's ring, which the scroll would clip. */}
+      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1 *:shrink-0">
+      <div>
+        <h3 className="text-sm font-medium">{copy.rangeHeading}</h3>
+        <p className="text-sm text-muted-foreground">{copy.rangeHelp}</p>
+      </div>
+      <div className="flex items-center justify-between text-xs">
+        {/* Sized to the widest count this recording can show, so dragging a handle does not resize it. */}
+        <span className="grid rounded-md bg-muted px-2 py-0.5 font-medium tabular-nums">
+          <span className="invisible col-start-1 row-start-1" aria-hidden="true">{copy.rangeCount(steps.length, steps.length, steps.length)}</span>
+          <span className="col-start-1 row-start-1">{copy.rangeCount(count, range.start + 1, range.end)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          {copy.trim}{' '}
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" disabled={count <= 1}
+            onClick={() => dispatch({ type: 'set-range', range: { start: range.start + 1, end: range.end } })}>{copy.dropFirst}</Button>
+          {' · '}
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" disabled={count <= 1}
+            onClick={() => dispatch({ type: 'set-range', range: { start: range.start, end: range.end - 1 } })}>{copy.dropLast}</Button>
+        </span>
+      </div>
+      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* `content-start`: the Tags column is a row taller with its hint, and a stretched grid shares that out. */}
+        <div className="grid content-start gap-2">
+          <Label htmlFor={nameId}>{copy.nameLabel}</Label>
+          <Input id={nameId} value={state.name} onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })} />
+        </div>
+        <div className="grid content-start gap-2">
+          {/* Optional said in the label, as every form here says it (field.md); the line below is how to fill it in. */}
+          <Label htmlFor={tagsId}>{copy.tagsLabel} <span className="text-xs text-muted-foreground">{copy.optional}</span></Label>
+          <Input id={tagsId} aria-describedby={tagsHintId} value={state.tags} onChange={(e) => dispatch({ type: 'set-tags', tags: e.target.value })} />
+          <FieldHint id={tagsHintId}>{copy.tagsHint}</FieldHint>
+        </div>
+      </div>
+      {bundleId
+        ? <p className="text-xs text-muted-foreground">{copy.appPrefix} <TechLabel>{bundleId}</TechLabel>{copy.appSuffix}</p>
+        : <p className="text-xs">{copy.noBundleId}</p>}
+      {/* Notes about the range, one short line each, in one list rather than a paragraph apiece. */}
+      {(warnings.length > 0 || typedOnScreenKeyboard(steps, range) || state.moved) && (
+        <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          {state.moved && <li>{copy.rangeMoved(state.moved[0]! + 1, spanOf(state.moved))}</li>}
+          {warnings.map((w) => <li key={w}>{copy.rangeWarnings[w]}</li>)}
+          {typedOnScreenKeyboard(steps, range) && <li>{copy.screenKeyboardAdvice}</li>}
+        </ul>
+      )}
+      {askedValues(steps, range).map((i) => <AskedPassword key={i} state={state} index={i} dispatch={dispatch} />)}
+      <Notice title={copy.replayNoticeTitle}>{copy.replayNotice[platform === 'android' ? 'android' : 'ios']}</Notice>
+      </div>
+      <Footer>
+        <Button variant="outline" className="w-24" onClick={onCancel}>{copy.cancel}</Button>
+        <Button ref={continueRef} className="w-24" disabled={count === 0 || !askedReady(state)} onClick={onContinue}>{copy.continue}</Button>
+      </Footer>
+    </div>
+  )
+}
+
+/**
+ * A password typed on the soft keyboard (#1140): no read can say it, and Match has to type it, so the person does. Held
+ * in the dialog only. Starts from what the computer's keyboard typed into the same field, if anything.
+ */
+function AskedPassword({ state, index, dispatch }: { state: CaptureState; index: number; dispatch: Dispatch<CaptureEvent> }) {
+  const id = useId()
+  const hintId = useId()
+  const step = state.steps[index]
+  const prefilled = step?.kind === 'text' ? step.text : ''
+  const value = state.asked[index] ?? prefilled
+  return (
+    <div className="grid content-start gap-2">
+      {/* Which field, beside the step: two passwords in one range differ by nothing else here. */}
+      <Label htmlFor={id}>
+        {copy.askedLabel(index + 1)}
+        {step?.kind === 'text' && step.field && <> <TechLabel>{step.field}</TechLabel></>}
+      </Label>
+      {/* `new-password` and the managers' own opt-outs: `off` is ignored on a password input, and a manager would offer
+          to save the app's test password under the dashboard, or fill in the dashboard's own. */}
+      <Input id={id} type="password" autoComplete="new-password" data-1p-ignore data-lpignore="true" aria-describedby={hintId} value={value}
+        onChange={(e) => dispatch({ type: 'set-asked', index, value: e.target.value })} />
+      {/* Said apart from an empty one: dots alone do not say they came from the computer's keyboard. */}
+      <FieldHint id={hintId}>{prefilled ? copy.askedPrefilledHint : copy.askedHint}</FieldHint>
+    </div>
+  )
+}
+
+// The strip is laid out by arithmetic rather than measured: every tile is the same size, so where a step sits, where
+// the frame goes and which boundary a pointer is nearest all follow from the index and the range, with nothing to read
+// back. Figma 373:89: 96 px tiles 8 px apart; the frame is an 18 px edge holding the handle, then an 8 px inner margin,
+// so a step entering the range moves 26 px along — and is animated doing it.
+const TILE = 96
+const TILE_H = 217
+const GAP = 8
+const STRIDE = TILE + GAP
+const PAD_X = 12
+const EDGE = 18
+const SHIFT = EDGE + 8
+const FRAME_Y = 12
+const INNER_Y = 10
+const ROW_H = FRAME_Y + INNER_Y + TILE_H + INNER_Y + FRAME_Y
+/** Shared by the tiles, the frame and the handles, so they move as one. Off under reduced motion. */
+const SLIDE = 'duration-200 ease-out motion-reduce:transition-none'
+
+type Range = { start: number; end: number }
+
+const tileLeft = (i: number, r: Range) => PAD_X + i * STRIDE + (i >= r.start ? SHIFT : 0) + (i >= r.end ? SHIFT : 0)
+const frameLeft = (r: Range) => PAD_X + r.start * STRIDE
+const frameRight = (r: Range) => frameLeft(r) + (r.end - r.start) * STRIDE - GAP + 2 * SHIFT
+
+/**
+ * The range as a frame over the steps, with a handle at each end — a video editor's trim. A step taken in or left out
+ * slides into or out of the frame. Each handle is a slider for the keyboard, one step per arrow.
+ */
+function RangeStrip({ steps, range, onChange, thumbnailOf }: {
+  steps: RawStep[]
+  range: Range
+  thumbnailOf?: (step: RawStep) => string | null
+  onChange: (range: Range) => void
+}) {
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const row = useRef<HTMLDivElement>(null)
+  const dragging = useRef<Edge | null>(null)
+  const placed = useRef(false)
+  /** The handle whose step is named above it: hovered, focused or held. Controlled, because Radix closes a tooltip on
+   *  the press that starts a drag, which is when the name is most wanted. */
+  const [named, setNamed] = useState<Edge | null>(null)
+  const total = steps.length
+
+  // Opened on a range that starts further in, the strip starts there. Only once: after that the strip is where the
+  // person put it. A ref callback, not an effect: an effect on opening alone would need its dependencies suppressed,
+  // and that suppression is one of the two that cost the compiler the whole component.
+  const attachScroller = (el: HTMLDivElement | null) => {
+    scroller.current = el
+    if (el && !placed.current) { placed.current = true; el.scrollLeft = Math.max(0, frameLeft(range) - PAD_X) }
+  }
+
+  /** Keeps a handle moved by the keyboard in view. Its place is known before it is drawn, so no measuring. */
+  const reveal = (x: number) => {
+    const el = scroller.current
+    if (!el) return
+    if (x < el.scrollLeft + EDGE) el.scrollLeft = x - EDGE
+    else if (x > el.scrollLeft + el.clientWidth - EDGE) el.scrollLeft = x - el.clientWidth + EDGE
+  }
+
+  const change = (next: Range) => {
+    if (next.start === range.start && next.end === range.end) return
+    onChange(next)
+    reveal(next.start !== range.start ? frameLeft(next) : frameRight(next))
+  }
+
+  /** The boundary nearest the pointer: how many steps, where they are drawn now, have their middle to its left. */
+  const boundaryAt = (clientX: number) => {
+    const x = clientX - (row.current?.getBoundingClientRect().left ?? 0)
+    let k = 0
+    while (k < total && tileLeft(k, range) + TILE / 2 < x) k++
+    return k
+  }
+
+  const handle = (edge: Edge) => {
+    const at = edge === 'start' ? range.start : range.end
+    const shown = edge === 'start' ? range.start : range.end - 1
+    const keys: Record<string, number> = {
+      ArrowLeft: at - 1, ArrowDown: at - 1, ArrowRight: at + 1, ArrowUp: at + 1,
+      Home: edge === 'start' ? 0 : range.start + 1, End: edge === 'start' ? range.end - 1 : total,
+    }
+    const name = copy.rangeHandleText(shown + 1, rawStepLabel(steps[shown]!))
+    return (
+      <Tooltip key={edge} open={named === edge} onOpenChange={(open) => { if (!open && dragging.current !== edge) setNamed(null) }}>
+        <TooltipTrigger asChild>
+          <div
+            role="slider"
+            tabIndex={0}
+            aria-label={edge === 'start' ? copy.rangeStart : copy.rangeEnd}
+            aria-orientation="horizontal"
+            aria-valuemin={edge === 'start' ? 1 : range.start + 1}
+            aria-valuemax={edge === 'start' ? range.end : total}
+            aria-valuenow={shown + 1}
+            aria-valuetext={name}
+            className={cn('absolute flex cursor-ew-resize touch-none items-center justify-center rounded-xl transition-[left] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background', SLIDE)}
+            style={{ left: edge === 'start' ? frameLeft(range) : frameRight(range) - EDGE, width: EDGE, top: FRAME_Y, bottom: FRAME_Y }}
+            onKeyDown={(e) => {
+              const next = keys[e.key]
+              if (next === undefined) return
+              e.preventDefault()
+              change(moveEdge(range, edge, next, total))
+            }}
+            onFocus={() => setNamed(edge)}
+            onBlur={() => { if (dragging.current !== edge) setNamed(null) }}
+            onPointerEnter={() => setNamed(edge)}
+            onPointerLeave={() => { if (dragging.current !== edge) setNamed(null) }}
+            onPointerDown={(e) => {
+              dragging.current = edge
+              setNamed(edge)
+              e.currentTarget.setPointerCapture?.(e.pointerId)
+            }}
+            onPointerMove={(e) => {
+              if (dragging.current !== edge) return
+              // Held near either end of the strip, it scrolls on, so a range longer than the strip can still be reached.
+              const el = scroller.current
+              const box = el?.getBoundingClientRect()
+              if (el && box) {
+                if (e.clientX < box.left + 40) el.scrollLeft -= 20
+                else if (e.clientX > box.right - 40) el.scrollLeft += 20
+              }
+              const next = moveEdge(range, edge, boundaryAt(e.clientX), total)
+              if (next.start !== range.start || next.end !== range.end) onChange(next)
+            }}
+            onPointerUp={(e) => { dragging.current = null; if (e.currentTarget !== document.activeElement) setNamed(null) }}
+            onPointerCancel={() => { dragging.current = null; setNamed(null) }}
+          >
+            <span aria-hidden className="h-6 w-0.5 rounded-full bg-background/70" />
+          </div>
+        </TooltipTrigger>
+        {/* `always`: the handle slides with the range, and the name has to follow it rather than stay where it opened. */}
+        <TooltipContent side="top" updatePositionStrategy="always">{name}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  return (
+    // `overscroll-x-contain`: a swipe that reaches the end of the strip stops there, rather than going on to rubber-band
+    // the page under the dialog, which showed the device through the overlay.
+    <TooltipProvider delayDuration={300}>
+      <div ref={attachScroller} className="overflow-x-auto overscroll-x-contain">
+        <div ref={row} className="relative" style={{ width: frameRight({ start: 0, end: total }) + PAD_X, height: ROW_H }}>
+          <div
+            aria-hidden
+            className={cn('absolute rounded-xl bg-foreground transition-[left,width]', SLIDE)}
+            style={{ left: frameLeft(range), width: frameRight(range) - frameLeft(range), top: FRAME_Y, bottom: FRAME_Y }}
+          >
+            <div className="absolute rounded-md bg-muted" style={{ left: EDGE, right: EDGE, top: INNER_Y, bottom: INNER_Y }} />
+          </div>
+          <ol aria-label={copy.rangeStrip}>
+            {steps.map((s, i) => (
+              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} />
+            ))}
+          </ol>
+          {handle('start')}
+          {handle('end')}
+        </div>
+      </div>
+    </TooltipProvider>
+  )
+}
+
+/** A step made of touches on the soft keyboard — one key, or a typed run the keys were folded into — has no picture by
+ *  design (the relay keeps none of those screens). */
+const typedOnSoftKeyboard = (step: RawStep): boolean =>
+  step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
+
+/** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
+function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
+  // A tap left out before the replay is drawn as one outside the range, and says why.
+  const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <li
+          className={cn('absolute flex flex-col gap-1 p-2 text-xs transition-[left,opacity]', SLIDE, (!inRange || step.dropped) && 'opacity-50')}
+          style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
+        >
+          {/* A tap left out says so in the tile, not only in the tooltip its cut-short name has (CodeRabbit on #1167). */}
+          <span className="flex h-4 items-center justify-between gap-1 leading-4">
+            <span className="text-muted-foreground">#{index + 1}</span>
+            {step.dropped && <span className="truncate text-[11px] font-medium text-warning-foreground">{copy.droppedShort}</span>}
+          </span>{' '}
+          {/* The screen the step began on (1b-3b). Decorative: the item's own text names the step. A key on the soft
+              keyboard has none by design — that screen shows what was just typed, a password's last character too — and
+              says so, rather than looking like a picture that failed to load. */}
+          {picture
+            ? <img src={picture} alt="" draggable={false} className="h-[166px] w-full shrink-0 rounded-md border bg-background object-contain" />
+            : typedOnSoftKeyboard(step)
+              ? (
+                <span className="flex h-[166px] w-full shrink-0 flex-col items-center justify-center gap-1.5 rounded-md border bg-background px-1 text-center text-[10px] leading-tight text-muted-foreground">
+                  <Keyboard aria-hidden className="size-4" />
+                  {copy.keyboardTile}
+                </span>
+              )
+              : <span aria-hidden className="h-[166px] w-full shrink-0 rounded-md border bg-background" />}
+          <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
+        </li>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="font-mono">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+// ── Match ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The device as the viewer draws it, copied each frame: one decoder, two pictures. */
+function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; marks: WatchMarks }) {
+  const canvas = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    let frame = 0
+    const draw = () => {
+      const src = tap.surface()
+      const c = canvas.current
+      const ctx = c?.getContext('2d')
+      if (src && c && ctx) {
+        const w = 'videoWidth' in src ? (src as HTMLVideoElement).videoWidth : (src as HTMLCanvasElement).width
+        const h = 'videoHeight' in src ? (src as HTMLVideoElement).videoHeight : (src as HTMLCanvasElement).height
+        if (w && h) {
+          if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
+          ctx.drawImage(src, 0, 0)
+        }
+      }
+      frame = requestAnimationFrame(draw)
+    }
+    frame = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(frame)
+  }, [tap])
+  // The replay's touches drawn over the device, as the MCP watch view draws an agent's: the canvas is the screen, so the
+  // box the marks are placed in must be exactly its size — `self-start`, or the column stretches it below the picture.
+  return (
+    <div className="relative max-h-full self-start">
+      <canvas ref={canvas} role="img" aria-label={label} className="block max-h-[var(--picture-max,60vh)] w-auto max-w-full rounded-lg border bg-muted" />
+      <TapMarks marks={marks} place={(x, y) => ({ left: x, top: y })} />
+    </div>
+  )
+}
+
+/**
+ * A count that changes as a run goes ("Step 3 of 15"), in the room its widest value takes, so the line does not move
+ * as the numbers do — the Range count's way.
+ */
+function SteadyCount({ text, widest }: { text: string; widest: string }) {
+  return (
+    <span className="grid tabular-nums">
+      <span className="invisible col-start-1 row-start-1" aria-hidden="true">{widest}</span>
+      <span className="col-start-1 row-start-1">{text}</span>
+    </span>
+  )
+}
+
+/** Something is running on the device: said beside the line that says what. Still under reduced motion. */
+function Busy() {
+  return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
+}
+
+export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf }: {
+  state: CaptureState
+  tap: CaptureTap
+  marks: WatchMarks
+  onStop: () => void
+  onRestart: () => void
+  onTakeWhatMatched: () => void
+  onBackToRange: () => void
+  onContinueAnyway: () => void
+  stopRef: RefObject<HTMLButtonElement | null>
+  onContinueToEdit: () => void
+  onKeep: (step: number, kept: boolean) => void
+  thumbnailOf: (step: RawStep) => string | null
+}) {
+  if (state.diverged) {
+    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} continueRef={stopRef} />
+  }
+  if (state.review) {
+    return <ReviewView state={state} review={state.review} tap={tap} marks={marks} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
+  }
+  const { done, total } = state.progress
+  const stopped = state.error !== null
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} /></div>
+        <div className="flex min-h-0 flex-col gap-3">
+          <p role="status" className="flex items-center gap-2 text-sm font-medium">
+            {!stopped && <Busy />}
+          {/* The reset before the first step takes seconds and is not a step: said as what it is (#1139). */}
+          {stopped ? state.error : state.reset === undefined && done === 0 ? copy.resetting
+            : <SteadyCount text={copy.matching(Math.min(done + 1, total), total)} widest={copy.matching(total, total)} />}
+          </p>
+          <p className="text-sm text-muted-foreground">{copy.matchingHelp}</p>
+          <ResetReport reset={state.reset} />
+        </div>
+      </div>
+      <Footer>
+        {stopped && state.matched.length > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
+        {/* One button that turns from Stop into Start again and back, not two: swapping elements dropped the focus of the
+            one pressed to the page (review of #1125). */}
+        <Button ref={stopRef} variant={stopped ? 'default' : 'outline'} className={stopped ? undefined : 'w-24'} onClick={stopped ? onRestart : onStop}>
+          {stopped ? copy.restart : copy.stop}
+        </Button>
+      </Footer>
+    </div>
+  )
+}
+
+/**
+ * Match's end when some taps the app did not respond to when recorded are about to be left out (P2c): one line that says
+ * so, which opens onto the list, and Continue — which alone accepts it. A row is checked to keep its tap; hovering or
+ * focusing one shows the screen it was tapped on in place of the device, since `#14 tapOn "Order#1215"` alone does not
+ * say which screen that was. Rows stay as they are when checked: the choice can change until Continue.
+ */
+function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, thumbnailOf, continueRef }: {
+  state: CaptureState
+  review: Review
+  tap: CaptureTap
+  marks: WatchMarks
+  onRestart: () => void
+  onContinue: () => void
+  onKeep: (step: number, kept: boolean) => void
+  thumbnailOf: (step: RawStep) => string | null
+  continueRef: RefObject<HTMLButtonElement | null>
+}) {
+  const [open, setOpen] = useState('')
+  const [shown, setShown] = useState(review.taps[0]!.index)
+  const summaryId = useId()
+  const total = review.taps.length
+  const left = review.taps.filter((t) => !state.kept.includes(t.step)).length
+  const picked = review.taps.find((t) => t.index === shown) ?? review.taps[0]!
+  // The replay's own picture of the screen the tap was replayed on, taken at full size; the recording's (160 px wide) only
+  // where the replay has none. Reaching the review, the two showed the same screen (user, P2c).
+  const replayed = state.screenshots[picked.index]
+  const picture = open ? replayed ?? thumbnailOf(review.matched[picked.index]!.raw) : null
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="flex min-h-0 flex-col items-center gap-2">
+          {picture
+            ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{replayed ? copy.reviewPictureReplayed(picked.step + 1) : copy.reviewPicture(picked.step + 1)}</p></>
+            : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
+        </div>
+        {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}
+        <div className="flex min-h-0 flex-col overflow-y-auto p-1">
+          <p role="status" className="text-sm font-medium">{copy.reviewDone}</p>
+          <Accordion type="single" collapsible value={open} onValueChange={setOpen}>
+            <AccordionItem value="review" className="border-b-0">
+              <AccordionTrigger id={summaryId} aria-controls={open ? `${summaryId}-panel` : undefined}>{copy.reviewSummary(left, total)}</AccordionTrigger>
+              {/* The trigger's id is ours, so the panel is named by it: Radix would name it by the id it made. */}
+              <AccordionContent id={`${summaryId}-panel`} aria-labelledby={summaryId}>
+                <p className="pb-2 text-xs text-muted-foreground">{copy.reviewHint}</p>
+                <ul className="grid gap-2">
+                  {review.taps.map((t) => {
+                    const id = `${summaryId}-keep-${t.step}`
+                    const kept = state.kept.includes(t.step)
+                    return (
+                      // One line each, a repeat marked by a tag: every card the same height (design, 2026-11-15).
+                      <li key={t.step} onMouseEnter={() => setShown(t.index)}>
+                        <label htmlFor={id} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3', kept && 'border-primary bg-accent/40')}>
+                          <Checkbox id={id} checked={kept} onCheckedChange={(v) => onKeep(t.step, v === true)} onFocus={() => setShown(t.index)} />
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium leading-5">#{t.step + 1} {capturedStepLabel(review.matched[t.index]!)}</span>
+                          {t.repeat && <Badge variant="outline" className="shrink-0 leading-4 text-muted-foreground">{copy.reviewAgain}</Badge>}
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      </div>
+      <Footer>
+        <Button variant="outline" onClick={onRestart}>{copy.restart}</Button>
+        <Button ref={continueRef} aria-describedby={summaryId} onClick={onContinue}>{copy.continueToEdit}</Button>
+      </Footer>
+    </div>
+  )
+}
+
+/**
+ * Match stopped at a step whose screen looked different from its recording (1b-3b): the two pictures with where they
+ * differ boxed on the replay's, and what is known for certain. No cause is named — the boxes are what the person judges
+ * by. The buttons keep their places and their emphasis whatever happened, since people press them from habit: going on is
+ * the primary, where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
+ */
+function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, continueRef }: {
+  state: CaptureState
+  onTakeWhatMatched: () => void
+  onBackToRange: () => void
+  onContinueAnyway: () => void
+  continueRef: RefObject<HTMLButtonElement | null>
+}) {
+  const d = state.diverged!
+  const done = state.progress.done
+  const before = stepsBeforeRange(state.steps, state.range)
+  const startMoves = before.length > 0 && state.range.start === defaultRange(state.steps).start
+  const matchedCompared = state.matched.some((m) => compared(m.raw))
+  const dropped: number[] = []
+  for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
+  const stepOf = (index: number) => index - state.range.start + 1
+  const facts = [
+    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
+    before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, startMoves) : null,
+    done > 0 ? copy.divergedMatched(done) : null,
+    d.carried ? copy.divergedCarried(d.carried.count, d.carried.from === d.index ? null : stepOf(d.carried.from)) : null,
+  ].filter(Boolean).join(' ')
+  // Boxed place by place unless most of it differs, or nothing could be boxed: then the picture is outlined as a whole.
+  const boxes = d.mostly ? [] : d.areas
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-6 overflow-y-auto sm:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-4">
+            <ComparedPicture title={copy.divergedRecorded(d.index + 1)} src={d.recordedUrl} masks={d.masks} />
+            <ComparedPicture title={copy.divergedNow} src={d.nowUrl} masks={d.masks} areas={boxes} differs={boxes.length === 0} />
+          </div>
+          {/* Under both pictures, from the left: "not compared" is true of both, and the order follows the pictures. */}
+          <p className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border border-dashed border-muted-foreground bg-foreground/5" />{copy.notCompared}</span>
+            <span className="flex items-center gap-1.5"><span aria-hidden className="inline-block size-2.5 rounded-sm border-2 border-warning-solid" style={DIFFERS_FILL} />{copy.differs}</span>
+          </p>
+        </div>
+        <div className="flex flex-col gap-3">
+          <p role="status" className="text-sm font-medium">
+            {d.mostly || boxes.length === 0
+              ? copy.divergedMostly(stepOf(d.index), state.progress.total)
+              : copy.divergedPlaces(stepOf(d.index), state.progress.total, boxes.length)}
+          </p>
+          {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
+          {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
+          <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
+        </div>
+      </div>
+      <Footer>
+        {/* At the far left, and only when something matched: its coming and going moves nothing else. */}
+        {done > 0 && <Button variant="outline" onClick={onTakeWhatMatched}>{copy.editWhatMatched}</Button>}
+        {/* Only where it is the way out: nothing matched yet, or the start can still take in the steps before it. Past a
+            match the stepper goes back to Range, and Edit what matched keeps what matched. A launch, which every range
+            matches first, is no match to lose (design review of (c)). */}
+        {(!matchedCompared || startMoves) && <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>}
+        <Button ref={continueRef} onClick={onContinueAnyway}>{copy.continueAnyway}</Button>
+      </Footer>
+    </div>
+  )
+}
+
+/** The `warning-solid` token at a quarter, as an annotation box is filled: the token has no alpha slot for `bg-…/25`. */
+const DIFFERS_FILL = { backgroundColor: 'hsl(var(--warning-solid) / 0.25)' }
+
+/** One of the two pictures, with what the comparison left out drawn over it: a light tint and a dashed edge, so what is
+ *  under it still shows. Where they differ is boxed on the replay's; outlined whole when no place could be boxed. */
+function ComparedPicture({ title, src, masks, areas = [], differs = false }: { title: string; src: string | null; masks: ScreenRect[]; areas?: ScreenRect[]; differs?: boolean }) {
+  const at = (r: ScreenRect) => ({ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` })
+  return (
+    <figure className="flex flex-col gap-2">
+      <figcaption className="text-xs font-medium">{title}</figcaption>
+      <div className={cn('relative w-[230px] overflow-hidden rounded-lg border', differs && 'border-2 border-warning-solid')}>
+        {src ? <img src={src} alt={title} className="block w-full" /> : <div aria-hidden className="aspect-[9/19] w-full bg-muted" />}
+        {masks.map((m, i) => (
+          <div key={`m${i}`} aria-hidden className="absolute border border-dashed border-muted-foreground bg-foreground/5" style={at(m)} />
+        ))}
+        {areas.map((a, i) => (
+          <div key={`a${i}`} aria-hidden data-differs className="absolute rounded-sm border-2 border-warning-solid" style={{ ...at(a), ...DIFFERS_FILL }} />
+        ))}
+      </div>
+    </figure>
+  )
+}
+
+// ── Edit ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBackToRange, verifyRef }: {
+  state: CaptureState
+  dispatch: Dispatch<CaptureEvent>
+  flow: FlowFile | null
+  renameCheck: RenameCheck
+  onVerify: () => void
+  onBackToRange: () => void
+  verifyRef: RefObject<HTMLButtonElement | null>
+}) {
+  const steps = state.captured?.steps ?? []
+  const kept = steps.map((s, i) => ({ s, i })).filter(({ i }) => !state.removed.includes(i))
+  const [selected, setSelected] = useState(kept[0]?.i ?? 0)
+  const [showYaml, setShowYaml] = useState(false)
+  // Which moment the picture shows for a tap (1b-3c): where it lands, or the screen it left. Choosing another step goes
+  // back to where it lands — no mode to leave.
+  const [view, setView] = useState<'at' | 'after'>('at')
+  const [shown, setShown] = useState<Selector | null>(null)
+  const select = (i: number) => {
+    if (i === selected) return
+    setSelected(i)
+    setView('at')
+    setShown(null)
+  }
+  const after = expectable(steps[selected], state.after[selected])
+  // The control pressed is gone after an add or a removal: focus goes to what took its place on the chosen row — the
+  // chip just added, or + Add — never to the page.
+  const focusOnRow = (target: 'last-chip' | 'add') => requestAnimationFrame(() => {
+    const row = listRef.current?.querySelector<HTMLElement>('li[data-chosen]')
+    const chips = row?.querySelectorAll<HTMLButtonElement>('[data-expected-chip]')
+    const to = target === 'last-chip' && chips?.length ? chips[chips.length - 1] : row?.querySelector<HTMLButtonElement>('[data-add-expected]')
+    to?.focus()
+  })
+  // The values the file must not hold, removed steps' too: what Edit refuses to offer and what it strikes out.
+  const secrets = secretValues(state)
+  const listRef = useRef<HTMLOListElement>(null)
+  const yaml = flow ? safeYaml(flow) : ''
+
+  const remove = (i: number, position: number) => {
+    dispatch({ type: 'remove-step', index: i })
+    // Focus goes to the next row's remove button, or the previous one, never to the page.
+    requestAnimationFrame(() => {
+      const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[data-remove]')
+      if (buttons?.length) buttons[Math.min(position, buttons.length - 1)]?.focus()
+      else verifyRef.current?.focus()
+    })
+  }
+
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {/* The device on the left, as on Match and Verify, so it does not jump sides between steps. The YAML takes the
+            picture's place rather than pushing the buttons down: one or the other is looked at. */}
+        <div className={cn('flex min-h-0 justify-center', showYaml ? 'items-stretch' : 'items-start')}>
+          {showYaml
+            ? <YamlField yaml={yaml} fill />
+            : (
+              // Tabs to the picture's left edge rather than centred: a picture's width follows the device and its turn, so
+              // a centred switch sits nowhere in particular. Every step has them, After off where there is nothing after,
+              // so the picture keeps one size from step to step (`--picture-tap`, the room the tabs and hint take).
+              <Tabs value={after ? view : 'at'} onValueChange={(v) => { setView(v as 'at' | 'after'); if (v === 'at') setShown(null) }}
+                className="flex max-h-full flex-col items-start gap-4 [--picture-tap:calc(var(--picture-max,60vh)-5rem)]">
+                <TabsList variant="line" aria-label={copy.momentLabel}>
+                  <TabsTrigger value="at">{copy.atThisTap}</TabsTrigger>
+                  <TabsTrigger value="after" disabled={!after}>{copy.afterThisTap}</TabsTrigger>
+                </TabsList>
+                {/* No display class on a panel: it would override the `hidden` Radix puts on the one not shown, and that
+                    empty panel would take a gap and push the picture down when the tab changes. */}
+                <TabsContent value="at" className="mt-0 space-y-2">
+                  {state.screenshots[selected]
+                    ? <StepPicture src={state.screenshots[selected]!} step={steps[selected]!} />
+                    : <div aria-hidden className="aspect-[9/19] h-full max-h-[var(--picture-tap)] rounded-lg border bg-muted" />}
+                  {after && <p className="text-xs text-muted-foreground">{copy.atHint}</p>}
+                </TabsContent>
+                {after && (
+                  <TabsContent value="after" className="mt-0">
+                    <AfterPicture step={selected + 1} after={after} before={steps[selected]?.tree} secrets={secrets} shown={shown}
+                      expected={state.expected[selected] ?? []}
+                      onAdd={(selector) => { dispatch({ type: 'add-expected', index: selected, selector }); setShown(selector); focusOnRow('last-chip') }} />
+                  </TabsContent>
+                )}
+              </Tabs>
+            )}
+        </div>
+        <div className="flex min-h-0 flex-col gap-2">
+          <h3 className="text-sm font-medium">{copy.editHeading(kept.length)}</h3>
+          <ol ref={listRef} aria-label={copy.steps[2]} className="-m-1 min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
+            {kept.map(({ s, i }, position) => (
+              <EditRow key={i} index={i} step={madeSecret(s, state.made[i])} made={state.made[i] !== undefined} selected={selected === i}
+                onSelect={() => select(i)} onRemove={() => remove(i, position)}
+                onPutBack={s.skipped === 'no-response' && state.reviewed ? () => dispatch({ type: 'put-back', step: state.steps.indexOf(s.raw) }) : undefined}
+                expected={state.expected[i] ?? []} leftOut={(sel) => holdsSecret(sel, secrets)} canExpect={selected === i && after !== null} shown={view === 'after' ? shown : null}
+                onAddExpected={() => { setShowYaml(false); setView('after'); setShown(null) }} onShowExpected={(sel) => { setShowYaml(false); setView('after'); setShown(sel) }}
+                onRemoveExpected={(n) => { dispatch({ type: 'remove-expected', index: i, n }); setShown(null); focusOnRow('add') }}
+                renamedTo={secretBase(madeSecret(s, state.made[i])) !== null ? state.renamed[secretBase(madeSecret(s, state.made[i]))!] : undefined}
+                onRename={(from, to) => dispatch({ type: 'rename-secret', from, to })} renameCheck={renameCheck}
+                onMakeSecret={() => dispatch({ type: 'make-secret', index: i })} onKeepAsText={() => dispatch({ type: 'keep-as-text', index: i })} />
+            ))}
+          </ol>
+        </div>
+      </div>
+      <Footer>
+        <Button variant="ghost" className="sm:mr-auto" aria-expanded={showYaml} onClick={() => setShowYaml((v) => !v)}>
+          {showYaml ? copy.hideYaml : copy.showYaml}
+        </Button>
+        <Button variant="outline" onClick={onBackToRange}>{copy.backToRange}</Button>
+        {/* Not with only left-out rows kept: the flow would have no step, which no YAML can say. */}
+        <Button ref={verifyRef} disabled={kept.every(({ s }) => s.step === null)} onClick={onVerify}>{copy.verifyAndExport}</Button>
+      </Footer>
+    </div>
+  )
+}
+
+function safeYaml(flow: FlowFile): string {
+  try { return yamlOf(flow) } catch (e) { return `# ${(e as Error).message}` }
+}
+
+type CapturedRow = NonNullable<CaptureState['captured']>['steps'][number]
+/** What a rename to `to` of the secret now called `current` comes to: refused with a reason, or a note. */
+type RenameCheck = (current: string, to: string) => { error?: string; note?: string }
+
+/** A row the person made a secret (1b-3c), drawn as the secret step it becomes. */
+const madeSecret = (step: CapturedRow, name: string | undefined): CapturedRow => (name === undefined ? step : asSecret(step, name))
+const secretBase = (step: CapturedRow): string | null => (step.step?.type === 'inputSecret' ? step.step.name : null)
+
+function EditRow({
+  index, step, made, selected, onSelect, onRemove, onPutBack, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
+  expected, leftOut, canExpect, shown, onAddExpected, onShowExpected, onRemoveExpected,
+}: {
+  index: number
+  step: CapturedRow
+  /** Made a secret in Edit: it can be kept as text again. */
+  made: boolean
+  selected: boolean
+  onSelect: () => void
+  onRemove: () => void
+  /** A tap Match's review left out (P2c): put back rather than removed. */
+  onPutBack?: () => void
+  /** What the person expects this tap to bring (1b-3c), shown on the selected tap only; the rest say how many. */
+  expected: Selector[]
+  canExpect: boolean
+  shown: Selector | null
+  onAddExpected: () => void
+  leftOut: (selector: Selector) => boolean
+  onShowExpected: (selector: Selector) => void
+  onRemoveExpected: (n: number) => void
+  renamedTo: string | undefined
+  onRename: (from: string, to: string) => void
+  renameCheck: RenameCheck
+  onMakeSecret: () => void
+  onKeepAsText: () => void
+}) {
+  const label = capturedStepLabel(step)
+  const detailsId = useId()
+  const [open, setOpen] = useState(false)
+  const details = useRef<HTMLDivElement>(null)
+  const secretName = secretBase(step)
+  // Typed text written into the file as typed: the one kind of step Make secret is for.
+  const typed = step.step?.type === 'inputText' && 'text' in step.step
+  // The control pressed goes with the swap: focus moves to what took its place, the name or Make secret.
+  const swap = (change: () => void) => {
+    change()
+    requestAnimationFrame(() => details.current?.querySelector<HTMLElement>('input, button')?.focus())
+  }
+  const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
+  return (
+    // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
+    // reason 8 px under it with 4 px below.
+    // The label's button stretches over the whole card (its `after:` box), so the card is one target with no click
+    // handler of its own; the buttons and the field on it sit a layer above (`relative z-10`) and keep their own clicks.
+    // Keyboard and screen reader still meet the one button that selects. `data-stretched` keeps it out of the press
+    // nudge in index.css: a transform on it would shrink the `after:` box to the label mid-click.
+    // The row is the Collapsible's root, so the details grow into it rather than appearing (no heading: a row of a list).
+    <Collapsible asChild open={open} onOpenChange={setOpen}>
+    <li data-chosen={selected || undefined} className={cn('relative rounded-md border py-2 pl-3 pr-2 hover:bg-accent/40', selected ? 'border-primary' : 'border-border', step.step === null && 'opacity-60')}>
+      <div className="flex items-center gap-2">
+        {/* One line, as drawn; the whole label is the tooltip when it does not fit. */}
+        <button type="button" data-stretched onClick={onSelect} aria-current={selected ? 'true' : undefined} title={label}
+          className="min-w-0 flex-1 truncate text-left text-sm leading-5 after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
+          <span className="text-muted-foreground">#{index + 1} </span>{label}
+        </button>
+        {!canExpect && expected.filter((sel) => !leftOut(sel)).length > 0 && <Badge variant="outline" className="shrink-0">{copy.expectedCount(expected.filter((sel) => !leftOut(sel)).length)}</Badge>}
+        {byPosition(step) && <Badge variant="outline" className="shrink-0 border-dashed text-muted-foreground" title={copy.byPositionHint}>{copy.byPosition}</Badge>}
+        {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
+        {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
+        {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
+        {(secretName || typed) && (
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.stepDetails(label)} aria-controls={open ? detailsId : undefined}>
+              <ChevronRight aria-hidden className={cn('h-4 w-4 transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
+            </Button>
+          </CollapsibleTrigger>
+        )}
+        {/* One button in the row's action slot either way (`data-remove` on both, which Remove's focus rule counts by): put
+            back, it stays focused and becomes the row's Remove — a second press removes the step, as on any row. */}
+        {onPutBack
+          ? (
+            <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.putBackStep(label)} title={copy.putBackStep(label)} onClick={onPutBack}>
+              <RotateCcw aria-hidden className="h-4 w-4" />
+            </Button>
+          )
+          : (
+            <Button data-remove variant="ghost" size="icon" className="relative z-10 size-7 shrink-0" aria-label={copy.removeStep(label)} onClick={onRemove}>
+              <Trash2 aria-hidden className="h-4 w-4" />
+            </Button>
+          )}
+      </div>
+      {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
+      {canExpect && (
+        <div className="relative z-10 mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
+          <span className="mr-1 text-xs text-muted-foreground">{copy.expected}</span>
+          {expected.map((sel, n) => (
+            // Kept in the list, struck out, rather than hidden: Keep as text brings it back, and removal is by its place.
+            <span key={JSON.stringify(sel)} className={cn('inline-flex h-6 items-center rounded-full border border-transparent bg-secondary text-xs text-secondary-foreground', sameSelector(sel, shown) && 'border-blue-500', leftOut(sel) && 'text-muted-foreground line-through')}>
+              <button type="button" data-expected-chip className="h-full rounded-l-full pl-2 pr-1" aria-label={leftOut(sel) ? copy.expectedLeftOutLabel(sel.label ?? sel.id ?? '') : copy.showExpected(sel.label ?? sel.id ?? '')} onClick={() => onShowExpected(sel)}>
+                {copy.expectedChip(sel.label ?? sel.id ?? '')}
+              </button>
+              <button type="button" className="grid size-5 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10" aria-label={copy.removeExpected(sel.label ?? sel.id ?? '')} onClick={() => onRemoveExpected(n)}>×</button>
+            </span>
+          ))}
+          <button type="button" data-add-expected className="h-6 rounded-full border border-dashed px-2 text-xs text-muted-foreground hover:text-foreground" aria-label={copy.addExpectedLabel} onClick={onAddExpected}>{copy.addExpected}</button>
+          {expected.some(leftOut) && <p className="basis-full text-xs text-muted-foreground">{copy.expectedLeftOut}</p>}
+        </div>
+      )}
+      {(secretName || typed) && (
+        // Room past the panel's edges: it clips while it animates, and the field's focus ring is drawn outside it.
+        <CollapsibleContent id={detailsId} className="relative z-10 -mx-1 px-1 pb-1">
+        <div ref={details} className="mt-2">
+          {secretName
+            ? (
+              <div className="grid gap-2">
+                {/* Keyed by the name: a rename of another secret can rename this one too (a join, then a rename of
+                    either side), and a field still holding the old name would rename it back when it loses focus. */}
+                <SecretName key={renamedTo ?? secretName} from={secretName} current={renamedTo ?? secretName} onRename={onRename} renameCheck={renameCheck} />
+                {made && <Button variant="link" size="sm" className="h-auto justify-self-start p-0 text-xs" onClick={() => swap(onKeepAsText)}>{copy.keepAsText}</Button>}
+              </div>
+            )
+            : (
+              <div className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2">
+                <p className="text-xs text-muted-foreground">{copy.typedIntoFile}</p>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => swap(onMakeSecret)}>{copy.makeSecret}</Button>
+              </div>
+            )}
+        </div>
+        </CollapsibleContent>
+      )}
+    </li>
+    </Collapsible>
+  )
+}
+
+function SecretName({ from, current, onRename, renameCheck }: {
+  from: string
+  current: string
+  onRename: (from: string, to: string) => void
+  renameCheck: RenameCheck
+}) {
+  const id = useId()
+  const hintId = useId()
+  const errorId = useId()
+  const noteId = useId()
+  const [value, setValue] = useState(current)
+  const { error, note } = value === current ? {} : renameCheck(current, value)
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{copy.secretLabel}</Label>
+      <Input
+        id={id} value={value} className="font-mono"
+        aria-describedby={[hintId, error && errorId, note && noteId].filter(Boolean).join(' ')} aria-invalid={error ? true : undefined}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => { if (!error && value !== current) onRename(from, value) }}
+      />
+      <FieldHint id={hintId}>
+        {copy.secretHint}{' '}
+        <a href={copy.secretDocsUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{copy.secretDocs}</a>
+      </FieldHint>
+      {error && <FieldError id={errorId} message={error} />}
+      {note && <p id={noteId} className="text-xs">{note}</p>}
+    </div>
+  )
+}
+
+/**
+ * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's: a tap is
+ * a ring, a swipe the same stroke (`SwipeStroke`).
+ */
+/** `fill`: drawn at the device's height, as the live device is beside it — a recorded picture (1b-3b) is 160 px wide,
+ *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */
+function StepPicture({ src, step, fill = false }: { src: string; step: CapturedStep; fill?: boolean }) {
+  const mark = markOf(step.raw)
+  // Filled by height only while the picture is upright: a turned one at a fixed height in a narrow column would be
+  // squeezed, its width capped and its height not (CodeRabbit, #1171).
+  const [upright, setUpright] = useState(true)
+  const filled = fill && upright
+  const pct = (n: number) => `${n * 100}%`
+  return (
+    // The border on the frame, not the image, as on the screen after a tap: on the image it came out of the height cap,
+    // and the two pictures of one step differed by its width when the tabs were switched.
+    // Not clipped: a tap's mark near the edge is drawn past it.
+    <div className={cn('relative max-h-full rounded-lg border', fill ? 'self-center' : 'self-start')}>
+      <img src={src} alt={capturedStepLabel(step)} onLoad={(e) => setUpright(e.currentTarget.naturalHeight >= e.currentTarget.naturalWidth)}
+        className={cn('block w-auto max-w-full rounded-md', filled ? 'h-[var(--picture-max,60vh)] bg-muted' : fill ? 'h-auto max-h-[var(--picture-max,60vh)]' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
+      {mark && (
+        <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
+          {mark.kind === 'swipe' ? (
+            <SwipeStroke from={{ left: mark.from[0], top: mark.from[1] }} to={{ left: mark.to[0], top: mark.to[1] }} />
+          ) : (
+            <circle cx={pct(mark.x)} cy={pct(mark.y)} r={11} fill={MARK_BLUE} fillOpacity={0.3} stroke={MARK_BLUE} strokeWidth={2} />
+          )}
+        </svg>
+      )}
+    </div>
+  )
+}
+
+/** The screen a tap left, where a person can pick what it should bring when its tree lines up with the picture: upright
+ *  (a turned iOS app's tree is the app's, turned from the picture, which nothing here maps yet). `null` otherwise. */
+function expectable(step: CapturedStep | undefined, after: AfterTouch | undefined): AfterTouch | null {
+  if (!step || !after?.screenshot || (step.raw.kind !== 'tap' && step.raw.kind !== 'longPress')) return null
+  return after.interfaceTurn === undefined || after.interfaceTurn === 0 ? after : null
+}
+
+const byPosition = (step: CapturedStep): boolean =>
+  (step.step?.type === 'tapOn' || step.step?.type === 'longPressOn') && step.step.selector.index !== undefined
+
+const sameSelector = (a: Selector, b: Selector | null): boolean => b !== null && JSON.stringify(a) === JSON.stringify(b)
+
+/** What can be picked: named, on the screen, and smaller than half of it (a container is not what a person means). */
+function pickable(tree: readonly UIElement[]): Array<{ e: UIElement; i: number }> {
+  return tree
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.label.length > 0 && e.frame.width > 0 && e.frame.height > 0 && e.frame.width * e.frame.height < 0.5
+      && e.frame.x >= 0 && e.frame.y >= 0 && e.frame.x + e.frame.width <= 1.001 && e.frame.y + e.frame.height <= 1.001)
+    // The biggest first, so a smaller element inside one is drawn above it and takes the click.
+    .sort((a, b) => b.e.frame.width * b.e.frame.height - a.e.frame.width * a.e.frame.height)
+}
+
+/**
+ * The screen a tap left, with what is on it laid over as buttons: clicking one offers it as what the tap should bring,
+ * or says why not (1b-3c). An element `shown` is drawn alone, the rest dimmed.
+ */
+function AfterPicture({ step, after, before, secrets, shown, expected, onAdd }: {
+  step: number
+  after: AfterTouch
+  before: UIElement[] | undefined
+  secrets: string[]
+  shown: Selector | null
+  expected: Selector[]
+  onAdd: (selector: Selector) => void
+}) {
+  const [picked, setPicked] = useState<number | null>(null)
+  const hintId = useId()
+  const pct = (n: number) => `${n * 100}%`
+  const lit = shown ? new Set(matchSelector(after.tree, shown)) : null
+  const element = picked !== null ? after.tree[picked] : undefined
+  const verdict = element ? expectedFor(element, { secrets, ...(before ? { before } : {}) }) : null
+  const already = verdict && 'selector' in verdict && expected.some((s) => sameSelector(s, verdict.selector))
+  const root = useRef<HTMLDivElement>(null)
+  // Escape takes the offer away and leaves focus on the element it was about, never on the page.
+  const dismiss = () => {
+    root.current?.querySelector<HTMLButtonElement>(`[data-pick="${picked}"]`)?.focus()
+    setPicked(null)
+  }
+  return (
+    <div ref={root} className="relative self-start" data-escape-local={picked !== null ? '' : undefined}
+      onKeyDown={(ev) => { if (ev.key === 'Escape' && picked !== null) dismiss() }}>
+      <div className="relative overflow-hidden rounded-lg border">
+        <img src={after.screenshot} alt={copy.afterAlt(step)} className="block max-h-[var(--picture-tap,var(--picture-max,60vh))] w-auto max-w-full" />
+        {pickable(after.tree).map(({ e, i }) => (
+          <button key={i} type="button" data-pick={i} aria-label={copy.pickElement(e.label)} aria-describedby={hintId}
+            className={cn('absolute rounded-sm hover:bg-blue-500/10 hover:outline hover:outline-2 hover:outline-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500',
+              picked === i && 'outline outline-2 outline-blue-500', lit?.has(e) && 'z-10 outline outline-2 outline-offset-2 outline-blue-500 shadow-[0_0_0_9999px_rgba(255,255,255,0.55)]')}
+            style={{ left: pct(e.frame.x), top: pct(e.frame.y), width: pct(e.frame.width), height: pct(e.frame.height) }}
+            onClick={() => setPicked(i)} />
+        ))}
+      </div>
+      <p id={hintId} className="mt-2 text-xs text-muted-foreground">{copy.afterLead(step)} {copy.afterHint}</p>
+      {element && verdict && (
+        <div role="group" aria-label={copy.expectTitle(element.label)} className="absolute left-1 z-20 w-80 max-w-[calc(100%-0.5rem)] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"
+          style={{ top: pct(Math.min(element.frame.y + element.frame.height, 0.8)) }}>
+          {'refused' in verdict
+            ? <p className="text-xs text-muted-foreground">{copy.expectRefused[verdict.refused]}</p>
+            : already
+              ? <p className="text-xs text-muted-foreground">{copy.expectAlready}</p>
+              : (
+              <>
+                <p className="text-sm font-medium">{copy.expectTitle(element.label)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{copy.expectMatches(matchSelector(after.tree, verdict.selector).length)}</p>
+                {verdict.warnings.map((w) => <p key={w} className="mt-2 rounded bg-warning px-2 py-1 text-xs">{copy.expectWarnings[w]}</p>)}
+                <div className="mt-3 flex justify-end">
+                  <Button variant="outline" size="sm" autoFocus onClick={() => { onAdd(verdict.selector); setPicked(null) }}>{copy.expectAdd}</Button>
+                </div>
+              </>
+            )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The blue the MCP watch view's marks are drawn in (`TapMarks`). */
+const MARK_BLUE = 'rgb(59 130 246)'
+
+/** The flow's YAML, highlighted, with line numbers and a copy button: the shared CodeBlock, as Flow Runs and MCP's
+ *  capture page will show a flow. */
+function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: boolean; contentRef?: RefObject<HTMLPreElement | null> }) {
+  const lines = useHighlightedCode(yaml, 'yaml')
+  const ownRef = useRef<HTMLPreElement>(null)
+  const ref = contentRef ?? ownRef
+  // With no clipboard (plain HTTP, the usual self-hosted case) the copy icon selects the YAML instead of doing nothing.
+  const copyOrSelect = (text: string) => copyToClipboard(text).then((ok) => { if (!ok) selectYaml(ref.current); return ok })
+  return (
+    <CodeBlock size="sm" className={fill ? 'h-full' : 'max-h-72'}>
+      <CodeBlockHeader>
+        <CodeBlockTitle>{copy.yamlLabel}</CodeBlockTitle>
+        <CodeBlockActions><CodeBlockCopyButton value={yaml} copy={copyOrSelect} /></CodeBlockActions>
+      </CodeBlockHeader>
+      <CodeBlockContent ref={ref} aria-label={copy.yamlLabel} lineNumbers>
+        {lines.map((line, i) => <CodeBlockLine key={i}>{line}</CodeBlockLine>)}
+      </CodeBlockContent>
+    </CodeBlock>
+  )
+}
+
+// ── Verify ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function VerifyScreen({ state, tap, marks, total, onExport, onBack, primaryRef }: {
+  state: CaptureState
+  tap: CaptureTap
+  marks: WatchMarks
+  /** The flow's steps, which the run counts through; known before its result is. */
+  total: number
+  onExport: () => void
+  onBack: () => void
+  primaryRef: RefObject<HTMLButtonElement | null>
+}) {
+  const verify = state.verify
+  const result = verify?.result
+  const failed = result?.status === 'failed' || state.error !== null
+  const stuck = state.error !== null && !result
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+    <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} marks={marks} /></div>
+      <div className="flex min-h-0 flex-col gap-3">
+        <h3 className="text-sm font-medium">{copy.verifyHeading}</h3>
+        <p className="text-sm text-muted-foreground">{copy.verifyHelp}</p>
+        <ResetReport reset={state.reset} />
+        <p role="status" className={cn('flex items-center gap-2 text-sm', failed && 'text-destructive')}>
+          {verify?.status === 'running' && !state.error && <Busy />}
+          {state.error ?? (verify?.status === 'running' && state.reset === undefined && verify.done === 0 ? copy.resetting
+            : verify?.status === 'running'
+            ? <SteadyCount text={copy.verifying(Math.min(verify.done + 1, total), total)} widest={copy.verifying(total, total)} />
+            : verify?.status === 'passed' ? copy.passed : result ? `${copy.failed} ${result.failureMessage ?? ''}` : '')}
+        </p>
+        <VerifyTrace verify={verify} />
+      </div>
+    </div>
+      {/* The same footer as every step, at the bottom of the dialog: buttons that move between steps do not move. */}
+      <Footer>
+        {result && <Button variant="outline" onClick={onBack}>{copy.backToEdit}</Button>}
+        {/* There while it runs, busy (`aria-disabled`, not `disabled`, which drops focus): with nothing to hold, focus
+            fell to the page when Verify began and stayed there after it finished (review of #1125). A run that threw
+            has no result to export, so the same button, still holding focus, goes back to Edit instead of staying
+            unavailable for good. */}
+        <Button
+          ref={primaryRef} aria-disabled={(!result && !stuck) || undefined}
+          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+          onClick={() => { if (result) onExport(); else if (stuck) onBack() }}
+        >
+          {stuck ? copy.backToEdit : failed ? copy.exportAnyway : copy.continue}
+        </Button>
+      </Footer>
+    </div>
+  )
+}
+
+/**
+ * The verification as a trace, as MCP's Agent activity shows a run (`TraceStep`): each step as it starts and ends while
+ * the run goes, then every step of the result, the one that failed open onto why and on what to select instead.
+ */
+function VerifyTrace({ verify }: { verify: CaptureState['verify'] }) {
+  const [toggled, setToggled] = useState<Record<number, boolean>>({})
+  const id = useId()
+  // Follows the step running, as Agent activity does: a long flow ran below the dialog's fold and had to be scrolled to.
+  // The live steps only: the result lists every step after a failure as not run, and following those to the bottom
+  // pushed the failed step, opened onto why, out of view (pre-PR review).
+  const follow = useFollowBottom<HTMLOListElement>(verify?.live)
+  if (!verify) return null
+  const rows: Array<{
+    index: number; name: string; status: 'running' | 'passed' | 'failed' | 'skipped'; durationMs?: number; message?: string
+    reach?: string; reachNote?: string; suggestions?: { yaml: string }[]; observed?: StepExpect | null
+  }> =
+    verify.result ? verify.result.steps : verify.live
+  if (rows.length === 0) return null
+  return (
+    <ol ref={follow} aria-label={copy.verifyHeading} className="-m-1 flex min-h-0 flex-col gap-2 overflow-y-auto p-1 text-sm">
+      {rows.map((s) => {
+        // A touch the device could not judge opens too, on a passed step: a covered element passes that way (#1125). So
+        // does one that changed nothing: an overlay the tree does not show takes the touch and the step still passes.
+        const unchecked = s.reach === 'unchecked'
+        const unchanged = s.status === 'passed' && s.observed === null
+        const opens = Boolean((s.status === 'failed' && (s.message || s.suggestions?.length)) || unchecked || unchanged)
+        const effect = s.observed ? effectLine(s.observed) : null
+        const why = opens || effect !== null
+        const open = toggled[s.index] ?? opens
+        return (
+          <li key={s.index}>
+            <TraceStep
+              state={s.status === 'passed' ? 'done' : s.status}
+              label={<>{s.name}<span className="sr-only">, {copy.stepStatus[s.status]}</span></>}
+              {...(s.durationMs !== undefined && s.status !== 'running' ? { meta: seconds(s.durationMs) } : {})}
+              {...(why ? { open, onToggle: () => setToggled((t) => ({ ...t, [s.index]: !open })), contentId: `${id}-${s.index}` } : {})}
+            >
+              {why && (
+                <div className="flex flex-col gap-1.5 text-foreground">
+                  {s.status === 'failed' && s.message && <p>{s.message}</p>}
+                  {unchecked && <p className="text-muted-foreground">{copy.uncheckedTouch(s.reachNote)}</p>}
+                  {unchanged && <p className="text-muted-foreground">{copy.touchChangedNothing}</p>}
+                  {effect && <p className="text-muted-foreground">{copy.touchEffect(effect)}</p>}
+                  {s.status === 'failed' && s.suggestions && s.suggestions.length > 0 && (
+                    <>
+                      <p className="text-muted-foreground">{copy.suggestionsHeading}</p>
+                      <ul className="flex flex-col gap-1 font-mono text-xs">
+                        {s.suggestions.map((g) => <li key={g.yaml}>{g.yaml}</li>)}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </TraceStep>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
+/** What a run will look for after a touch, in a line: `"Saved" appears, "Save" goes`. */
+function effectLine(seen: StepExpect): string {
+  const name = (a: NonNullable<StepExpect['appear']>[number]) => (a.text !== undefined ? `"${a.text}"` : a.id ?? '')
+  return [...(seen.appear ?? []).map((a) => `${name(a)} appears`), ...(seen.gone ?? []).map((a) => `${name(a)} goes`)].join(', ')
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Focus the YAML and select it alone, for the keyboard to copy: select-all in a focused block takes the page. */
+function selectYaml(pre: HTMLPreElement | null): void {
+  if (!pre) return
+  pre.focus()
+  window.getSelection()?.selectAllChildren(pre.querySelector('[data-slot=code-block-code]') ?? pre)
+}
+
+/** A plain-HTTP page has no clipboard API. That is a copy that did not happen, not a failure. */
+function copyToClipboard(text: string): Promise<boolean> {
+  return (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('no clipboard')))
+    .then(() => true, () => false)
+}
+
+export function ExportScreen({ flow, bundleId, onDone, doneRef }: {
+  flow: FlowFile
+  bundleId: string | null
+  onDone: () => void
+  doneRef: RefObject<HTMLButtonElement | null>
+}) {
+  const fileId = useId()
+  const yaml = safeYaml(flow)
+  const fileName = fileNameOf(flow.name)
+  const [copied, setCopied] = useState<boolean | null>(null)
+  const yamlRef = useRef<HTMLPreElement>(null)
+  // No clipboard (a plain-HTTP page): the YAML is selected and focused instead, so ⌘C copies it — and only it, which
+  // select-all in a focused block would not (it takes the page).
+  const copyYaml = () => {
+    void copyToClipboard(yaml).then((ok) => {
+      setCopied(ok)
+      if (!ok) selectYaml(yamlRef.current)
+    })
+  }
+  const secrets = [...new Set(flow.steps.flatMap((s) => (s.type === 'inputSecret' ? [s.name] : [])))]
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([yaml], { type: 'application/yaml' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName.split('/').pop()!
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
+      {/* The YAML takes the height the rest leaves, and scrolls inside itself; the notes on using it sit under it. The
+          4 px padding, given back by the margin, is room for the file field's focus ring. */}
+      <div className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1">
+        <div className="shrink-0">
+          <h3 className="text-sm font-medium">{copy.exportHeading}</h3>
+          <p className="text-sm text-muted-foreground">{copy.exportHelp}</p>
+        </div>
+        <div className="grid shrink-0 gap-2">
+          <Label htmlFor={fileId}>{copy.fileLabel}</Label>
+          <Input id={fileId} readOnly value={fileName} className="font-mono" onFocus={(e) => e.currentTarget.select()} />
+        </div>
+        <div className="flex min-h-40 flex-1 flex-col">
+          <YamlField yaml={yaml} contentRef={yamlRef} fill />
+        </div>
+        <ul className="shrink-0 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          <li className="text-foreground">{copy.howToUse}</li>
+          {secrets.length > 0 && <li>{copy.secretsToSet(secrets)}</li>}
+          {bundleId && <li>{copy.appPinned(bundleId)}</li>}
+        </ul>
+        <p role="status" className="min-h-5 shrink-0 text-sm text-muted-foreground">{copied === true ? copy.copied : copied === false ? copy.copyByHand : ''}</p>
+      </div>
+      <Footer>
+        <Button variant="outline" onClick={copyYaml}>{copy.copyYaml}</Button>
+        <Button variant="outline" onClick={download}>{copy.download}</Button>
+        <Button ref={doneRef} className="w-24" onClick={onDone}>{copy.done}</Button>
+      </Footer>
+    </div>
+  )
+}
+

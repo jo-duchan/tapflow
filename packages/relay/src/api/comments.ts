@@ -5,7 +5,7 @@ import busboy from 'busboy'
 import { getDb } from '../db.js'
 import { currentRole, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json } from '../router.js'
-import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError } from '../lib/uploads.js'
 
 export function handleListComments(req: http.IncomingMessage, res: http.ServerResponse): void {
   const auth = requireAuth(req, res)
@@ -95,7 +95,8 @@ export function handleCreateComment(
 
   bb.on('finish', async () => {
     // 쓰기 완료를 기다린 뒤 삭제해야 잘린 파일이 디스크에 남지 않는다.
-    await writePromise.catch(() => {})
+    const writeError = await writePromise.then(() => null, (err: unknown) => err)
+    if (writeError instanceof StorageFullError) return json(res, 507, { error: writeError.message })
     if (sizeError) {
       if (attachmentPath) unlinkSafe(attachmentPath, 'rejected attachment')
       return json(res, 400, { error: 'Attachment exceeds the upload size limit' })

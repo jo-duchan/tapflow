@@ -2,7 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="Sample Compose">
         <!-- adjustResize: the keyboard shrinks the window instead of covering the tab bar, as most apps do. -->
-        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+        <!-- configChanges: a turn or a fold re-lays the screen in place instead of recreating the activity, which
+             would drop the selected tab and the status a flow reads right after `setOrientation` or `setPosture`. -->
+        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

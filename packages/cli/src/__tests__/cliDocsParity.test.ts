@@ -151,10 +151,11 @@ describe.each(Object.entries(DOCS))('docs/%s cli.md matches the registered CLI',
     // invocations (14 commands, three of them split into subcommands) and 25 command flags; 26 since `flow run --no-record` (2026-10-11);
     // 18 and 27 since `token set` / `token status` (2026-10-14): one command, so its shared `--relay` counts once;
     // 29 since `flow run --include-tags` / `--exclude-tags` (2026-10-23); 30 since `flow run --admission-timeout`, 32 since
-    // `--service-tier` / `--keep` (2026-10-23); 33 since `flow run --no-reset` (2026-10-24); 35 since `--parallel` / `--platform` (2026-10-25).
+    // `--service-tier` / `--keep` (2026-10-23); 33 since `flow run --no-reset` (2026-10-24); 35 since `--parallel` / `--platform` (2026-10-25);
+    // 36 since `flow run --secret` (2026-11-08).
     const code = codeSurface(cli)
     expect(code.invocations.size).toBe(18)
-    expect([...code.flags.values()].reduce((n, s) => n + s.size, 0)).toBe(35)
+    expect([...code.flags.values()].reduce((n, s) => n + s.size, 0)).toBe(36)
     expect(docSurface(markdown).invocations.size).toBe(18)
 
     expect(parity(cli, markdown)).toEqual({ undocumented: [], nonexistent: [] })

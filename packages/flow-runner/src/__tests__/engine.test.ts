@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { runFlow, type FlowDriver } from '../engine.js'
 import { parseFlow } from '../schema.js'
-import { EnvironmentStepError, TransientQueryError } from '../errors.js'
+import { InputRefusedError, SessionEndedError } from '../sessionErrors.js'
+import { PlatformError } from '@tapflowio/agent-core/errors'
+import { DeviceLacksError, EnvironmentStepError, markEnvironmentFailure, TransientQueryError } from '../errors.js'
+import type { PinchFingers } from '../engine.js'
+import type { ChromeButton, ChromeData, ReachResult } from '@tapflowio/protocol'
 
 const el = (over: Partial<UIElement>): UIElement => ({
   role: 'button',
@@ -20,8 +24,8 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     calls,
     queryUITree: vi.fn(async () => trees[Math.min(i++, trees.length - 1)]),
     tap: vi.fn(async (x: number, y: number) => { calls.push(['tap', x, y]) }),
-    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number) => {
-      calls.push(['swipe', from, to, durationMs])
+    swipe: vi.fn(async (from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
+      calls.push(['swipe', from, to, durationMs, ...(holdMs !== undefined ? [holdMs] : [])])
     }),
     inputText: vi.fn(async (text: string) => { calls.push(['inputText', text]) }),
     pressKey: vi.fn(async (code: string) => { calls.push(['pressKey', code]) }),
@@ -29,12 +33,403 @@ function fakeDriver(trees: UIElement[][]): FlowDriver & { calls: Array<[string, 
     launchApp: vi.fn(async (options?: unknown) => { calls.push(options === undefined ? ['launchApp'] : ['launchApp', options]) }),
     clearState: vi.fn(async (appId: string) => { calls.push(['clearState', appId]) }),
     screenshot: vi.fn(async () => Buffer.from('PNG')),
+    pressButton: vi.fn(async (name: string) => { calls.push(['pressButton', name]) }),
+    longPress: vi.fn(async (x: number, y: number, durationMs: number) => { calls.push(['longPress', x, y, durationMs]) }),
+    pinch: vi.fn(async (start: PinchFingers, end: PinchFingers, durationMs: number) => { calls.push(['pinch', start, end, durationMs]) }),
+    setOrientation: vi.fn(async (orientation: string, timeoutMs: number) => { calls.push(['setOrientation', orientation, timeoutMs]) }),
+    setPosture: vi.fn(async (posture: string, timeoutMs: number) => { calls.push(['setPosture', posture, timeoutMs]) }),
   }
 }
+
+/**
+ * A device whose screen changes only when it is swiped, as a real one does: the `n`th screen after `n` swipes, the last
+ * one after that. A tree read with no gesture before it (`scroll { until }`'s confirming read) sees the same screen.
+ */
+function listDriver(screens: UIElement[][]): ReturnType<typeof fakeDriver> {
+  const driver = fakeDriver([[]])
+  vi.mocked(driver.queryUITree).mockImplementation(async () => {
+    const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+    return screens[Math.min(swiped, screens.length - 1)]!
+  })
+  return driver
+}
+
+const chromeButton = (name: string, usage: number): ChromeButton => ({
+  name, accessibilityTitle: name, anchor: 'left', onTop: false,
+  normalOffset: { x: 0, y: 0 }, rolloverOffset: { x: 0, y: 0 }, buttonW: 1, buttonH: 1, usagePage: 12, usage,
+})
+
+const iosChrome = (...buttons: ChromeButton[]): ChromeData => ({
+  framePng: '', bezelWidth: 1, bezelHeight: 1, compositeWidth: 1, compositeHeight: 1,
+  padding: { left: 0, right: 0, top: 0, bottom: 0 }, screenRect: { x: 0, y: 0, width: 1, height: 1 },
+  screenCornerRadius: 0, logicalWidth: 1, logicalHeight: 1, buttons,
+})
 
 const OPTS = { pollIntervalMs: 1, defaultTimeoutMs: 20 }
 
 const flowOf = (yaml: string) => parseFlow(yaml, 'test.yaml')
+
+// #1125: a touch whose flow says what it brings is checked for it — a tap that landed on an overlay the tree does not show
+// sends fine and changes nothing, and passed.
+describe('runFlow — what a touch is expected to bring', () => {
+  const save = { role: 'button' as const, label: 'Save', enabled: true, frame: { x: 0.1, y: 0.5, width: 0.3, height: 0.05 } }
+  const saved = { role: 'text' as const, label: 'Saved', enabled: true, frame: { x: 0.1, y: 0.1, width: 0.3, height: 0.05 } }
+  const withExpect = 'steps:\n  - tapOn: "Save"\n    expect:\n      appear: [{ text: "Saved" }]\n      gone: [{ text: "Save", role: button }]\n'
+
+  it('passes once the screen shows it, and says it was confirmed', async () => {
+    const driver = fakeDriver([[save], [save], [saved]])
+    const result = await runFlow(flowOf(withExpect), driver, { pollIntervalMs: 1, defaultTimeoutMs: 200 })
+    expect(result.status).toBe('passed')
+    expect(result.steps[0]).toMatchObject({ effect: 'confirmed' })
+  })
+
+  it('fails as the product\'s when the screen never shows it, naming what is missing', async () => {
+    const driver = fakeDriver([[save]])
+    const result = await runFlow(flowOf(withExpect), driver, OPTS)
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
+    expect(result.steps[0]).toMatchObject({ status: 'failed', effect: 'failed' })
+    expect(result.steps[0]!.message).toMatch(/"Saved" did not appear/)
+    expect(driver.calls.filter(([c]) => c === 'tap')).toHaveLength(1)
+  })
+
+  it('fails when the screen before the touch already looked like its effect', async () => {
+    const driver = fakeDriver([[save, saved]])
+    const flow = flowOf('steps:\n  - tapOn: "Save"\n    expect:\n      appear: [{ text: "Saved" }]\n')
+    const result = await runFlow(flow, driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.steps[0]!.message).toMatch(/already looked as this touch leaves it \("Saved" was showing\)/)
+  })
+
+  it('checks nothing more on a touch whose flow says nothing about it', async () => {
+    const driver = fakeDriver([[save]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Save"\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(result.steps[0]).not.toHaveProperty('effect')
+  })
+
+  it('reads the screen before a point, which is touched without one', async () => {
+    // The screen changes when the point is tapped, as a device's does: the still screen before it is the baseline.
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'tap') ? [saved] : [save]))
+    const flow = flowOf('steps:\n  - tapOn: [0.2, 0.52]\n    expect:\n      appear: [{ text: "Saved" }]\n')
+    const result = await runFlow(flow, driver, { pollIntervalMs: 1, defaultTimeoutMs: 200 })
+    expect(result.status).toBe('passed')
+    expect(result.steps[0]).toMatchObject({ reach: 'delivered', effect: 'confirmed' })
+  })
+
+  it('judges a point against the screen before it too', async () => {
+    const driver = fakeDriver([[save, saved]])
+    const flow = flowOf('steps:\n  - tapOn: [0.2, 0.52]\n    expect:\n      appear: [{ text: "Saved" }]\n')
+    const result = await runFlow(flow, driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.steps[0]!.message).toMatch(/already looked as this touch leaves it/)
+  })
+
+  // Review of #1125: the step between a toast's touch and its leaving changed nothing, and the toast was forgotten.
+  it('remembers what earlier touches brought across a touch that changed nothing', async () => {
+    const a = el({ label: 'A', frame: { x: 0, y: 0.3, width: 0.3, height: 0.05 } })
+    const b = el({ label: 'B', frame: { x: 0, y: 0.4, width: 0.3, height: 0.05 } })
+    const c = el({ label: 'C', frame: { x: 0, y: 0.5, width: 0.3, height: 0.05 } })
+    const toast = el({ role: 'text', identifier: 'toast', label: 'Saved', frame: { x: 0, y: 0.8, width: 1, height: 0.05 } })
+    const title = el({ role: 'text', label: 'Done', frame: { x: 0, y: 0.05, width: 1, height: 0.05 } })
+    // The screen by how many taps have landed: A brings the toast, B changes nothing, and by C the toast has gone on
+    // its own while C brings a title.
+    const driver = fakeDriver([[]])
+    const taps = () => driver.calls.filter(([c]) => c === 'tap').length
+    driver.queryUITree = vi.fn(async () => (taps() === 0 ? [a, b, c] : taps() < 3 ? [a, b, c, toast] : [a, b, c, title]))
+    const flow = flowOf('steps:\n  - tapOn: "A"\n  - tapOn: "B"\n  - tapOn: "C"\n')
+    const result = await runFlow(flow, driver, { pollIntervalMs: 1, defaultTimeoutMs: 20, observeEffects: true })
+    expect(result.steps.map((s) => s.observed)).toEqual([
+      { appear: [{ id: 'toast', text: 'Saved' }] },
+      null,
+      { appear: [{ text: 'Done', role: 'text' }] },
+    ])
+  })
+
+  // Sample app E2E: Close on what the touch before opened is that touch's effect, told apart by what it touched.
+  it('counts what an earlier touch brought as gone when this touch was on it', async () => {
+    const open = el({ label: 'Open', frame: { x: 0, y: 0.3, width: 0.3, height: 0.05 } })
+    const close = el({ role: 'button', identifier: 'dialog.close', label: 'Close', frame: { x: 0.4, y: 0.5, width: 0.2, height: 0.05 } })
+    const driver = fakeDriver([[]])
+    const taps = () => driver.calls.filter(([c]) => c === 'tap').length
+    driver.queryUITree = vi.fn(async () => (taps() === 1 ? [open, close] : [open]))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Open"\n  - tapOn: "Close"\n'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 20, observeEffects: true })
+    expect(result.steps.map((s) => s.observed)).toEqual([
+      { appear: [{ id: 'dialog.close', text: 'Close' }] },
+      { gone: [{ id: 'dialog.close', text: 'Close' }] },
+    ])
+  })
+
+  it('watches what each touch does when asked to, for Verify to write down', async () => {
+    const driver = fakeDriver([[save], [saved]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Save"\n'), driver, { ...OPTS, observeEffects: true })
+    expect(result.steps[0]!.observed).toEqual({ appear: [{ text: 'Saved', role: 'text' }], gone: [{ text: 'Save', role: 'button' }] })
+  })
+})
+
+// #1125: a point is a fraction of the screen, and on a screen of another size the layout under it differs.
+describe('runFlow — the screen a flow\'s points were made on', () => {
+  const iphone = (logicalWidth: number, logicalHeight: number) => ({ ...iosChrome(), logicalWidth, logicalHeight })
+  const pointed = 'viewport: { width: 402, height: 874 }\nsteps:\n  - launchApp\n  - tapOn: [0.5, 0.5]\n'
+
+  it('refuses a flow made on another size before it touches anything, as the environment\'s', async () => {
+    const driver = { ...fakeDriver([[]]), chrome: vi.fn(async () => iphone(440, 956)) }
+    const result = await runFlow(flowOf(pointed), driver, OPTS)
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'environment', failedBeforeRun: true })
+    expect(result.steps[1]!.message).toMatch(/made on a 402×874 screen, and this device's is 440×956/)
+    expect(driver.calls).toEqual([])
+  })
+
+  it('runs it on the same size, held either way', async () => {
+    const driver = { ...fakeDriver([[]]), chrome: vi.fn(async () => iphone(874, 402)) }
+    expect((await runFlow(flowOf(pointed), driver, OPTS)).status).toBe('passed')
+  })
+
+  it('reads the size only for a flow that touches a point', async () => {
+    const driver = { ...fakeDriver([[]]), chrome: vi.fn(async () => iphone(440, 956)) }
+    expect((await runFlow(flowOf('viewport: { width: 402, height: 874 }\nsteps: [launchApp]\n'), driver, OPTS)).status).toBe('passed')
+    expect(driver.chrome).not.toHaveBeenCalled()
+  })
+
+  it('says the size it ran on when watching, for Flow Capture to pin the points to', async () => {
+    const android = { buttons: [], streamType: 'h264' as const, screenWidth: 2424, screenHeight: 1080 }
+    const driver = { ...fakeDriver([[]]), chrome: vi.fn(async () => android) }
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.5, 0.5]\n'), driver, { ...OPTS, observeEffects: true })
+    expect(result.viewport).toEqual({ width: 1080, height: 2424 })
+  })
+})
+
+// #1125: a tap goes where the device says it reaches the element, not to the frame's centre, which a tab bar covered —
+// the row's centre was the next tab's button, and the step passed.
+describe('runFlow — where a touch on an element lands', () => {
+  const row = el({ label: 'Row 13', frame: { x: 0, y: 0.879, width: 1, height: 0.06 } })
+  const reachable = (point: [number, number], atCentre = false): ReachResult => ({ state: 'reachable', point, atCentre, frame: row.frame })
+  const withReach = (...answers: ReachResult[]) => {
+    const driver = fakeDriver([[row]])
+    let i = 0
+    driver.reach = vi.fn(async () => [answers[Math.min(i++, answers.length - 1)]!])
+    return driver
+  }
+
+  it('taps the point the device says reaches it, once two reads agree, and says it was checked', async () => {
+    const driver = withReach(reachable([0.1, 0.885]), reachable([0.1, 0.885]))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([['tap', 0.1, 0.885]])
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'verified' })
+  })
+
+  // A list still settling from a swipe moves the point between reads: the one tapped is the one that held.
+  it('waits for the point to hold before tapping it', async () => {
+    const driver = withReach(reachable([0.5, 0.95]), reachable([0.5, 0.9]), reachable([0.5, 0.88]), reachable([0.5, 0.88]))
+    await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+    expect(driver.calls).toEqual([['tap', 0.5, 0.88]])
+  })
+
+  // iOS E2E: a row under a scrim failed as "no element matched … within 0.149s" — the read again ran out of the time
+  // the waiting left it, and the step named the wrong cause.
+  it('says the element is covered when the last read again runs out of time', async () => {
+    const driver = withReach({ state: 'occluded', by: 'Other list.scrim' })
+    let reads = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (reads++ === 0) return [row]
+      await new Promise((r) => setTimeout(r, 15))
+      throw new TransientQueryError('ui-tree query failed: The operation was aborted due to timeout')
+    })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 40 })
+    expect(result.steps[0]!.message).toBe('"Row 13" is covered by Other list.scrim: a touch on it would land on that instead')
+    expect(result.failureKind).toBe('product')
+    expect(driver.calls).toEqual([])
+  })
+
+  // Review of #1125: a 502 while the agent reconnects failed the step outright, where a tree read polls past it.
+  it('asks again past a blip on the way to the agent, and taps the centre unchecked if it lasts', async () => {
+    const blip = new TransientQueryError('reach query failed: 502')
+    const driver = withReach(reachable([0.1, 0.885]))
+    let calls = 0
+    driver.reach = vi.fn(async () => {
+      if (calls++ < 2) throw blip
+      return [reachable([0.1, 0.885])]
+    })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'verified' })
+    const lasting = withReach(reachable([0.1, 0.885]))
+    lasting.reach = vi.fn(async () => { throw blip })
+    const late = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), lasting, OPTS)
+    expect(late.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked', reachNote: 'the device did not say where a touch lands: reach query failed: 502' })
+  })
+
+  // Review of #1147: an agent that never answers held the step for the relay's whole reach deadline (15 s and more).
+  it('gives up on a reach the device never answers at the selector\'s deadline, and taps the centre unchecked', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    driver.reach = vi.fn((_targets: UIElement[], signal?: AbortSignal) => new Promise<ReachResult[]>((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new TransientQueryError('reach query failed: aborted')))
+    }))
+    const started = Date.now()
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    // Not under the floor that leaves a late element time to be asked, and nowhere near the relay's own deadline.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_900)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  }, 10_000)
+
+  // Review of #1152: a device that said the row was covered and then went quiet had the covered centre tapped.
+  it('does not tap a centre the device said was covered when it then cannot answer', async () => {
+    for (const quiet of [
+      async () => { throw new TransientQueryError('reach query failed: aborted') },
+      async () => [{ state: 'unknown', reason: 'no answer' } as ReachResult],
+    ]) {
+      const driver = withReach(reachable([0.1, 0.885]))
+      let calls = 0
+      driver.reach = vi.fn(async () => (calls++ === 0 ? [{ state: 'occluded', by: 'Button Hard' } as ReachResult] : quiet()))
+      const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 500 })
+      expect(result.steps[0]).toMatchObject({ status: 'failed' })
+      expect(result.steps[0]!.message).toContain('covered by Button Hard')
+      expect(result.failureKind).toBe('product')
+      expect(driver.calls).toEqual([])
+    }
+  })
+
+  // Review of #1152: one point reached away from the centre does not make the centre safe to tap when the device then
+  // goes quiet; one reached at the centre does.
+  it('does not tap the centre after a point reached only away from it, and does after one at it', async () => {
+    const offCentre = withReach(reachable([0.1, 0.885]))
+    let n = 0
+    offCentre.reach = vi.fn(async () => [n++ === 0 ? { state: 'occluded', by: 'Button Hard' } as ReachResult : n === 2 ? reachable([0.1, 0.885]) : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const failed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), offCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(failed.steps[0]).toMatchObject({ status: 'failed' })
+    expect(failed.steps[0]!.message).toContain('reached only away from its centre')
+    expect(offCentre.calls).toEqual([])
+    const atCentre = withReach(reachable([0.5, 0.909]))
+    let m = 0
+    // Moved since the read (another frame), so one answer does not confirm it and the second round is asked.
+    const moved: ReachResult = { state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, y: 0.875 } }
+    atCentre.reach = vi.fn(async () => [m++ === 0 ? moved : { state: 'unknown', reason: 'no answer' } as ReachResult])
+    const passed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), atCentre, { ...OPTS, defaultTimeoutMs: 500 })
+    expect(passed.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked' })
+    expect(atCentre.calls).toEqual([['tap', 0.5, 0.909]])
+  })
+
+  // Food Truck through the relay: a reach took 1.7–2.1 s and a tree read 0.8–3.4 s, and the second round (read, reach)
+  // ran the step past its 10 s. An element reached at its centre, in the frame the read just before found it in, has
+  // held still across two independent reads already.
+  it('takes one answer reached at the centre, in the frame the read found it in, without a second round', async () => {
+    const driver = withReach(reachable([0.5, 0.909], true))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'verified' })
+    expect(driver.reach).toHaveBeenCalledTimes(1)
+    expect(driver.queryUITree).toHaveBeenCalledTimes(1)
+  })
+
+  // A cover sliding in over a still row (a sheet, a toast) leaves the row's frame as it was while the point a touch
+  // reaches moves: only the centre, where nothing covers it, is taken on one answer (design review).
+  it('asks a second round for an answer reached away from the centre, or in a frame the read did not see', async () => {
+    const elsewhere = (edge: Partial<UIElement['frame']>): ReachResult => ({ state: 'reachable', point: [0.5, 0.909], atCentre: true, frame: { ...row.frame, ...edge } })
+    for (const first of [
+      reachable([0.1, 0.885]),
+      elsewhere({ x: 0.01 }), elsewhere({ y: 0.875 }), elsewhere({ width: 0.98 }), elsewhere({ height: 0.05 }),
+    ]) {
+      const driver = withReach(first, reachable([0.2, 0.9]), reachable([0.2, 0.9]))
+      await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+      expect(driver.calls).toEqual([['tap', 0.2, 0.9]])
+    }
+  })
+
+  // "kept moving" on a screen where nothing moved: Food Truck's points agreed every time, and the step ran out of time
+  // between a slow read and a slow reach. Said only when two points did disagree.
+  it('says the element kept moving only when two points it was reached at disagreed', async () => {
+    const moving = withReach(reachable([0.1, 0.8]))
+    let y = 0.8
+    moving.reach = vi.fn(async () => [reachable([0.1, (y += 0.01)])])
+    const failed = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), moving, { ...OPTS, defaultTimeoutMs: 300 })
+    expect(failed.steps[0]!.message).toBe('"Row 13" kept moving, so no touch could be placed on it')
+  })
+
+  it('says the device was too slow to confirm, not that it moved, when the time ran out on agreeing answers', async () => {
+    const slow = withReach(reachable([0.1, 0.885]))
+    // The first answer lands past the step's deadline (a reach is given at least REACH_FLOOR_MS, 2 s).
+    slow.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 200)); return [reachable([0.1, 0.885])] })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), slow, { ...OPTS, defaultTimeoutMs: 150 })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
+    const m = /^"Row 13" was reached, but the device answered too slowly to confirm the point before the timeout \(a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![1])).toBeGreaterThanOrEqual(0.2)
+    expect(slow.calls).toEqual([])
+  })
+
+  // Design review: the likeliest Food Truck path — the read after the wait ran out of time — said "kept moving" too.
+  it('says the device was too slow when the read again runs out, after one answer', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    let reads = 0
+    driver.queryUITree = vi.fn(async () => {
+      if (reads++ === 0) return [row]
+      await new Promise((r) => setTimeout(r, 150))
+      throw new TransientQueryError('ui-tree query failed: The operation was aborted due to timeout')
+    })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 1, defaultTimeoutMs: 40 })
+    // The read is what ran out here, not the reach, and the message says so (pre-PR review).
+    const m = /a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![2])).toBeGreaterThanOrEqual(0.1)
+    expect(result.steps[0]!.message).not.toContain('kept moving')
+    expect(driver.calls).toEqual([])
+  })
+
+  // CodeRabbit on #1163: the read reported was the whole selector wait, so an element that appeared late after quick
+  // reads read as one slow read. Only the last tree query counts.
+  it('reports the last tree query, not the wait for the element to appear', async () => {
+    const driver = withReach(reachable([0.1, 0.885]))
+    let reads = 0
+    driver.queryUITree = vi.fn(async () => (reads++ < 30 ? [] : [row]))
+    // The element appears after ~0.3 s of quick reads; the first answer lands past the 0.7 s deadline.
+    driver.reach = vi.fn(async () => { await new Promise((r) => setTimeout(r, 600)); return [reachable([0.1, 0.885])] })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { pollIntervalMs: 10, defaultTimeoutMs: 700 })
+    const m = /a reach took (\d+\.\d) s, a read of the screen (\d+\.\d) s\)$/.exec(result.steps[0]!.message ?? '')
+    expect(m).not.toBeNull()
+    expect(Number(m![2])).toBe(0)
+  })
+
+  it('reads again while it is covered, and taps once it is not', async () => {
+    const driver = withReach({ state: 'occluded', by: 'Button Hard' }, reachable([0.5, 0.86]), reachable([0.5, 0.86]))
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+    expect(driver.calls).toEqual([['tap', 0.5, 0.86]])
+    expect(result.status).toBe('passed')
+  })
+
+  it.each([
+    [{ state: 'occluded', by: 'Button Hard' } as ReachResult, '"Row 13" is covered by Button Hard: a touch on it would land on that instead'],
+    [{ state: 'offscreen' } as ReachResult, '"Row 13" is not on the screen'],
+    [{ state: 'missing', candidates: 2 } as ReachResult, '"Row 13" was not where the screen was read (2 near it)'],
+  ])('fails, touching nothing, when it stays %j', async (answer, message) => {
+    const driver = withReach(answer)
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([])
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'product' })
+    expect(result.steps[0]!.message).toBe(message)
+  })
+
+  it('taps the centre when the device cannot judge, and says the tap was not checked', async () => {
+    const driver = withReach({ state: 'unknown', reason: 'this relay predates reach' })
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    expect(result.steps[0]).toMatchObject({ status: 'passed', reach: 'unchecked', reachNote: 'this relay predates reach' })
+  })
+
+  it('taps the centre with a driver that cannot ask, saying so', async () => {
+    const driver = fakeDriver([[row]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: "Row 13"\n'), driver, OPTS)
+    expect(driver.calls).toEqual([['tap', 0.5, 0.909]])
+    expect(result.steps[0]).toMatchObject({ reach: 'unchecked' })
+  })
+
+  it('holds and pinches where it reaches too, and calls a written point delivered', async () => {
+    const driver = withReach(reachable([0.4, 0.5]), reachable([0.4, 0.5]))
+    const result = await runFlow(flowOf('steps:\n  - longPressOn: { on: "Row 13", durationMs: 800 }\n  - tapOn: [0.2, 0.3]\n  - inputText: hi\n'), driver, OPTS)
+    expect(driver.calls[0]).toEqual(['longPress', 0.4, 0.5, 800])
+    expect(result.steps.map((st) => st.reach)).toEqual(['verified', 'delivered', undefined])
+  })
+})
 
 describe('runFlow', () => {
   // #1047. The step's name is what a run record and a failure message show: argument values yes, env values never.
@@ -152,6 +547,113 @@ describe('runFlow', () => {
     expect(result.steps[0]).not.toHaveProperty('suggestions')
   })
 
+  // Verify on Android 16: a piece dropped in the wrong slot springs back, and the next swipe on it grabbed empty space
+  // while it was still travelling home. A point names no element to wait for, so it waits for the screen to stop.
+  describe('a point waits for the screen to stop moving', () => {
+    const SLOW = { pollIntervalMs: 500, defaultTimeoutMs: 10_000 }
+    const piece = (y: number) => [el({ label: 'Piece', frame: { x: 0.7, y, width: 0.1, height: 0.05 } })]
+    async function swipeAfter(read: (n: number) => UIElement[] | Promise<UIElement[]>) {
+      vi.useFakeTimers()
+      try {
+        const t0 = Date.now()
+        const queries: number[] = []
+        let swipeAt = -1
+        const driver = fakeDriver([])
+        driver.queryUITree = vi.fn(async () => { queries.push(Date.now() - t0); return read(queries.length - 1) })
+        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - swipe: { from: [0.75, 0.8], to: [0.5, 0.3] }\n'), driver, SLOW)
+        await vi.advanceTimersByTimeAsync(10_000)
+        return { result: await run, queries, swipeAt }
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+
+    it('swipes once two reads a quarter of a second apart find everything where it was', async () => {
+      // Travelling home for three reads, then still.
+      const { result, queries, swipeAt } = await swipeAfter((n) => piece(n < 3 ? 0.5 + n * 0.1 : 0.8))
+      expect(result.status).toBe('passed')
+      expect(queries).toEqual([0, 100, 200, 300, 400, 500, 600])
+      expect(swipeAt).toBe(600)
+    })
+
+    // A spring stops for a moment at its turning point: two reads close together there are not a still screen.
+    it('does not take two close reads at a spring\'s turning point for still', async () => {
+      const ys = [0.5, 0.5, 0.6, 0.8]
+      const { swipeAt } = await swipeAfter((n) => piece(ys[Math.min(n, ys.length - 1)]!))
+      expect(swipeAt).toBeGreaterThan(300)
+    })
+
+    // A spring's slow tail moves less than a hundredth of the screen between reads; it is still moving.
+    it('sees movement smaller than a hundredth of the screen', async () => {
+      const ys = [0.5, 0.504, 0.508, 0.512, 0.516, 0.52]
+      const { swipeAt } = await swipeAfter((n) => piece(ys[Math.min(n, ys.length - 1)]!))
+      expect(swipeAt).toBeGreaterThanOrEqual(800)
+    })
+
+    it('waits before a plain scroll as before a swipe', async () => {
+      vi.useFakeTimers()
+      try {
+        const t0 = Date.now()
+        let n = 0
+        let swipeAt = -1
+        const driver = fakeDriver([])
+        driver.queryUITree = vi.fn(async () => piece(n++ < 3 ? 0.5 + n * 0.1 : 0.8))
+        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - scroll: down\n'), driver, SLOW)
+        await vi.advanceTimersByTimeAsync(10_000)
+        await run
+        expect(swipeAt).toBeGreaterThanOrEqual(500)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // CodeRabbit on #1193: a slow first read does not count towards the span; the observations must be apart.
+    it('measures the span from the first read\'s answer, not its asking', async () => {
+      const { swipeAt, queries } = await swipeAfter(async (n) => {
+        if (n === 0) await new Promise((r) => setTimeout(r, 200))
+        return piece(0.8)
+      })
+      // Answered at 200; the next read asked at 300 is only 100 ms after it, so it takes reads until 450 or later.
+      expect(queries[1]).toBe(300)
+      expect(swipeAt).toBeGreaterThanOrEqual(450)
+    })
+
+    it('goes on after 3 s on a screen that never stops, and on a read that never answers', async () => {
+      const moving = await swipeAfter((n) => piece(0.1 + (n % 50) * 0.01))
+      expect(moving.result.status).toBe('passed')
+      expect(moving.swipeAt).toBeGreaterThanOrEqual(3000)
+      expect(moving.swipeAt).toBeLessThan(3200)
+      const hanging = await swipeAfter(() => new Promise<UIElement[]>(() => {}))
+      expect(hanging.result.status).toBe('passed')
+      expect(hanging.swipeAt).toBe(3000)
+    })
+
+    // Review: "not up yet" is a screen mid-transition, when waiting matters most; anything else is no reason to wait.
+    it('reads again after a read that says try again, and goes on at once after one that cannot be made', async () => {
+      const busy = await swipeAfter((n) => { if (n < 3) throw new TransientQueryError('agent busy'); return piece(0.8) })
+      expect(busy.result.status).toBe('passed')
+      expect(busy.queries.length).toBeGreaterThan(4)
+      expect(busy.swipeAt).toBeGreaterThan(300)
+      const gone = await swipeAfter(() => { throw new Error('session not found') })
+      expect(gone.result.status).toBe('passed')
+      expect(gone.swipeAt).toBe(0)
+    })
+
+    // Review: a clock or a progress label changes without moving; it is no reason to wait out the cap.
+    it('takes a screen whose only change is a label for still', async () => {
+      const { swipeAt } = await swipeAfter((n) => [el({ label: `${n}s`, frame: { x: 0.1, y: 0.1, width: 0.2, height: 0.05 } })])
+      expect(swipeAt).toBeLessThan(1000)
+    })
+
+    it('waits before a point tap too', async () => {
+      const driver = fakeDriver([[el({ label: 'Save' })]])
+      await runFlow(flowOf('steps:\n  - tapOn: [0.2, 0.5]\n'), driver, OPTS)
+      expect(vi.mocked(driver.queryUITree).mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
   describe('launchApp waits for the app\'s screen to hold still', () => {
     const SLOW = { pollIntervalMs: 500, defaultTimeoutMs: 10_000 }
     // Runs a flow under fake timers. `reads` answers each tree query in turn (the last repeats); a function is
@@ -169,8 +671,9 @@ describe('runFlow', () => {
           const r = reads[Math.min(i++, reads.length - 1)]!
           return typeof r === 'function' ? r() : r
         })
-        driver.swipe = vi.fn(async () => { swipeAt = Date.now() - t0 })
-        const run = runFlow(flowOf('steps:\n  - launchApp\n  - scroll: down\n'), driver, SLOW)
+        // A key press reads nothing itself (a scroll now waits for a still screen of its own), so the reads are launchApp's.
+        driver.pressKey = vi.fn(async () => { swipeAt = Date.now() - t0 })
+        const run = runFlow(flowOf('steps:\n  - launchApp\n  - pressKey: Enter\n'), driver, SLOW)
         await vi.advanceTimersByTimeAsync(20_000)
         const result = await run
         return { result, queries, swipeAt }
@@ -323,9 +826,10 @@ describe('runFlow', () => {
   it('names each step for watchers without what it types', async () => {
     const marks: Record<string, unknown>[] = []
     const driver = fakeDriver([[el({ label: 'ok' })]])
-    await runFlow(flowOf('steps:\n  - inputText: "hunter2"\n  - openUrl: "myapp://reset?token=s3cret"\n  - pressKey: KeyA\n  - pressKey: NumpadComma\n  - pressKey: NumpadStar\n  - pressKey: Enter\n  - tapOn: "ok"\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
+    await runFlow(flowOf('steps:\n  - inputText: "hunter2"\n  - openUrl: "myapp://reset?token=s3cret"\n  - pressKey: KeyA\n  - pressKey: NumpadComma\n  - pressKey: NumpadStar\n  - pressKey: Enter\n  - pressKey: { code: KeyQ, modifiers: [shift] }\n  - pressKey: { code: ArrowLeft, modifiers: [alt] }\n  - tapOn: "ok"\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
     expect(marks.filter((m) => m['phase'] === 'start').map((m) => m['label'])).toEqual([
-      'inputText (7 chars)', 'openUrl', 'pressKey(character)', 'pressKey(character)', 'pressKey(character)', 'pressKey(Enter)', 'tapOn("ok")',
+      'inputText (7 chars)', 'openUrl', 'pressKey(character)', 'pressKey(character)', 'pressKey(character)', 'pressKey(Enter)',
+      'pressKey(shift+character)', 'pressKey(alt+ArrowLeft)', 'tapOn("ok")',
     ])
     expect(JSON.stringify(marks.map((m) => m['label']))).not.toMatch(/hunter2|s3cret/)
   })
@@ -539,6 +1043,464 @@ describe('runFlow', () => {
       ['swipe', [0.5, 0.7], [0.5, 0.3], 300],
       ['swipe', [0.5, 0.3], [0.5, 0.7], 300],
     ])
+  })
+
+  describe('scroll until an element is on screen', () => {
+    const row = (label: string, y: number) => el({ label, role: 'cell', frame: { x: 0, y, width: 1, height: 0.05 } })
+    const swipes = (driver: ReturnType<typeof fakeDriver>) => driver.calls.filter((c) => c[0] === 'swipe')
+
+    it('sends no swipe when the element is already on screen', async () => {
+      const driver = fakeDriver([[row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toEqual([])
+      expect(result.steps[0]!.name).toBe('scroll(down until "Row 16")')
+    })
+
+    it('swipes the scroll gesture until it appears, in the given direction', async () => {
+      const driver = listDriver([[row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      // Drags held still before the lift: a fling's glide carried an iOS list past the element (measured).
+      expect(swipes(driver)).toEqual([['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150], ['swipe', [0.5, 0.3], [0.5, 0.7], 300, 150]])
+    })
+
+    // A pager whose page is taller than the drag snaps a held drag back: the step after one that moved nothing flings.
+    it('flings the step after two that left the screen as it was', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Pre-PR review: a drag the device dropped mid-list reads as "moved nothing" once; a fling after it could glide past.
+    it('drags again after a single step that moved nothing', async () => {
+      const driver = listDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
+    })
+
+    // #1125: a row under a tab bar is inside the screen, and its centre is the tab. It is not in view until the device
+    // reaches it at its centre, so the scroll goes on.
+    it('keeps scrolling while the element is reached only off its centre', async () => {
+      const driver = fakeDriver([[row('Row 13', 0.9)], [row('Row 13', 0.5)]])
+      let reads = 0
+      driver.reach = vi.fn(async (targets: UIElement[]) => targets.map((t): ReachResult => (reads++ === 0
+        ? { state: 'reachable', point: [0.1, 0.91], atCentre: false, frame: t.frame }
+        : { state: 'reachable', point: [0.5, 0.525], atCentre: true, frame: t.frame })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 13" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(1)
+    })
+
+    it('stops as before when the device cannot be asked this time', async () => {
+      const driver = fakeDriver([[row('Row 13', 0.9)]])
+      driver.reach = vi.fn(async () => { throw new TransientQueryError('reach query failed: 504') })
+      expect((await runFlow(flowOf('steps:\n  - scroll: { until: "Row 13" }\n'), driver, OPTS)).status).toBe('passed')
+      expect(swipes(driver)).toEqual([])
+    })
+
+    it('stops as before when the device cannot judge', async () => {
+      const driver = fakeDriver([[row('Row 13', 0.9)]])
+      driver.reach = vi.fn(async (targets: UIElement[]) => targets.map((): ReachResult => ({ state: 'unknown', reason: 'old agent' })))
+      expect((await runFlow(flowOf('steps:\n  - scroll: { until: "Row 13" }\n'), driver, OPTS)).status).toBe('passed')
+      expect(swipes(driver)).toEqual([])
+    })
+
+    // The relay refuses more than 64 targets in one reach, and the one in view may be the last of them.
+    it('asks about many matches in batches the relay takes, down to the last', async () => {
+      const many = Array.from({ length: 70 }, (_, i) => row('Add', 0.1 + i * 0.01))
+      const driver = fakeDriver([many])
+      const sizes: number[] = []
+      driver.reach = vi.fn(async (targets: UIElement[]) => {
+        sizes.push(targets.length)
+        return targets.map((t): ReachResult => t === many[69]
+          ? { state: 'reachable', point: [0.5, 0.815], atCentre: true, frame: t.frame }
+          : { state: 'occluded' })
+      })
+      expect((await runFlow(flowOf('steps:\n  - scroll: { until: "Add" }\n'), driver, OPTS)).status).toBe('passed')
+      expect(sizes).toEqual([64, 6])
+      expect(swipes(driver)).toEqual([])
+    })
+
+    // iOS E2E: the fling was still carrying the list when Row 17 came into view; the tap after landed on Row 18, and on
+    // iOS a tap on a moving list only stops it, so the step passed with nothing tapped.
+    it('waits for what it found to stop moving before the next step, once it has swiped', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 16', 0.6)], [row('Row 16', 0.5)], [row('Row 16', 0.4)], [row('Row 16', 0.4)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n  - tapOn: "Row 16"\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(driver.calls.find((c) => c[0] === 'tap')).toEqual(['tap', 0.5, 0.425])
+    })
+
+    // The agents clip frames to the screen, so a row cut by the edge content enters from ends exactly on it — and a
+    // tap on its center can land on a bar drawn over that edge.
+    it('keeps scrolling past a match cut by the edge the list scrolls in from', async () => {
+      const cut = el({ label: 'Row 16', role: 'cell', frame: { x: 0, y: 0.97, width: 1, height: 0.03 } })
+      const driver = fakeDriver([[row('Row 1', 0.3), cut], [row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(1)
+    })
+
+    it('judges the cut by the direction: scrolling up, the top edge', async () => {
+      const top = el({ label: 'Header', frame: { x: 0, y: 0, width: 1, height: 0.04 } })
+      const bottom = el({ label: 'Header', frame: { x: 0, y: 0.96, width: 1, height: 0.04 } })
+      const up = fakeDriver([[top], [row('Header', 0.3)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Header" }\n'), up, OPTS)).status).toBe('passed')
+      expect(swipes(up)).toHaveLength(1)
+      const down = fakeDriver([[bottom]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: up, until: "Header" }\n'), down, OPTS)).status).toBe('passed')
+      expect(swipes(down)).toHaveLength(0)
+    })
+
+    it('judges the cut by the direction: left and right, the side edges', async () => {
+      const at = (x: number) => el({ label: 'Tab', frame: { x, y: 0.1, width: 0.04, height: 0.05 } })
+      const right = fakeDriver([[at(0.96)], [at(0.5)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), right, OPTS)).status).toBe('passed')
+      expect(swipes(right)).toEqual([['swipe', [0.8, 0.5], [0.2, 0.5], 300, 150]])
+      const left = fakeDriver([[at(0)], [at(0.5)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: left, until: "Tab" }\n'), left, OPTS)).status).toBe('passed')
+      expect(swipes(left)).toEqual([['swipe', [0.2, 0.5], [0.8, 0.5], 300, 150]])
+      const notCut = fakeDriver([[at(0)]])
+      expect((await runFlow(flowOf('steps:\n  - scroll: { direction: right, until: "Tab" }\n'), notCut, OPTS)).status).toBe('passed')
+      expect(swipes(notCut)).toEqual([])
+    })
+
+    it('takes a match pinned to the entering edge while something else keeps changing', async () => {
+      const cta = el({ label: 'Continue', frame: { x: 0, y: 0.92, width: 1, height: 0.08 } })
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Synced ${n++}s ago`, 0.1), cta])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Continue", timeout: 5 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      // Nothing moved either: a fling is tried before the pinned match is taken (a pager may have snapped drags back).
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    it('does not take a match larger than the screen for one that stays put: clipped, it reads the same anywhere', async () => {
+      const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      // A row that moves up with each swipe keeps it from reading as the end, so only the spanning match could stop it.
+      const driver = listDriver([...[0, 1, 2, 3, 4].map((k) => [row('Synced', 0.6 - k * 0.05), big]), [row('Target', 0.4)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 5 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(5)
+    })
+
+    it('counts a match as still only while it stays put: one that moves again is being scrolled in', async () => {
+      const cut = (y: number) => el({ label: 'Row 16', role: 'cell', frame: { x: 0, y, width: 1, height: 1 - y } })
+      const driver = fakeDriver([[cut(0.97)], [cut(0.97)], [cut(0.96)], [cut(0.96)], [row('Row 16', 0.5)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(4)
+    })
+
+    it('takes a cut match at the end of the list, where scrolling cannot bring more of it', async () => {
+      const cut = el({ label: 'Footer', frame: { x: 0, y: 0.98, width: 1, height: 0.02 } })
+      const driver = fakeDriver([[row('Row 1', 0.3), cut]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Footer" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // CodeRabbit on #1190: a countdown on a pager that snaps held drags back changes the screen every read, and the
+    // search must still see that nothing moved and fling to the next page.
+    it('flings on a pager whose page snaps back though a countdown on it keeps changing', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const page = [row('Page 1', 0.3), row(`Ends in ${10 - n}s`, 0.5)]
+        n++
+        return driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0) ? [row('Page 2', 0.3), row('Target', 0.5)] : page
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Design review: a countdown that does not tick between every two reads is still learned, and the pager flings.
+    it('flings on a pager whose countdown ticks on a clock, not on every read', async () => {
+      const driver = fakeDriver([[]])
+      // A clock: it ticks every 2 ms, faster than the confirming read's wait (three 1 ms polls) and slower than a read.
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const tick = Math.floor(Date.now() / 2) % 30
+        return driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+          ? [row('Page 2', 0.3), row('Target', 0.5)] : [row('Page 1', 0.3), row(`Ends in ${30 - tick}s`, 0.5)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).at(-1)![4]).toBe(0)
+    })
+
+    // Design review: the read with no gesture before it still looks for the element (a lazy load landed in it), so
+    // the next drag does not carry it away.
+    it('takes the element from the read that confirms, with no drag after it', async () => {
+      const driver = fakeDriver([[]])
+      let afterSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        if (!driver.calls.some((c) => c[0] === 'swipe')) return [row('Row 1', 0.3)]
+        return afterSwipe++ === 0 ? [row('Loading', 0.3)] : [row('Target', 0.2)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(1)
+    })
+
+    // CodeRabbit on #1190: a paged list reusing its row ids and places is moving; the search drags on to page 5.
+    it('keeps dragging a paged list that reuses its row ids and places', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => el({ role: 'cell', label: `Row ${n * 3 + i}`, identifier: `row.${i}`, frame: { x: 0, y: 0.2 + i * 0.2, width: 1, height: 0.05 } }))
+      const driver = listDriver([page(0), page(1), page(2), page(3), [...page(4).slice(0, 2), row('Target', 0.6)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190: fixed chrome that outnumbers the rows replaced under it does not hide that the list moved.
+    it('keeps dragging when fixed chrome outnumbers the rows replaced under it', async () => {
+      const chrome = [row('Title', 0.02), row('Search', 0.08)]
+      const driver = listDriver([[...chrome, row('Row 1', 0.4)], [...chrome, row('Row 2', 0.4)], [...chrome, row('Row 3', 0.4)], [...chrome, row('Target', 0.4)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150])
+    })
+
+    // The confirming read waits three polls, so a clock ticking once a poll interval or two is seen changing in it.
+    it('waits three polls before the read that confirms', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = listDriver([page(0), page(1), [row('Target', 0.4)]])
+      const at: number[] = []
+      const read = vi.mocked(driver.queryUITree).getMockImplementation()!
+      vi.mocked(driver.queryUITree).mockImplementation(async () => { at.push(Date.now()); return read() })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, { ...OPTS, pollIntervalMs: 20 })
+      expect(result.status).toBe('passed')
+      // Read 1 is ambiguous (rows replaced in place); read 2 confirms it.
+      expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(55)
+    })
+
+    // A cut match held still is an arrival only where the device reaches it at its centre, like any other.
+    it('does not take a cut match held still that the device says is covered', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = listDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      driver.reach = vi.fn(async (els: UIElement[]) => els.map(() => ({ state: 'occluded' as const })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/does not reach it at its centre/)
+    })
+
+    // Pre-push review: a page shown as "Loading…" and then filled in changes by itself once; that is the page arriving,
+    // not a clock, and the search must not learn the rows as a region that explains the next page.
+    it('keeps dragging a paged list whose pages arrive as placeholders and fill in', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let shown = 0
+      let readsSinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; readsSinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4)]
+        return swiped > 0 && readsSinceSwipe++ === 0 ? loading : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
+    // Only what changed in both windows is learned: a clock does, a page that finishes arriving in the second does not.
+    it('learns the clock and not the rows that arrived beside it', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const loading = [0, 1, 2].map((i) => row('Loading', 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      let reads = 0
+      let shown = 0
+      let sinceSwipe = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const clock = row(`${reads++}s`, 0.9)
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        if (swiped !== shown) { shown = swiped; sinceSwipe = 0 }
+        if (swiped >= 5) return [row('Target', 0.4), clock]
+        return [...(swiped > 0 && sinceSwipe++ < 2 ? loading : page(swiped)), clock]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150, 150])
+    })
+
+    // Pre-push review: a failed read while a read is being confirmed sends no gesture; the next read confirms instead.
+    it('sends no gesture after a failed read while confirming', async () => {
+      const page = (n: number) => [0, 1, 2].map((i) => row(`Row ${n * 3 + i}`, 0.2 + i * 0.2))
+      const driver = fakeDriver([[]])
+      const swipedAtRead: number[] = []
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        const swiped = driver.calls.filter((c) => c[0] === 'swipe').length
+        swipedAtRead.push(swiped)
+        if (swipedAtRead.length === 3) throw new TransientQueryError('agent busy')
+        return swiped >= 2 ? [row('Target', 0.4)] : page(swiped)
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      // Read 2 is ambiguous (rows replaced in place), read 3 fails, read 4 confirms it: no drag before either.
+      expect(swipedAtRead.slice(1, 4)).toEqual([1, 1, 1])
+    })
+
+    // CodeRabbit on #1190: at the end, a match is taken only where the device reaches it at its centre.
+    it('fails at the end of the list with a match the device says is covered, naming it', async () => {
+      const big = el({ label: 'Target', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const driver = listDriver([[row('Row 29', 0.3), big]])
+      driver.reach = vi.fn(async (els: UIElement[]) => els.map(() => ({ state: 'occluded' as const })))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/on screen but the device does not reach it at its centre/)
+    })
+
+    // The other side of the rule below: rows moved under a fixed button, so no fling is needed before taking it.
+    it('takes a cut match fixed to the bottom without a fling while the rows above it move', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const page = (shift: number) => [0.2, 0.4, 0.6].map((y) => row('Item', y - shift))
+      const driver = fakeDriver([[...page(0), cut], [...page(0.1), cut], [...page(0.2), cut]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): every position of a shared label is compared, so two still `Item` cells
+    // read as still and the pager gets its fling.
+    it('flings on a still pager whose cells share a label', async () => {
+      // A device need not list the cells in the same order each read.
+      let n = 0
+      const page1 = () => (n++ % 2 === 0 ? [row('Item', 0.2), row('Item', 0.6)] : [row('Item', 0.6), row('Item', 0.2)])
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+        ? [row('Item', 0.2), row('Target', 0.6)] : page1()))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Every position counts, not one per label: rows sharing a label moved while the last of them (a footer) did not.
+    it('keeps dragging while rows that share a label move, though one of them stays', async () => {
+      const page = (shift: number) => [row('Item', 0.2 - shift), row('Item', 0.4 - shift), row('Item', 0.9)]
+      const driver = listDriver([page(0), page(0.05), page(0.1), page(0.15), [...page(0.15), row('Target', 0.6)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): a virtualized list that moved by whole rows under a fixed header is moving;
+    // mostly new elements are new content, not text that changed in place.
+    it('keeps dragging a list whose rows are all replaced under a fixed header', async () => {
+      const page = (n: number) => [row('Header', 0.05), ...[0.3, 0.5, 0.7].map((y, i) => row(`Row ${n * 3 + i}`, y))]
+      const driver = listDriver([page(0), page(1), page(2), page(3), [...page(3), row('Target', 0.9)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 150])
+    })
+
+    // CodeRabbit on #1190 (second round): the end of a list is judged by positions too, so a clock on it does not
+    // keep the search flinging until the timeout. A minority of elements whose text changed in place is no progress.
+    it('fails at the end of a list that carries a clock, before the timeout', async () => {
+      const driver = fakeDriver([[]])
+      let n = 0
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row('Row 28', 0.3), row('Row 29', 0.5), row(`${n++}s ago`, 0.9)])
+      const started = Date.now()
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 99" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+      expect(Date.now() - started).toBeLessThan(5_000)
+    })
+
+    // CodeRabbit on #1190: on a pager that snaps held drags back, a cut target stays where it is; that is no arrival
+    // until a fling was tried.
+    it('tries a fling before taking a cut match that only a snapped-back pager kept still', async () => {
+      const cut = el({ label: 'Target', frame: { x: 0, y: 0.95, width: 1, height: 0.05 } })
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => (driver.calls.some((c) => c[0] === 'swipe' && c[4] === 0)
+        ? [row('Page 2', 0.3), row('Target', 0.5)] : [row('Page 1', 0.3), cut]))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Target", timeout: 10 } }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 0])
+    })
+
+    // Rows that share a label scroll by moving, not by changing what the screen holds.
+    it('does not take a screen whose elements only moved for the end of the list', async () => {
+      const page = (shift: number) => [0.2, 0.4, 0.6, 0.8].map((y) => row('Item', y - shift))
+      const driver = fakeDriver([page(0), page(0.1), page(0.15), [...page(0.15), row('Done', 0.9)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Done" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    // assertVisible's rule (suggest.ts): a tapOn line offered for a check that something is there turns a regression green.
+    it('offers no selector suggestions when it fails', async () => {
+      const driver = fakeDriver([[row('Checkout later', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Checkout now" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.steps[0]!.suggestions).toBeUndefined()
+    })
+
+    // Two unchanged reads, not one: a single one can follow a swipe the app dropped.
+    it('fails as the product\'s at the end of the list, before the timeout', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 30', 0.3)], [row('Row 30', 0.3)], [row('Row 30', 0.3)]])
+      const started = Date.now()
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 99" }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureKind).toBe('product')
+      expect(result.failureMessage).toMatch(/scrolled down to the end without "Row 99" coming on screen/)
+      // Three unchanged reads end it: two drags, then the fling a pager would need, then the end.
+      expect(swipes(driver).map((c) => c[4])).toEqual([150, 150, 150, 0])
+      expect(Date.now() - started).toBeLessThan(5_000)
+    })
+
+    it('two unchanged reads that are not in a row are not the end', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 8', 0.3)], [row('Row 8', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    it('one unchanged read after a swipe is not the end', async () => {
+      const driver = fakeDriver([[row('Row 1', 0.3)], [row('Row 1', 0.3)], [row('Row 16', 0.3)]])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 16" }\n'), driver, OPTS)
+      expect(result.status).toBe('passed')
+    })
+
+    // A dump takes ~2.5 s on an emulator: the default step wait would allow about three swipes.
+    it('waits past the default step timeout when until names none', async () => {
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 3))
+        return [row(`Row ${driver.calls.filter((c) => c[0] === 'swipe').length}`, 0.3)]
+      })
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: "Row 15" }\n'), driver, OPTS) // OPTS waits 20 ms
+      expect(result.status).toBe('passed')
+      expect(swipes(driver)).toHaveLength(15)
+    })
+
+    it('fails at the selector\'s timeout while the screen keeps changing', async () => {
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockImplementation(async () => [row(`Row ${driver.calls.filter((c) => c[0] === 'swipe').length}`, 0.3)])
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Row 99999", timeout: 0.05 } }\n'), driver, OPTS)
+      expect(result.status).toBe('failed')
+      expect(result.failureKind).toBe('product')
+      expect(result.failureMessage).toMatch(/on screen after scrolling down for 0.05s/)
+    })
+
+    // A failed read says nothing about where the list is; swiping blind could carry the element past.
+    it('does not swipe after a read that failed, and fails as the environment\'s with no screen seen', async () => {
+      const driver = fakeDriver([[]])
+      vi.mocked(driver.queryUITree).mockRejectedValue(new TransientQueryError('agent busy'))
+      const result = await runFlow(flowOf('steps:\n  - scroll: { until: { label: "Row 16", timeout: 0.05 } }\n'), driver, OPTS)
+      expect(result.failureKind).toBe('environment')
+      expect(swipes(driver)).toEqual([])
+    })
+  })
+
+  it('passes a pressKey step\'s modifiers, and a plain press with no second argument', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pressKey: { code: KeyA, modifiers: [shift, meta] }\n  - pressKey: Enter\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(vi.mocked(driver.pressKey).mock.calls).toEqual([['KeyA', ['shift', 'meta']], ['Enter']])
+    expect(result.steps.map((s) => s.name)).toEqual(['pressKey(shift+meta+KeyA)', 'pressKey(Enter)'])
   })
 
   it('clearState uses the flow appId, inline bundle id wins', async () => {
@@ -800,5 +1762,289 @@ describe('runFlow onStep (the run video\'s timeline)', () => {
       { index: 1, name: expect.any(String), phase: 'start', label: 'openUrl' },
       { index: 1, name: expect.any(String), phase: 'end', status: 'failed' },
     ])
+  })
+})
+
+describe('runFlow — hardware buttons, long press and pinch', () => {
+  it('presses a button by name', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pressButton: home\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['pressButton', 'home']])
+  })
+
+  it('waits for the element, then holds its center for the step\'s time', async () => {
+    const driver = fakeDriver([[], [el({ label: 'Save' })]])
+    const result = await runFlow(flowOf('steps:\n  - longPressOn: { on: "Save", durationMs: 1500 }\n'), driver, { ...OPTS, defaultTimeoutMs: 1000 })
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['longPress', 0.5, 0.55, 1500]])
+    expect(result.steps[0]!.name).toBe('longPressOn("Save", 1500ms)')
+  })
+
+  // The scale is what the person meant, so it is kept exactly; the spacing is what adapts to the screen.
+  it('pinches about the element\'s center by exactly the scale, fingers mirrored and on the screen', async () => {
+    for (const [yaml, scale] of [['scale: 2', 2], ['scale: 0.5', 0.5], ['scale: 10', 10]] as const) {
+      const driver = fakeDriver([[el({ label: 'Map', frame: { x: 0.2, y: 0.3, width: 0.6, height: 0.4 } })]])
+      const result = await runFlow(flowOf(`steps:\n  - pinch: { on: Map, ${yaml} }\n`), driver, OPTS)
+      expect(result.status).toBe('passed')
+      const [, start, end, ms] = driver.calls[0] as [string, PinchFingers, PinchFingers, number]
+      expect(ms).toBe(500)
+      const gap = (f: PinchFingers) => Math.hypot(f[1][0] - f[0][0], f[1][1] - f[0][1])
+      expect(gap(end) / gap(start)).toBeCloseTo(scale, 6)
+      for (const f of [start, end]) {
+        expect((f[0][0] + f[1][0]) / 2).toBeCloseTo(0.5, 6)
+        expect((f[0][1] + f[1][1]) / 2).toBeCloseTo(0.5, 6)
+        for (const [x, y] of f) for (const v of [x, y]) expect(v >= 0 && v <= 1).toBe(true)
+      }
+    }
+  })
+
+  it('fits the fingers to a point near an edge by spreading them along the other axis', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pinch: { on: [0.95, 0.5], scale: 3 }\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    const [, start, end] = driver.calls[0] as [string, PinchFingers, PinchFingers]
+    for (const f of [start, end]) for (const [x, y] of f) {
+      expect(x).toBeCloseTo(0.95, 6)
+      expect(y >= 0 && y <= 1).toBe(true)
+    }
+  })
+
+  it('fails a pinch it cannot fit on the screen, and says why, without touching the device', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - pinch: { on: [0.99, 0.01], scale: 2 }\n'), driver, OPTS)
+    expect(result.status).toBe('failed')
+    expect(result.failureMessage).toMatch(/too close to the edge of the screen/)
+    expect(driver.calls).toEqual([])
+  })
+
+  it('names the steps for watchers', async () => {
+    const marks: Record<string, unknown>[] = []
+    const driver = fakeDriver([[el({ label: 'Map' })]])
+    await runFlow(flowOf('steps:\n  - pressButton: volume_up\n  - longPressOn: Map\n  - pinch: { on: Map, scale: 2 }\n  - pinch: { on: [0.5, 0.5], scale: 0.5 }\n'), driver, { ...OPTS, onStep: (m) => marks.push(m) })
+    expect(marks.filter((m) => m['phase'] === 'start').map((m) => m['label'])).toEqual([
+      'pressButton(volume_up)', 'longPressOn("Map", 1000ms)', 'pinch("Map", ×2)', 'pinch([0.5,0.5], ×0.5)',
+    ])
+  })
+})
+
+// D1: a flow pressing a button the device lacks is refused before its first step, rather than answered with a press
+// that did nothing and failed one step later under the wrong name.
+describe('runFlow — a button the device lacks', () => {
+  const backFlow = 'steps:\n  - tapOn: ok\n  - pressButton: back\n  - assertVisible: Home\n'
+
+  describe('inputText { replace } (#1135)', () => {
+    const replaceFlow = 'steps:\n  - inputText: { text: "안녕", replace: true }\n'
+
+    it('selects what the field holds, then types over it', async () => {
+      const driver = fakeDriver([[]])
+      expect((await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', '안녕']])
+      expect(driver.pressKey).toHaveBeenCalledWith('KeyA', ['meta'])
+    })
+
+    it('selects before a secret that replaces, so a field read whole is not typed after what it holds', async () => {
+      const driver = fakeDriver([[]])
+      const flow = flowOf('steps:\n  - inputText: { secret: PASSWORD, replace: true }\n')
+      expect((await runFlow(flow, driver, { ...OPTS, platform: 'ios', secrets: { PASSWORD: 'pw' } })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', 'pw']])
+    })
+
+    // Android selects with Ctrl+A from Android 13 (#1135): run, and stopped only by a device that refuses the press.
+    it('selects on Android too', async () => {
+      const driver = fakeDriver([[]])
+      expect((await runFlow(flowOf(replaceFlow), driver, { ...OPTS, platform: 'android' })).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'KeyA'], ['inputText', '안녕']])
+    })
+
+    it('fails the step as the environment\'s, typing nothing, when the device cannot select', async () => {
+      for (const flow of [replaceFlow, 'steps:\n  - inputText: { secret: PASSWORD, replace: true }\n']) {
+        const driver = fakeDriver([[]])
+        vi.mocked(driver.pressKey).mockRejectedValue(new InputRefusedError('unsupported', new PlatformError('not supported')))
+        const result = await runFlow(flowOf(flow), driver, { ...OPTS, platform: 'android', secrets: { PASSWORD: 'pw' } })
+        expect(result).toMatchObject({ status: 'failed', failureKind: 'environment' })
+        expect(result.failureMessage).toMatch(/cannot select what a field holds/)
+        expect(result).not.toHaveProperty('failedBeforeRun')
+        expect(driver.inputText).not.toHaveBeenCalled()
+      }
+    })
+
+    it('presses the field\'s action for imeAction, under tapflow\'s key name', async () => {
+      const driver = fakeDriver([[]])
+      expect((await runFlow(flowOf('steps:\n  - imeAction\n'), driver, OPTS)).status).toBe('passed')
+      expect(driver.calls).toEqual([['pressKey', 'ImeAction']])
+    })
+  })
+
+  it('refuses a platform\'s missing button before anything reaches the device', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' })]])
+    const result = await runFlow(flowOf(backFlow), driver, { ...OPTS, platform: 'ios' })
+    expect(result.status).toBe('failed')
+    expect(result.failureKind).toBe('environment')
+    expect(result.failedBeforeRun).toBe(true)
+    expect(result.failureMessage).toMatch(/^pressButton\(back\): iOS has no "back" button/)
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed', 'skipped'])
+    expect(driver.calls).toEqual([])
+    expect(driver.screenshot).not.toHaveBeenCalled()
+  })
+
+  it('runs the same flow where the button exists', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' }), el({ label: 'Home' })]])
+    const result = await runFlow(flowOf(backFlow), driver, { ...OPTS, platform: 'android' })
+    expect(result.status).toBe('passed')
+    expect(result.failedBeforeRun).toBeUndefined()
+  })
+
+  it('asks an iOS device\'s chrome about a button that depends on it', async () => {
+    const has = fakeDriver([[]])
+    has.chrome = vi.fn(async () => iosChrome(chromeButton('power', 48)))
+    expect((await runFlow(flowOf('steps:\n  - pressButton: lock\n'), has, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+
+    const lacks = fakeDriver([[]])
+    lacks.chrome = vi.fn(async () => iosChrome(chromeButton('power', 0)))
+    const refused = await runFlow(flowOf('steps:\n  - pressButton: lock\n'), lacks, { ...OPTS, platform: 'ios' })
+    expect(refused.failureMessage).toMatch(/this device has no "lock" button/)
+    expect(refused.failedBeforeRun).toBe(true)
+    expect(lacks.calls).toEqual([])
+  })
+
+  it('fails as the environment when the device never says which buttons it has', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => null)
+    const result = await runFlow(flowOf('steps:\n  - pressButton: volume_up\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result.failureKind).toBe('environment')
+    expect(result.failureMessage).toMatch(/did not report its buttons/)
+    // Not the flow's fault, so not marked as one: a device that will not describe itself may be a device to leave.
+    expect(result.failedBeforeRun).toBeUndefined()
+    expect(driver.calls).toEqual([])
+  })
+
+  it('marks the press it could not check, not an earlier one that needed no checking', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => null)
+    const result = await runFlow(flowOf('steps:\n  - pressButton: home\n  - pressButton: volume_up\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed'])
+  })
+
+  // A session that ends while its chrome is awaited is a result for this flow, so the run can record it and go on.
+  it('reports a session lost while asking for the chrome as the flow\'s environment failure, not a rejection', async () => {
+    const driver = fakeDriver([[]])
+    driver.chrome = vi.fn(async () => { throw new Error('device chrome failed: the relay ended this session') })
+    const result = await runFlow(flowOf('steps:\n  - pressButton: lock\n'), driver, { ...OPTS, platform: 'ios' })
+    expect(result).toMatchObject({ status: 'failed', failureKind: 'environment' })
+    expect(result.failureMessage).toMatch(/could not be checked: device chrome failed: the relay ended this session/)
+    expect(result.failedBeforeRun).toBeUndefined()
+  })
+
+  it('does not ask the chrome for a flow that presses nothing, nor check a platform it has no table for', async () => {
+    const driver = fakeDriver([[el({ label: 'ok' })]])
+    driver.chrome = vi.fn(async () => null)
+    expect((await runFlow(flowOf('steps:\n  - tapOn: ok\n'), driver, { ...OPTS, platform: 'ios' })).status).toBe('passed')
+    expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, { ...OPTS, platform: 'tvos' })).status).toBe('passed')
+    expect((await runFlow(flowOf('steps:\n  - pressButton: back\n'), driver, OPTS)).status).toBe('passed')
+    expect(driver.chrome).not.toHaveBeenCalled()
+  })
+})
+
+describe('runFlow — orientation and posture', () => {
+  it('asks the driver to turn and fold, with the step timeout, and names the steps', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - setOrientation: landscape\n  - setPosture: unfolded\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['setOrientation', 'landscape', 20], ['setPosture', 'unfolded', 20]])
+    expect(result.steps.map((s) => s.name)).toEqual(['setOrientation(landscape)', 'setPosture(unfolded)'])
+  })
+
+  // A device that cannot fold is not a broken device: the flow fails as the environment's, and the device is kept.
+  it('marks a step the device cannot do as deviceLacks, and an ordinary environment failure not', async () => {
+    const lacks = fakeDriver([[]])
+    lacks.setPosture = vi.fn(async () => { throw new DeviceLacksError('setPosture: no postures') })
+    const a = await runFlow(flowOf('steps:\n  - setPosture: folded\n'), lacks, OPTS)
+    expect(a).toMatchObject({ status: 'failed', failureKind: 'environment', deviceLacks: true })
+
+    const broken = fakeDriver([[]])
+    broken.setOrientation = vi.fn(async () => { throw new EnvironmentStepError('did not turn') })
+    const b = await runFlow(flowOf('steps:\n  - setOrientation: landscape\n'), broken, OPTS)
+    expect(b.failureKind).toBe('environment')
+    expect(b.deviceLacks).toBeUndefined()
+  })
+})
+
+describe('points and secrets', () => {
+  it('taps and holds a point as written, without reading the tree for it', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.4, 0.6]\n  - longPressOn: { on: [0.1, 0.2], durationMs: 700 }\n'), driver, OPTS)
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['tap', 0.4, 0.6], ['longPress', 0.1, 0.2, 700]])
+    expect(result.steps.map((s) => s.name)).toEqual(['tapOn([0.4,0.6])', 'longPressOn([0.1,0.2], 700ms)'])
+  })
+
+  it('types a secret it was given, and names it nowhere by value', async () => {
+    const driver = fakeDriver([[]])
+    const marks: Array<{ name: string; label?: string }> = []
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { PASSWORD: 'hunter2' }, onStep: (m) => marks.push(m) })
+    expect(result.status).toBe('passed')
+    expect(driver.calls).toEqual([['inputText', 'hunter2']])
+    expect(result.steps[0]!.name).toBe('inputText(secret PASSWORD)')
+    expect(marks[0]!.label).toBe('inputText (secret)')
+    expect(JSON.stringify({ result, marks })).not.toContain('hunter2')
+  })
+
+  it('refuses a flow naming a secret it was not given, before anything reaches the device', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.4, 0.6]\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { OTHER: 'x' } })
+    expect(driver.calls).toEqual([])
+    expect(result.failureKind).toBe('environment')
+    expect(result.failedBeforeRun).toBe(true)
+    expect(result.steps.map((s) => s.status)).toEqual(['skipped', 'failed'])
+    expect(result.failureMessage).toMatch(/secret PASSWORD was not given to this run.*--secret PASSWORD/)
+  })
+
+  it('keeps the value out of a failure whose driver quoted it, and keeps the failure\'s kind', async () => {
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.inputText).mockRejectedValueOnce(markEnvironmentFailure(new Error('Command failed: adb shell input text hunter2')))
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'hunter2' } })
+    expect(result.failureKind).toBe('environment')
+    expect(result.failureMessage).toBe('inputText(secret PASSWORD): typing the secret PASSWORD failed')
+    expect(JSON.stringify(result)).not.toContain('hunter2')
+  })
+
+  it('names no input\'s or secure element\'s label among the candidates of an ambiguous match', async () => {
+    const driver = fakeDriver([[el({ role: 'input', label: 'hunter2', identifier: 'pw' }), el({ role: 'other', label: '••••', secure: true, identifier: 'pw' })]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: { id: pw }\n'), driver, OPTS)
+    expect(result.failureMessage).toMatch(/candidates/)
+    expect(result.failureMessage).not.toMatch(/hunter2|••••/)
+  })
+
+  it('reads only the secrets it was given, not what every object inherits', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: constructor }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'x' } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
+  it.each([['undefined', undefined], ['empty', '']])('refuses a secret given as %s before the first step', async (_, value) => {
+    // A JS caller passing `process.env.PASSWORD` with the variable unset.
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - tapOn: [0.5, 0.5]\n  - inputText: { secret: PASSWORD }\n'), driver,
+      { ...OPTS, secrets: { PASSWORD: value as unknown as string } })
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
+  })
+
+  it('keeps what the relay said about the session when typing a secret failed', async () => {
+    const driver = fakeDriver([[]])
+    vi.mocked(driver.inputText).mockRejectedValueOnce(new SessionEndedError('session s1 ended: the device was shut down', 'unknown'))
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: PASSWORD }\n'), driver, { ...OPTS, secrets: { PASSWORD: 'hunter2' } })
+    expect(result.failureMessage).toBe('inputText(secret PASSWORD): typing the secret PASSWORD failed: session s1 ended: the device was shut down')
+  })
+
+  it('refuses it with no secrets at all, as run_flow runs', async () => {
+    const driver = fakeDriver([[]])
+    const result = await runFlow(flowOf('steps:\n  - inputText: { secret: TAPFLOW_TOKEN }\n'), driver, OPTS)
+    expect(driver.calls).toEqual([])
+    expect(result.failedBeforeRun).toBe(true)
   })
 })

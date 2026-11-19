@@ -26,6 +26,13 @@ describe('suggestSelectors', () => {
     expect(s[0]).toEqual({ yaml: 'tapOn: "Sign in"', element: { role: 'button', label: 'Sign in' } })
   })
 
+  // An Android password node of another class is secure without being an input: its label can be what was typed.
+  it('never names a secure element by its label, in the line or beside it', () => {
+    const tree = [el('hunter2', { role: 'other', secure: true, identifier: 'pw' }), el('Sign in')]
+    const s = suggestSelectors(tree, { id: 'pw2' })
+    expect(s[0]).toEqual({ yaml: 'tapOn: { id: "pw" }', element: { role: 'other', label: '', identifier: 'pw' } })
+  })
+
   it('treats case, spacing and punctuation as the same label', () => {
     const tree = [el('Pay now'), el('Cancel')]
     expect(suggestSelectors(tree, { label: 'pay  now!' })[0]!.yaml).toBe('tapOn: "Pay now"')

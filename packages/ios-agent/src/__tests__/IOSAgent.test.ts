@@ -4,13 +4,15 @@ import http from 'http'
 import os from 'os'
 import path from 'path'
 import { spawnSync } from 'child_process'
-import { ValidationError, PlatformError, MAX_CLIPBOARD_BYTES, SHUTDOWN_NO_SESSION_STATE } from '@tapflowio/agent-core'
+import { ValidationError, PlatformError, MAX_CLIPBOARD_BYTES, SHUTDOWN_NO_SESSION_STATE, CLIPBOARD_SENTINEL_PREFIX } from '@tapflowio/agent-core'
 import { ClipboardTooLargeError } from '../SimctlWrapper.js'
 import { SimulatorNetwork } from '../SimulatorNetwork.js'
 
 // A live helper. Since #482 every write reports whether it reached the helper process and the
 // agent acks on that answer, so the mock has to state it — returning undefined would model a
 // helper that silently drops everything. `killHelper()` below flips one over to that state.
+const touchGate = vi.hoisted(() => ({ ready: (): Promise<boolean> => Promise.resolve(true) }))
+
 vi.mock('../TouchHelper', () => ({
   TouchHelper: vi.fn(function () { return withMinContact({
     start: vi.fn(),
@@ -20,12 +22,15 @@ vi.mock('../TouchHelper', () => ({
     // without it makes the ws dispatch swallow a TypeError and send no ack at all, which surfaces
     // as tests hanging with no message rather than failing.
     inputState: vi.fn(() => 'ready'),
+    // A boot holds `device:ready` until this resolves (#1114); a test swaps the gate to hold it.
+    whenReady: vi.fn(() => touchGate.ready()),
     // Asked before readiness for a continuation frame: a gesture whose open never landed can never
     // be finished, however ready the helper becomes.
     ownsGesture: vi.fn(() => true),
     touchStart: vi.fn(() => true),
     touchMove: vi.fn(() => true),
     touchEnd: vi.fn(() => true),
+    touchCancel: vi.fn(() => true),
     pressButton: vi.fn(() => true),
     pressButtonDown: vi.fn(() => true),
     pressButtonUp: vi.fn(() => true),
@@ -120,6 +125,8 @@ import type { ServiceTier } from '@tapflowio/protocol'
 import { LEAN_LABELS } from '../leanLabels'
 import { TouchHelper } from '../TouchHelper'
 import { XCUITreeReader } from '../XCUITreeReader'
+import { AppObserver, type AppTouch, type AppTouchReport } from '../AppObserver'
+import { AppAccessibility } from '../AppAccessibility'
 import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
 import type { GuestHelperNative } from '../GuestHelper'
@@ -201,6 +208,9 @@ function mockSimctl(booted: boolean | 'unknown' = false): SimctlWrapper {
     launchApp: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
+    resetKeyboardLanguage: vi.fn().mockResolvedValue(undefined),
+    setKeyboardLanguage: vi.fn().mockResolvedValue(true),
+    keyboardLanguage: vi.fn().mockResolvedValue(undefined),
     showSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     hideSoftwareKeyboard: vi.fn().mockResolvedValue(undefined),
     // Stateful pasteboard: the agent confirms a write by reading it back, so a mock that
@@ -679,6 +689,933 @@ describe('IOSAgent', () => {
         expect(th.touchEnd).toHaveBeenCalledTimes(1)
       }, { timeout: 500 })
 
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // A client leaving mid-gesture sends a cancel before its end (#1115): the helper is asked to cancel, unanswered.
+  describe('input:touch:cancel', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+
+    it('asks the helper to cancel the touch, and sends no ack', async () => {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const seen: string[] = []
+      browser.on('message', (d, binary) => { if (!binary) seen.push((JSON.parse(String(d)) as { type: string }).type) })
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-cancel', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      await vi.waitFor(() => expect(MockTouchHelper.mock.results.length).toBeGreaterThan(0))
+      const th = MockTouchHelper.mock.results.at(-1)!.value
+      browser.send(JSON.stringify({ type: 'input:touch:start', sessionId: agent.sessionId, payload: { x: 0.5, y: 0.5 } }))
+      browser.send(JSON.stringify({ type: 'input:touch:cancel', sessionId: agent.sessionId }))
+      await vi.waitFor(() => expect(th.touchCancel).toHaveBeenCalledTimes(1))
+      await new Promise((r) => setTimeout(r, 100))
+      expect(seen.filter((t) => t.startsWith('input:'))).toEqual([])
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // The touch helper is started by the boot and drops what it is sent until it says it is ready, so a client acting on
+  // `device:ready` at once was refused its first input (#1114).
+  describe('device:ready waits for the touch helper', () => {
+    beforeEach(() => { MockTouchHelper.mockClear() })
+    afterEach(() => { touchGate.ready = () => Promise.resolve(true) })
+
+    async function boot(options: { touchReadyWaitMs?: number } = {}) {
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const seen: string[] = []
+      browser.on('message', (d, binary) => { if (!binary) seen.push((JSON.parse(String(d)) as { type: string }).type) })
+      const agent = new IOSAgent({ intervalMs: 50, ...options }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-touch', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      return { agent, browser, seen }
+    }
+
+    it('is not sent until the helper is ready', async () => {
+      let release: ((ready: boolean) => void) | undefined
+      touchGate.ready = () => new Promise((resolve) => { release = resolve })
+      const { agent, browser, seen } = await boot()
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
+      await new Promise((r) => setTimeout(r, 200))
+      expect(seen).not.toContain('device:ready')
+      release!(true)
+      await vi.waitFor(() => expect(seen).toContain('device:ready'), { timeout: 1000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A shutdown during the wait stops the helper, which ends the wait with `false`; the boot must be abandoned there,
+    // not carry on to announce a device that was just shut down. Holds the order of the wait and the seq check.
+    it('is not sent for a boot a shutdown abandoned during the wait', async () => {
+      let release: ((ready: boolean) => void) | undefined
+      touchGate.ready = () => new Promise((resolve) => { release = resolve })
+      const { agent, browser, seen } = await boot()
+      // This boot's wait has asked, not merely a helper having been built.
+      await vi.waitFor(() => expect(release).toBeDefined())
+      // Past the local stream connect, so the shutdown lands while the boot is waiting on the helper alone.
+      await new Promise((r) => setTimeout(r, 300))
+      browser.send(JSON.stringify({ type: 'device:shutdown', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await vi.waitFor(() => expect(seen).toContain('device:shutdown-done'), { timeout: 2000 })
+      release!(false)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(seen).not.toContain('device:ready')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A helper being replaced past its own start-up deadline must not leave a device with a picture and no answer.
+    it('is sent anyway once the wait runs out', async () => {
+      touchGate.ready = () => new Promise(() => {})
+      const { agent, browser, seen } = await boot({ touchReadyWaitMs: 100 })
+      await vi.waitFor(() => expect(seen).toContain('device:ready'), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // A client turns a tree point into a touch point by the app's turn; a multi-panel device gets none (#1116).
+  describe('ui:tree:response carries the app\'s interface turn', () => {
+    afterEach(() => { vi.restoreAllMocks() })
+
+    it.each([[false, 270], [true, undefined]] as const)('multi-panel %s → interfaceTurn %s', async (multiPanel, expected) => {
+      vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
+      vi.spyOn(XCUITreeReader.prototype, 'readWithTurn').mockResolvedValue({ elements: [], interfaceTurn: 270 })
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId, clientKind: 'flow-runner' }))
+      await waitForType(browser, 'session:joined')
+      browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-tree', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await waitForType(browser, 'device:ready')
+      // Driven at the agent's dispatcher: the relay sends `ui:tree:request` for an HTTP caller, not a browser one.
+      const internals = agent as unknown as {
+        lastBundleIds: Map<string, string>
+        multiPanelDevices: Set<string>
+        handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
+        sendMsg(msg: { type: string }): void
+      }
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      if (multiPanel) internals.multiPanelDevices.add('dev-1')
+      const sent: Array<{ type: string; interfaceTurn?: number }> = []
+      const real = internals.sendMsg.bind(agent)
+      internals.sendMsg = (msg) => { sent.push(msg); real(msg as never) }
+      internals.handleRelayMessage({ type: 'ui:tree:request', sessionId: agent.sessionId!, requestId: 'rq-t' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:tree:response')).toBe(true), { timeout: 2000 })
+      const reply = sent.find((m) => m.type === 'ui:tree:response')!
+      expect(reply.interfaceTurn).toBe(expected)
+      if (expected === undefined) expect(reply).not.toHaveProperty('interfaceTurn')
+
+      agent.disconnect()
+      browser.close()
+    })
+  })
+
+  // Flow Capture (#1135) and the keyboard reset (#1134), driven at the agent's dispatcher as the relay sends them.
+  describe('the focused field and the keyboard language', () => {
+    afterEach(() => { vi.restoreAllMocks() })
+
+    type Internals = {
+      lastBundleIds: Map<string, string>
+      handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
+      sendMsg(msg: { type: string }): void
+    }
+    async function bootedAgent(simctl: SimctlWrapper = mockSimctl(true), boot = true) {
+      vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
+      const browser = new WebSocket(`ws://localhost:${port}`)
+      await waitForOpen(browser)
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId, clientKind: 'dashboard' }))
+      await waitForType(browser, 'session:joined')
+      const internals = agent as unknown as Internals
+      const sent: Array<{ type: string; [k: string]: unknown }> = []
+      const real = internals.sendMsg.bind(agent)
+      internals.sendMsg = (msg) => { sent.push(msg as never); real(msg as never) }
+      const doBoot = async () => {
+        browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-k', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+        await waitForType(browser, 'device:ready')
+      }
+      if (boot) await doBoot()
+      return { agent, browser, internals, sent, doBoot }
+    }
+
+    // The reads come from the app observer, not the tree runner: an attached runner made a busy SwiftUI app lag.
+    const answer = (field: Record<string, unknown>, keyboard: Record<string, unknown> = { shown: false, orientation: 1 }) =>
+      ({ kind: 'answer' as const, keyboard, field: { keyboard, ...field } })
+
+    it('answers a field read with the observer\'s field, for the app last installed or launched', async () => {
+      const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ identifier: 'form.email', placeholder: 'Email', frame: { x: 0, y: 0, width: 1, height: 1 }, type: 'text', value: '안녕' }))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:field:response')).toBe(true), { timeout: 2000 })
+      expect(readField).toHaveBeenCalledWith('dev-1', 'com.app')
+      expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({ requestId: 'rq-f', field: { value: '안녕' } })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers a failed read rather than going silent', async () => {
+      vi.spyOn(AppObserver.prototype, 'read').mockRejectedValue(new Error('observer gone'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({ field: null, reason: 'failed' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A person's E2E: Capture's range began on home-screen taps made while a ~10 s install ran, since those reads asked
+    // no app and came back unknown. An app still installing cannot be in front.
+    it('answers no app in front while the app is installing and none is named yet, then asks the app', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      let finish!: () => void
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = () => new Promise<void>((r) => { finish = r })
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k1' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:keyboard:response')).toBeDefined(), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:keyboard:response')!['keyboard']).toEqual({ shown: null, onHome: true })
+      expect(read).not.toHaveBeenCalled()
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-done')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalledWith('dev-1', 'com.installed'), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('keeps saying so while any of two overlapping installs is still running', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue({ kind: 'silent' })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      const finishes: Array<(fail?: boolean) => void> = []
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = () => new Promise<void>((resolve, reject) => { finishes.push((fail) => (fail ? reject(new Error('x')) : resolve())) })
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { filePath: '/a.zip', bundleId: 'com.a' } } as never)
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-b', payload: { filePath: '/b.zip', bundleId: 'com.a' } } as never)
+      finishes[1]!(true)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-error')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k' })
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'ui:keyboard:response')).toBeDefined(), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:keyboard:response')!['keyboard']).toEqual({ shown: null, onHome: true })
+      expect(read).not.toHaveBeenCalled()
+      finishes[0]!(true)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'app:install-error')).toHaveLength(2), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('stops saying so once an install failed, rather than for the rest of the session', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue({ kind: 'silent' })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true))
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = async () => { throw new Error('no space') }
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-error')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k' })
+      await vi.waitFor(() => expect(read).toHaveBeenCalled(), { timeout: 2000 })
+      read.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('reads the app an install put on the device, which a person may open from its icon rather than with Launch', async () => {
+      const readField = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }))
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      ;(agent as unknown as { installBuild: () => Promise<void> }).installBuild = async () => {}
+      internals.handleRelayMessage({ type: 'app:install', sessionId: agent.sessionId!, requestId: 'rq-i', payload: { filePath: '/b.zip', bundleId: 'com.installed' } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'app:install-done')).toBe(true), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-f' })
+      await vi.waitFor(() => expect(readField).toHaveBeenCalledWith('dev-1', 'com.installed'), { timeout: 2000 })
+      // Named for the observer at the install, so an app opened from its icon is observed.
+      expect(simctl.setSimulatorEnv).toHaveBeenCalledWith('dev-1', 'TAPFLOW_OBSERVE_BUNDLE', 'com.installed')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // An attached runner made a busy SwiftUI app lag with no query running; a recorded person's reads come from the
+    // observer, so their boot warms nothing. An automation client's still does: its first tree query would wait.
+    it('does not warm the tree runner on a boot for a person Flow Capture records; an automation client\'s still does', async () => {
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const warm = vi.mocked(XCUITreeReader.prototype.warm)
+      warm.mockClear()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      expect(warm).not.toHaveBeenCalled()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { deviceId: 'dev-1', automation: true } } as never)
+      await vi.waitFor(() => expect(warm).toHaveBeenCalledWith('dev-1'), { timeout: 3000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // P1 of the record-time observation plan: SwiftUI names nothing in-app without app accessibility (measured), and a
+    // running app keeps what it started with, so it is on before the ready of a recorded person's boot and put back for
+    // anyone else's.
+    it('turns app accessibility on before a recorded person\'s boot is ready, and puts it back for another boot', async () => {
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const readyWhenEnabled: boolean[] = []
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(async () => { readyWhenEnabled.push(sent.some((m) => m.type === 'device:ready')) })
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(1), { timeout: 3000 })
+      expect(enable).toHaveBeenCalledWith('dev-1')
+      expect(readyWhenEnabled).toEqual([false])
+      expect(restore).not.toHaveBeenCalled()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-a', payload: { deviceId: 'dev-1', automation: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
+      expect(restore).toHaveBeenCalledWith('dev-1')
+      expect(enable).toHaveBeenCalledTimes(1)
+      enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // Record-time observation: the app's report of each touch-down goes to the relay, named by the gesture's id.
+    it('pairs the app\'s report of a touch-down with the gesture and sends it, for a recorded boot on a relay that keeps them', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const now = Date.now()
+      const reports = [
+        { seq: 1, at: now, bundle: 'com.app', observation: { point: { x: 0.9, y: 0.9 }, moving: false } },
+        { seq: 2, at: now, bundle: 'com.app', observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 } } },
+      ]
+      // Stamped when taken: a report from before the boot is not the boot's.
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => reports.splice(0).map((r) => ({ ...r, at: Date.now() })))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      expect(watch).toHaveBeenLastCalledWith('dev-1', true)
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'capture:touched')).toBeDefined(), { timeout: 2000 })
+      // The report near the touch, not the one at the corner.
+      expect(sent.filter((m) => m.type === 'capture:touched')).toEqual([{ type: 'capture:touched', sessionId: agent.sessionId, requestId: 'g1',
+        observation: { point: { x: 0.41, y: 0.52 }, moving: true, element: { label: 'Row 3', traits: 1 }, seq: 2 } }])
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // Correctness review: two pairings in flight lost a report to the list one replaced under the other; and of two
+    // reports at one spot the first, not the nearest in time, was taken.
+    it('pairs overlapping gestures each with its own report, the nearest in time at the same spot', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const queue: AppTouch[][] = []
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const report = (seq: number, at: number, moving: boolean): AppTouch => ({ seq, at, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving } })
+      // The first gesture finds nothing at first and keeps asking; both reports arrive while it does, each at its own
+      // gesture's moment, so whichever pairing runs first takes its own.
+      const t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await new Promise((r) => setTimeout(r, 200))
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      // The first gesture's report first: taking the first report at the point would give it to the second gesture.
+      queue.push([report(1, t1, false), report(2, t2, true)])
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(2), { timeout: 2000 })
+      const byId = Object.fromEntries(sent.filter((m) => m.type === 'capture:touched').map((m) => [m['requestId'], (m['observation'] as { moving: boolean }).moving]))
+      expect(byId).toEqual({ g1: false, g2: true })
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // P2a: the app's verdict follows the down report by a second, and goes to the gesture whose report has its seq.
+    it('sends each gesture the app\'s later verdict by seq, never one from an earlier process or one that says nothing', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const queue: AppTouchReport[][] = []
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const down = (seq: number, at: number, tapCount: number): AppTouch => ({ seq, at, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false, tapCount } })
+      const t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      queue.push([down(1, t1, 1)])
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await new Promise((r) => setTimeout(r, 150))
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      queue.push([down(2, t2, 2)])
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(2), { timeout: 2000 })
+      // The second touch's verdict first, an earlier process's seq 1 among them; seq 1's own arrives in the same take
+      // and must not be lost to the other (CodeRabbit, #1168), whichever the directory lists first.
+      queue.push([
+        { seq: 2, at: t2, bundle: 'com.app', end: true, acted: true },
+        { seq: 1, at: t1, bundle: 'com.app', end: true, acted: false },
+        { seq: 1, at: t1 - 60_000, bundle: 'com.app', end: true, acted: true },
+      ])
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(4), { timeout: 2000 })
+      const later = sent.filter((m) => m.type === 'capture:touched').slice(2).map((m) => [m['requestId'], (m['observation'] as { acted?: boolean; tapCount?: number })])
+      later.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      expect(later).toEqual([['g1', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 1, seq: 1, acted: false }], ['g2', { point: { x: 0.4, y: 0.5 }, moving: false, tapCount: 2, seq: 2, acted: true }]])
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1168: a take in flight when a boot replaced the watch put what it read off disk into the old one.
+    it('gives a report taken across a re-boot to the gesture of the boot that is current', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      let release!: (r: AppTouchReport[]) => void
+      const held = new Promise<AppTouchReport[]>((r) => { release = r })
+      let calls = 0
+      const own: { observer?: AppObserver } = {}
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async function (this: AppObserver) {
+        if (this !== own.observer) return []
+        return ++calls === 1 ? held : []
+      })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
+      const boot = async (n: number) => {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
+        internals.lastBundleIds.set('dev-1', 'com.app')
+      }
+      await boot(1)
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.9, y: 0.9 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(calls).toBe(1))
+      await boot(2)
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      // The first gesture's take comes back now, with the report of the second.
+      release([{ seq: 1, at: t2, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }])
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched').map((m) => m['requestId'])).toEqual(['g2']), { timeout: 2000 })
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('gives a report the verdict wait took across a re-boot to the current boot\'s gesture', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      let release!: (r: AppTouchReport[]) => void
+      const held = new Promise<AppTouchReport[]>((r) => { release = r })
+      let calls = 0
+      let t1 = 0
+      const own: { observer?: AppObserver } = {}
+      // The first take pairs g1; the second is g1's verdict wait, held across the re-boot. Only this agent's takes: an
+      // earlier test's verdict wait may still be polling.
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async function (this: AppObserver) {
+        if (this !== own.observer) return []
+        calls++
+        if (calls === 1) return [{ seq: 1, at: t1, bundle: 'com.app', observation: { point: { x: 0.9, y: 0.9 }, moving: false } }]
+        return calls === 2 ? held : []
+      })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
+      const boot = async (n: number) => {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
+        internals.lastBundleIds.set('dev-1', 'com.app')
+      }
+      await boot(1)
+      t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.9, y: 0.9 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(calls).toBe(2), { timeout: 2000 })
+      await boot(2)
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      release([{ seq: 1, at: t2, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: true } }])
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched').map((m) => m['requestId'])).toEqual(['g1', 'g2']), { timeout: 2000 })
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1168: a report of the boot before, carried across, was paired with the next gesture at that spot.
+    it('does not pair a gesture with a report from before its boot, taken across the re-boot', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      let release!: (r: AppTouchReport[]) => void
+      const held = new Promise<AppTouchReport[]>((r) => { release = r })
+      const later: AppTouchReport[][] = []
+      let calls = 0
+      const own: { observer?: AppObserver } = {}
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async function (this: AppObserver) {
+        if (this !== own.observer) return []
+        return ++calls === 1 ? held : later.shift() ?? []
+      })
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      own.observer = (agent as unknown as { appObserver: AppObserver }).appObserver
+      const boot = async (n: number) => {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
+        internals.lastBundleIds.set('dev-1', 'com.app')
+      }
+      await boot(1)
+      const t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(calls).toBe(1))
+      await new Promise((r) => setTimeout(r, 20))
+      await boot(2)
+      const t2 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      // g1's report, from before the re-boot, comes back first; g2's own a little later.
+      release([{ seq: 1, at: t1, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: true } }])
+      await new Promise((r) => setTimeout(r, 120))
+      later.push([{ seq: 2, at: t2, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }])
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(1), { timeout: 2000 })
+      expect(sent.filter((m) => m.type === 'capture:touched').map((m) => [m['requestId'], (m['observation'] as { moving: boolean }).moving])).toEqual([['g2', false]])
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('sends nothing more for a verdict that is unknown', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const queue: AppTouchReport[][] = []
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => queue.shift() ?? [])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const t = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      queue.push([{ seq: 7, at: t, bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }], [{ seq: 7, at: t, bundle: 'com.app', end: true }])
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await vi.waitFor(() => expect(queue).toHaveLength(0), { timeout: 2000 })
+      await new Promise((r) => setTimeout(r, 200))
+      expect(sent.filter((m) => m.type === 'capture:touched')).toHaveLength(1)
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('stops the app\'s touch reports when the session ends without a shutdown', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      const internal = agent as unknown as { cleanupDeviceState(s: unknown): void; deviceStates: Map<string, unknown> }
+      // The agent's start already stops what an earlier agent left on a running device.
+      stop.mockClear()
+      internal.cleanupDeviceState(internal.deviceStates.get(agent.sessionId!))
+      expect(stop).toHaveBeenCalledWith('dev-1')
+      watch.mockRestore(); stop.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('sends no touch reports for a boot that is not recorded, or on a relay that did not ask for them', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([{ seq: 1, at: Date.now(), bundle: 'com.app', observation: { point: { x: 0.4, y: 0.5 }, moving: false } }])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      for (const [i, payload] of [{ observed: true }, { touchObservations: true }].entries()) {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${i}`, payload: { deviceId: 'dev-1', ...payload } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(i + 1), { timeout: 3000 })
+        expect(watch).toHaveBeenLastCalledWith('dev-1', false)
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: `g${i}` } as never)
+      }
+      await new Promise((r) => setTimeout(r, 300))
+      expect(sent.some((m) => m.type === 'capture:touched')).toBe(false)
+      expect(take).not.toHaveBeenCalled()
+      watch.mockRestore(); take.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // `observed` alone decides: `recorded`, an unreleased runner hint gated by the Mac's memory, turned touch reports and
+    // app accessibility off for the whole boot on a busy Mac, and is no longer read.
+    it('observes by the relay\'s `observed` alone', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockResolvedValue()
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const cases: Array<[Record<string, boolean>, boolean]> = [
+        [{ observed: true, recorded: false }, true],
+        [{ observed: false, recorded: true }, false],
+        [{ recorded: true }, false],
+        [{}, false],
+      ]
+      for (const [i, [payload, on]] of cases.entries()) {
+        enable.mockClear(); restore.mockClear()
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${i}`, payload: { deviceId: 'dev-1', touchObservations: true, ...payload } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(i + 1), { timeout: 3000 })
+        expect([i, watch.mock.lastCall]).toEqual([i, ['dev-1', on]])
+        expect([i, enable.mock.calls.length, restore.mock.calls.length]).toEqual([i, on ? 1 : 0, on ? 0 : 1])
+      }
+      watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1166: a shutdown during the accessibility write stopped the reports, and the abandoned boot turned
+    // them back on when the write returned, with nobody left to read them.
+    it('does not turn touch reports on for a boot a shutdown abandoned during the accessibility write', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      let finish!: () => void
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(() => new Promise<void>((r) => { finish = r }))
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      watch.mockClear()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(enable).toHaveBeenCalled(), { timeout: 3000 })
+      internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
+      await new Promise((r) => setTimeout(r, 100))
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:boot-error' && m['requestId'] === 'rq-r')).toBe(true), { timeout: 3000 })
+      expect(watch).not.toHaveBeenCalledWith('dev-1', true)
+      watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1166: a teardown during the flag's own write stopped first, and the late write left reports on.
+    it('stops the touch reports again when a shutdown lands while they are being turned on', async () => {
+      let finish!: () => void
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation((_d, on) => on ? new Promise<void>((r) => { finish = r }) : Promise.resolve())
+      const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(watch).toHaveBeenCalledWith('dev-1', true), { timeout: 3000 })
+      internals.handleRelayMessage({ type: 'device:shutdown', sessionId: agent.sessionId!, requestId: 'rq-off', payload: { deviceId: 'dev-1' } } as never)
+      await new Promise((r) => setTimeout(r, 100))
+      stop.mockClear()
+      finish()
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:boot-error' && m['requestId'] === 'rq-r')).toBe(true), { timeout: 3000 })
+      expect(stop).toHaveBeenCalledWith('dev-1')
+      watch.mockRestore(); stop.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('boots anyway when app accessibility cannot be turned on', async () => {
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockRejectedValue(new Error('defaults timed out'))
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      enable.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('puts app accessibility back before shutting the device down, while it still runs', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser } = await bootedAgent(simctl)
+      const order: string[] = []
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockImplementation(async () => { order.push('restore') })
+      ;(simctl.shutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('shutdown') })
+      browser.send(JSON.stringify({ type: 'device:shutdown', requestId: 'rq-off', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+      await vi.waitFor(() => expect(order).toEqual(['restore', 'shutdown']), { timeout: 3000 })
+      restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // An agent that died left it on: a booted device is put back when the next agent starts; a shut-down one keeps its
+    // marker for its next boot, where the setting can be written.
+    it('puts back app accessibility an earlier agent left on, for the devices running now', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.listDevices as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'booted', osVersion: 'iOS 18.3' },
+        { id: 'dev-2', name: 'iPhone 16', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' },
+      ])
+      const marked = vi.spyOn(AppAccessibility.prototype, 'markedDevices').mockReturnValue(['dev-1', 'dev-2'])
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      await agent.connect(`ws://localhost:${port}`)
+      await vi.waitFor(() => expect(restore).toHaveBeenCalledWith('dev-1'))
+      expect(restore).not.toHaveBeenCalledWith('dev-2')
+      marked.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+    })
+
+    it('resets the keyboard of a booted device once its boot\'s keyboard sync is done', async () => {
+      const simctl = mockSimctl(true)
+      let finishSync!: () => void
+      ;(simctl.syncKeyboardsFromLanguages as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { finishSync = r }))
+      const { agent, browser, internals } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-reset', sessionId: agent.sessionId! })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(simctl.resetKeyboardLanguage).not.toHaveBeenCalled()
+      finishSync()
+      await vi.waitFor(() => expect(simctl.resetKeyboardLanguage).toHaveBeenCalledWith('dev-1'), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('carries the keyboard language beside the field', async () => {
+      vi.spyOn(AppObserver.prototype, 'read').mockResolvedValue(answer({ reason: 'no-focus' }, { shown: true, orientation: 1 }))
+      const simctl = mockSimctl(true)
+      ;(simctl.keyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue('ko_KR@sw=Korean;hw=Automatic')
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:field:request', sessionId: agent.sessionId!, requestId: 'rq-fl' })
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'ui:field:response')).toBe(true), { timeout: 2000 })
+      expect(sent.find((m) => m.type === 'ui:field:response')).toMatchObject({
+        requestId: 'rq-fl', keyboard: { shown: true }, language: 'ko_KR@sw=Korean;hw=Automatic',
+      })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // #1125: where a touch meant for an element lands, from the runner, for the app the tree is read for.
+    it('answers ui:reach:request from the runner, and unknown when it throws', async () => {
+      const target = { role: 'button', label: 'Row 13', identifier: 'list.row.13', frame: { x: 0, y: 0.879, width: 1, height: 0.06 } }
+      const reached = { state: 'reachable', point: [0.1, 0.885], atCentre: false, frame: target.frame }
+      const reach = vi.spyOn(XCUITreeReader.prototype, 'reach').mockResolvedValueOnce([reached] as never).mockRejectedValueOnce(new Error('gone\nstack'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r1', targets: [target] } as never)
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r2', targets: [target] } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'ui:reach:response')).toHaveLength(2), { timeout: 2000 })
+      expect(reach).toHaveBeenCalledWith('dev-1', 'com.app', [target])
+      expect(sent.find((m) => m.requestId === 'rq-r1')).toMatchObject({ results: [reached] })
+      expect(sent.find((m) => m.requestId === 'rq-r2')).toMatchObject({ results: [{ state: 'unknown', reason: 'gone' }] })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('asks the runner about no targets when the request carries no list of them', async () => {
+      const reach = vi.spyOn(XCUITreeReader.prototype, 'reach').mockResolvedValueOnce([])
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.handleRelayMessage({ type: 'ui:reach:request', sessionId: agent.sessionId!, requestId: 'rq-r3', targets: 'nope' } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }), { timeout: 2000 })
+      expect(reach).toHaveBeenCalledWith('dev-1', expect.any(String), [])
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers ui:keyboard:request from the observer, and unknown when it fails', async () => {
+      const read = vi.spyOn(AppObserver.prototype, 'read').mockResolvedValueOnce(answer({ reason: 'no-focus' })).mockRejectedValueOnce(new Error('gone'))
+      const { agent, browser, internals, sent } = await bootedAgent()
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k1' })
+      internals.handleRelayMessage({ type: 'ui:keyboard:request', sessionId: agent.sessionId!, requestId: 'rq-k2' })
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'ui:keyboard:response')).toHaveLength(2), { timeout: 2000 })
+      expect(read).toHaveBeenCalledWith('dev-1', 'com.app')
+      expect(sent.find((m) => m.requestId === 'rq-k1')).toMatchObject({ keyboard: { shown: false } })
+      expect(sent.find((m) => m.requestId === 'rq-k2')).toMatchObject({ keyboard: { shown: null } })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // #1135: a replay's starting keyboard, answered so the replay launches the app only after it.
+    it('sets a named keyboard once the boot\'s keyboard sync is done, and answers', async () => {
+      const simctl = mockSimctl(true)
+      let finishSync!: () => void
+      ;(simctl.syncKeyboardsFromLanguages as ReturnType<typeof vi.fn>).mockReturnValue(new Promise<void>((r) => { finishSync = r }))
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks', payload: { keyboard: 'ko_KR@sw=Korean;hw=Automatic' } } as never)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(simctl.setKeyboardLanguage).not.toHaveBeenCalled()
+      finishSync()
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'device:keyboard-set-done')).toMatchObject({ requestId: 'rq-ks' }), { timeout: 2000 })
+      expect(simctl.setKeyboardLanguage).toHaveBeenCalledWith('dev-1', 'ko_KR@sw=Korean;hw=Automatic')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // Review of #1145: a relay reconnect clears `booted` while the simulator runs on, and the flag alone answered
+    // `No booted device`, so the replay started without the recorded keyboard.
+    it('sets the keyboard for a device that stayed up across a reconnect', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      for (const state of (agent as unknown as { deviceStates: Map<string, { booted: boolean }> }).deviceStates.values()) state.booted = false
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks3', payload: { keyboard: 'en_US@sw=QWERTY;hw=Automatic' } } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks3')).toMatchObject({ type: 'device:keyboard-set-done' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    // The failed command's first line only: node's message goes on with the udid and the whole argv.
+    it('answers a failed set with the first line of the error', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('spawn failed\nCommand failed: xcrun simctl spawn dev-1 defaults read -g AppleKeyboards'))
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks4', payload: {} } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks4')).toMatchObject({ type: 'device:keyboard-set-error', message: 'spawn failed' }), { timeout: 2000 })
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('answers an error for a keyboard the device does not have', async () => {
+      const simctl = mockSimctl(true)
+      ;(simctl.setKeyboardLanguage as ReturnType<typeof vi.fn>).mockResolvedValue(false)
+      const { agent, browser, internals, sent } = await bootedAgent(simctl)
+      internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks2', payload: {} } as never)
+      await vi.waitFor(() => expect(sent.find((m) => m.type === 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks2', reason: 'failed' }), { timeout: 2000 })
+      expect(simctl.setKeyboardLanguage).toHaveBeenCalledWith('dev-1', undefined)
+      agent.disconnect()
+      browser.close()
+    })
+
+    // #1139: Match and Verify start from a run's reset on the device the session holds.
+    describe('device:run-reset', () => {
+      function heldResetSimctl() {
+        const calls: string[] = []
+        const simctl = mockSimctl(true)
+        const record = (name: string) => vi.fn(async (_udid: string, id?: unknown) => { calls.push(typeof id === 'string' ? `${name}:${id}` : name) })
+        Object.assign(simctl, {
+          reinstallAppInPlace: record('reinstall'),
+          waitForBootStatus: record('bootstatus'),
+          resetKeychain: record('keychain'),
+          resetPrivacy: record('privacy'),
+          clearLocation: record('location'),
+          resetKeyboardLanguage: vi.fn(async () => { calls.push('keyboard') }),
+        })
+        return { simctl, calls }
+      }
+
+      it('reinstalls the app in place, resets the device, stands it up, and reports each item', async () => {
+        const { simctl, calls } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        // Left turned by the person: the reset turns it back.
+        ;(agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical.note('dev-1', 'landscapeLeft')
+        vi.mocked(simctl.rotate).mockClear()
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr', payload: { apps: ['com.app'] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr')).toEqual({
+          type: 'device:run-reset-done', sessionId: agent.sessionId, requestId: 'rq-rr',
+          report: { done: ['app-reinstall', 'keychain', 'privacy-services', 'pasteboard', 'location', 'network', 'orientation'], failed: [] },
+        })
+        expect(calls).toEqual(['bootstatus', 'reinstall:com.app', 'keychain', 'privacy', 'location', 'keyboard'])
+        expect(simctl.rotate).toHaveBeenCalledWith('dev-1', 'portrait')
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Going online runs the filter's host, which a Mac without it answers `filter-unavailable`: an online device is
+      // left alone, and one taken offline is brought back and the viewer told.
+      it('brings back only a device taken offline, and tells the session', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        const network = (agent as unknown as { network: { state(id: string): { offline?: boolean }; setOffline(id: string, o: boolean): Promise<unknown> } }).network
+        const setOffline = vi.spyOn(network, 'setOffline').mockResolvedValue({ offline: false, available: true })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-net1', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-net1')).toBeDefined(), { timeout: 3000 })
+        expect(setOffline).not.toHaveBeenCalled()
+        vi.spyOn(network, 'state').mockReturnValue({ offline: true })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-net2', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-net2')).toBeDefined(), { timeout: 3000 })
+        expect(setOffline).toHaveBeenCalledWith('dev-1', false)
+        expect(sent.some((m) => m.type === 'network:state' && !('requestId' in m))).toBe(true)
+        expect(sent.find((m) => m.requestId === 'rq-net2')).toMatchObject({ report: { failed: [] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('reports a turn that fails as failed, and goes on', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        ;(agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical.note('dev-1', 'landscapeLeft')
+        vi.mocked(simctl.rotate).mockRejectedValue(new Error('purple gone'))
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr2', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr2')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr2')).toMatchObject({ type: 'device:run-reset-done', report: { failed: ['orientation'] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Both turns only log a turn that did not take; the report must not call that device upright (pre-PR review).
+      it('reports the turn failed when the device is still on its side afterwards', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        const physical = (agent as unknown as { physical: { note: (id: string, o: string) => void } }).physical
+        physical.note('dev-1', 'landscapeLeft')
+        vi.spyOn(agent as unknown as { turnSingle(): Promise<void> }, 'turnSingle').mockResolvedValue()
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr6', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr6')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr6')).toMatchObject({ report: { failed: ['orientation'] } })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('refuses while a boot of the device is in flight', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        for (const state of (agent as unknown as { deviceStates: Map<string, { bootsInFlight: Set<number> }> }).deviceStates.values()) state.bootsInFlight.add(99)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr7', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr7')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr7')).toMatchObject({ type: 'device:run-reset-error', message: 'The device is still booting' })
+        expect(simctl.resetKeychain).not.toHaveBeenCalled()
+        agent.disconnect()
+        browser.close()
+      })
+
+      // A partial report behind a `-done` would read as a reset device (design review of #1139).
+      it('answers an error, not a partial report, when the device is shut down mid-reset', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        vi.mocked(simctl.resetKeychain).mockImplementation(async () => {
+          for (const state of (agent as unknown as { deviceStates: Map<string, { bootSeq: number }> }).deviceStates.values()) state.bootSeq++
+        })
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr3', payload: { apps: ['com.app'] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr3')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr3')).toMatchObject({ type: 'device:run-reset-error' })
+        agent.disconnect()
+        browser.close()
+      })
+
+      it('answers an error for a session with no booted device', async () => {
+        const { simctl } = heldResetSimctl()
+        const { agent, browser, internals, sent } = await bootedAgent(simctl, false)
+        vi.mocked(simctl.listDevices).mockResolvedValue([{ id: 'dev-1', name: 'iPhone 15', platform: 'ios', status: 'shutdown', osVersion: 'iOS 18.3' }] as never)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr4', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-rr4')).toBeDefined(), { timeout: 3000 })
+        expect(sent.find((m) => m.requestId === 'rq-rr4')).toMatchObject({ type: 'device:run-reset-error', message: 'No booted device' })
+        agent.disconnect()
+        browser.close()
+      })
+
+      // Design review of #1139: a reset a Stop left running ends with a keyboard reset, which would undo the next
+      // replay's keyboard set if that one did not wait for it.
+      it('sets the keyboard only after a reset in flight on the device has finished', async () => {
+        const { simctl } = heldResetSimctl()
+        let release!: () => void
+        vi.mocked(simctl.resetPrivacy).mockReturnValue(new Promise<void>((r) => { release = r }))
+        const { agent, browser, internals, sent } = await bootedAgent(simctl)
+        internals.handleRelayMessage({ type: 'device:run-reset', sessionId: agent.sessionId!, requestId: 'rq-rr5', payload: { apps: [] } } as never)
+        await vi.waitFor(() => expect(simctl.resetPrivacy).toHaveBeenCalled(), { timeout: 3000 })
+        internals.handleRelayMessage({ type: 'device:keyboard-set', sessionId: agent.sessionId!, requestId: 'rq-ks5', payload: {} } as never)
+        await new Promise((r) => setTimeout(r, 100))
+        expect(simctl.setKeyboardLanguage).not.toHaveBeenCalled()
+        release()
+        await vi.waitFor(() => expect(sent.find((m) => m.requestId === 'rq-ks5')).toMatchObject({ type: 'device:keyboard-set-done' }), { timeout: 3000 })
+        expect(vi.mocked(simctl.resetKeyboardLanguage).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(simctl.setKeyboardLanguage).mock.invocationCallOrder[0]!)
+        agent.disconnect()
+        browser.close()
+      })
+    })
+
+    it('holds a reset that arrives before the boot, and does it once the device is up', async () => {
+      const simctl = mockSimctl(true)
+      const { agent, browser, internals, doBoot } = await bootedAgent(simctl, false)
+      internals.handleRelayMessage({ type: 'device:keyboard-reset', sessionId: agent.sessionId! })
+      expect(simctl.resetKeyboardLanguage).not.toHaveBeenCalled()
+      await doBoot()
+      await vi.waitFor(() => expect(simctl.resetKeyboardLanguage).toHaveBeenCalledTimes(1), { timeout: 2000 })
       agent.disconnect()
       browser.close()
     })
@@ -1953,6 +2890,88 @@ describe('IOSAgent', () => {
       // budget is what CI twice proved too small.
     }, 25_000)
 
+    // #1129: the typed text can be a flow's secret, and the pasteboard is where the next person to open this simulator
+    // would find it. What was there goes back once the paste has landed.
+    it('puts back what the pasteboard held, after the paste and before the ack', async () => {
+      const { browser, agent, simctl, th } = await bootedSession()
+      pasteboard = 'hello'
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb1', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('hello')
+      const sets = (simctl.setPasteboard as ReturnType<typeof vi.fn>).mock
+      const typed = sets.calls.findIndex((c) => c[1] === 'hunter2')
+      const restored = sets.calls.findIndex((c, i) => i > typed && c[1] === 'hello')
+      expect(typed).toBeGreaterThanOrEqual(0)
+      expect(restored).toBeGreaterThan(typed)
+      const paste = th.sendKey.mock.invocationCallOrder.at(-1)!
+      expect(paste).toBeGreaterThan(sets.invocationCallOrder[typed]!)
+      expect(paste).toBeLessThan(sets.invocationCallOrder[restored]!)
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('empties the pasteboard when what it held cannot be read, and still answers done when the restore fails', async () => {
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'unreadable'
+      ;(simctl.getPasteboard as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('pbpaste failed'))
+      let done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb2', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+
+      const set = simctl.setPasteboard as ReturnType<typeof vi.fn>
+      set.mockImplementation(async (_d: string, t: string) => { if (t !== 'hunter2') throw new Error('pbcopy failed'); pasteboard = t })
+      done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb3', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('puts the pasteboard back when writing the text failed after the device took it', async () => {
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'hello'
+      const set = simctl.setPasteboard as ReturnType<typeof vi.fn>
+      set.mockImplementationOnce(async (_d: string, t: string) => { pasteboard = t; throw new Error('pbcopy killed') })
+      const errored = waitForType(browser, 'input:type-error')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb4', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      const e = await errored
+      expect(pasteboard).toBe('hello')
+      expect(JSON.stringify(e)).not.toContain('hunter2')
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('does not put back a sentinel a clipboard read left behind', async () => {
+      const { browser, agent } = await bootedSession()
+      pasteboard = `${CLIPBOARD_SENTINEL_PREFIX}left-behind`
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb5', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+      agent.disconnect()
+      browser.close()
+    })
+
+    // A restore that cannot be confirmed may have left the text there: the pasteboard is emptied rather than trusted.
+    it('empties the pasteboard when the restore cannot be read back', async () => {
+      // Real time: the restore's deadline is half a second.
+      const { browser, agent, simctl } = await bootedSession()
+      pasteboard = 'hello'
+      let reads = 0
+      ;(simctl.getPasteboard as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        if (++reads > 1) throw new Error('pbpaste failed')
+        return pasteboard
+      })
+      const done = waitForType(browser, 'input:type-done')
+      browser.send(JSON.stringify({ type: 'input:type', requestId: 'rq-pb6', sessionId: agent.sessionId, payload: { text: 'hunter2' } }))
+      await done
+      expect(pasteboard).toBe('')
+      agent.disconnect()
+      browser.close()
+    })
+
     it('answers input:type-error when the paste chord is dropped', async () => {
       // No pasteboard deadline guards this path, unlike the copy in clipboard:read — the text
       // lands on the device clipboard and nothing reaches the app under test.
@@ -1967,6 +2986,8 @@ describe('IOSAgent', () => {
       // The client tests that echo it echo it correctly, so a predicate that stopped checking matched either
       // way — which is what makes an assertion at the producer the only real one.
       expect(e.requestId).toBe('rq-in22')
+      // Nothing was pasted, and the text does not stay behind either.
+      expect(pasteboard).toBe('')
 
       agent.disconnect()
       browser.close()
@@ -4038,6 +5059,15 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // #1135: a flow's `imeAction` step. iOS's keyboard sends a field's action as Return.
+    it('input:key ImeAction presses Return', async () => {
+      const { browser, agent, thInstance } = await setupSession()
+      browser.send(JSON.stringify({ type: 'input:key', requestId: 'rq-ime', sessionId: agent.sessionId, payload: { code: 'ImeAction', modifiers: 0 } }))
+      await vi.waitFor(() => expect(thInstance.sendKey).toHaveBeenCalledWith(0x28, 0), { timeout: 500 })
+      agent.disconnect()
+      browser.close()
+    })
+
     it('input:key KeyA calls touchHelper.sendKey with HID usage 0x04', async () => {
       const { browser, agent, thInstance } = await setupSession()
       browser.send(JSON.stringify({ type: 'input:key', requestId: 'rq-in30', sessionId: agent.sessionId, payload: { code: 'KeyA', modifiers: 0 } }))
@@ -5739,6 +6769,7 @@ describe('IOSAgent', () => {
         resetKeychain: record('keychain'),
         resetPrivacy: record('privacy'),
         clearLocation: record('location'),
+        resetKeyboardLanguage: vi.fn(async () => { calls.push('keyboard') }),
       })
       return simctl
     }
@@ -5758,7 +6789,11 @@ describe('IOSAgent', () => {
       const simctl = resetSimctl(true)
       const { agent, browser } = await bootWith(simctl, { runReset: RESET })
       const ready = await waitForType(browser, 'device:ready')
-      expect(calls).toEqual(['bootstatus', 'uninstall:com.example.app', 'clear:com.example.helper', 'keychain', 'privacy', 'location'])
+      // The keyboard last and unreported (#1135): its first language, where a Flow Capture replay starts too.
+      expect(calls).toEqual(['bootstatus', 'uninstall:com.example.app', 'clear:com.example.helper', 'keychain', 'privacy', 'location', 'keyboard'])
+      // Bounded by what is left of the reset's budget, never unbounded.
+      const [, timeoutMs] = vi.mocked(simctl.resetKeyboardLanguage).mock.calls[0]!
+      expect(timeoutMs).toBeGreaterThan(0)
       expect(simctl.setPasteboard).toHaveBeenCalledWith('dev-1', '')
       expect((ready['payload'] as Record<string, unknown>)['runReset']).toEqual({
         done: ['app-uninstall', 'app-files', 'keychain', 'privacy-services', 'pasteboard', 'location'], failed: [],
@@ -5771,7 +6806,7 @@ describe('IOSAgent', () => {
       const simctl = resetSimctl(false)
       const { agent, browser } = await bootWith(simctl, { runReset: { uninstall: [], clear: [] } })
       await waitForType(browser, 'device:ready')
-      expect(calls).toEqual(['bootstatus', 'keychain', 'privacy', 'location'])
+      expect(calls).toEqual(['bootstatus', 'keychain', 'privacy', 'location', 'keyboard'])
       agent.disconnect(); browser.close()
     })
 

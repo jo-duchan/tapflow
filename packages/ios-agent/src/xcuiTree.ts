@@ -64,6 +64,13 @@ interface RawNode {
   identifier?: string
   label?: string
   placeholder?: string
+  /** Text-input focus: the line's trailing flags carry `Keyboard Focused`. A bare `Focused` is not it — a focused
+   *  button prints that too (`Selected, Focused` on a tab), and typing does not go there. */
+  focused?: boolean
+  /** A switch's `value: 1` (its `0`/`1` is the only value read: a field's echoes its placeholder, and text is not state). */
+  on?: boolean
+  /** The trailing `Selected` flag: a tab, a segment, a selected row. */
+  selected?: boolean
 }
 
 const FRAME_RE = /\{\{(-?[\d.]+), (-?[\d.]+)\}, \{(-?[\d.]+), (-?[\d.]+)\}\}/
@@ -82,6 +89,12 @@ const LABEL_RE = new RegExp(String.raw`, label: '(.*?)'(?=, placeholderValue: |,
 // Kept after typing: measured, a field holding "abc" still prints `placeholderValue: 'Email', value: abc`. An
 // empty field echoes the placeholder into `value` too, which is one reason `value` is not read here.
 const PLACEHOLDER_RE = new RegExp(String.raw`, placeholderValue: '(.*?)'(?=, value: |${TRAILING_FLAGS})`)
+// Read from the flags at the end of the line only. Searching the whole line would take `label: 'Tap, Keyboard
+// Focused'` for a flag; a quoted field ends in `'`, so the tail cannot reach into one.
+const FLAG_TAIL_RE = new RegExp(TRAILING_FLAGS)
+// Unquoted, so it runs to the flags or the end; only a toggle's 0 or 1 is read from it.
+const TOGGLE_VALUE_RE = new RegExp(String.raw`, value: ([01])(?=${TRAILING_FLAGS})`)
+const TOGGLES = new Set(['Switch', 'Toggle', 'CheckBox'])
 
 function parseLine(line: string): RawNode | null {
   // Strip indentation + the root arrow, then take the type up to ", 0x<addr>".
@@ -99,7 +112,29 @@ function parseLine(line: string): RawNode | null {
   if (lm) node.label = lm[1]
   const pm = PLACEHOLDER_RE.exec(line)
   if (pm && pm[1] !== '') node.placeholder = pm[1]
+  const tail = FLAG_TAIL_RE.exec(line)?.[0] ?? ''
+  const flags = tail.split(', ')
+  if (flags.includes('Keyboard Focused')) node.focused = true
+  if (flags.includes('Selected')) node.selected = true
+  if (TOGGLES.has(node.type) && TOGGLE_VALUE_RE.exec(line)?.[1] === '1') node.on = true
   return node
+}
+
+const ORIENTATION_HEADER = /^TAPFLOW_INTERFACE_ORIENTATION (\d+)\r?\n/
+
+/**
+ * The runner's first line (`TAPFLOW_INTERFACE_ORIENTATION <UIInterfaceOrientation>`) split off the tree, as the
+ * clockwise turn that stands the app's interface up in the portrait framebuffer: landscape right — the home button on
+ * the right, the device turned left — is 270, measured on an iPhone simulator. 0, an unknown value or no line (a
+ * runner built before it) is no information. Split here rather than left to `parseTreeText`, whose fallback for a body
+ * with no `Element subtree:` stops at the first line it cannot read and would return an empty tree.
+ */
+export function splitInterfaceTurn(text: string): { body: string; interfaceTurn?: 0 | 90 | 180 | 270 } {
+  const m = ORIENTATION_HEADER.exec(text)
+  if (!m) return { body: text }
+  const body = text.slice(m[0].length)
+  const turn = ({ 1: 0, 2: 180, 3: 270, 4: 90 } as const)[Number(m[1]) as 1 | 2 | 3 | 4]
+  return turn === undefined ? { body } : { body, interfaceTurn: turn }
 }
 
 export function parseTreeText(text: string): UIElement[] {
@@ -152,6 +187,11 @@ export function parseTreeText(text: string): UIElement[] {
     if (node.identifier) element.identifier = node.identifier
     if (node.placeholder) element.placeholder = node.placeholder
     element.rawRole = node.type
+    // Stated on every input so that a missing value means "unknown" (see `UIElement.secure`).
+    if (role === 'input') element.secure = node.type === 'SecureTextField'
+    if (node.focused && role === 'input') element.focused = true
+    if (node.on) element.checked = true
+    if (node.selected) element.selected = true
     elements.push(element)
   }
   return elements

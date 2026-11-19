@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseUiAutomatorDump } from '../uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump } from '../uiTree.js'
 
 const attrs = (over: Record<string, string> = {}): string => {
   const base: Record<string, string> = {
@@ -56,6 +56,35 @@ describe('parseUiAutomatorDump', () => {
     expect(el.frame).toEqual({ x: 0.25, y: 0.25, width: 0.5, height: 0.5 })
   })
 
+  // Measured on Pixel_9_tapflow (Android 14): with an AlertDialog in front the dump's root is the dialog's window.
+  const dialog =
+    `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n` +
+    `<hierarchy rotation="0">\n` +
+    `<node ${attrs({ class: 'android.widget.FrameLayout', bounds: '[28,955][1052,1469]' })}>\n` +
+    `<node ${attrs({ class: 'android.widget.Button', text: 'OK', clickable: 'true', bounds: '[830,1290][1000,1410]' })} />\n` +
+    `</node>\n</hierarchy>`
+
+  it('places a dialog\'s elements on the screen, by the screen\'s size, when the dialog\'s window is the root', () => {
+    expect(dumpRootFloats(dialog)).toBe(true)
+    const [ok] = parseUiAutomatorDump(dialog, { width: 1080, height: 2424 })
+    expect(round(ok!.frame!.y + ok!.frame!.height / 2)).toBeCloseTo(1350 / 2424, 3)
+    expect(round(ok!.frame!.x + ok!.frame!.width / 2)).toBeCloseTo(915 / 1080, 3)
+  })
+
+  // Pre-PR review: a size read across a turn (portrait) for a landscape dialog would clip the dump; the root decides.
+  it('keeps the root\'s size when the dialog does not fit the size it is given', () => {
+    const landscape = dialog.replace('[28,955][1052,1469]', '[600,100][1800,980]').replace('[830,1290][1000,1410]', '[1500,800][1700,950]')
+    const [ok] = parseUiAutomatorDump(landscape, { width: 1080, height: 2424 })
+    expect(round(ok!.frame!.x + ok!.frame!.width / 2)).toBeCloseTo(1600 / 1800, 3)
+  })
+
+  it('keeps the root\'s size for a dump of the screen, whatever size it is given', () => {
+    expect(dumpRootFloats(wrap(''))).toBe(false)
+    const xml = wrap(`<node ${attrs({ class: 'android.widget.Button', text: 'Login', clickable: 'true', bounds: '[270,1200][810,1350]' })} />`)
+    // A size from before a turn must not stretch a dump the root already says the shape of.
+    expect(parseUiAutomatorDump(xml, { width: 2400, height: 1080 })[0]!.frame).toEqual({ x: 0.25, y: 0.5, width: 0.5, height: 0.0625 })
+  })
+
   it('keeps text-bearing and interactive nodes, drops inert containers and zero-area nodes', () => {
     const xml = wrap(
       [
@@ -89,6 +118,18 @@ describe('parseUiAutomatorDump', () => {
     const els = parseUiAutomatorDump(xml)
     expect(els.map((e) => [e.identifier, e.role])).toEqual([
       ['form.volume', 'slider'], ['tab.form', 'other'], ['android:id/progress', 'other'],
+    ])
+  })
+
+  // #1125: what a tap on a switch or a tab changed, where nothing else in the tree does — its expected effect.
+  it('reads a checked switch and a selected tab, and nothing for the rest', () => {
+    const xml = wrap([
+      `<node ${attrs({ class: 'android.widget.Switch', 'resource-id': 'form.notify', checkable: 'true', checked: 'true', clickable: 'true', bounds: '[880,950][1030,1040]' })} />`,
+      `<node ${attrs({ class: 'android.widget.Switch', 'resource-id': 'form.other', checkable: 'true', clickable: 'true', bounds: '[880,1050][1030,1140]' })} />`,
+      `<node ${attrs({ class: 'android.view.View', 'resource-id': 'tab.form', selected: 'true', focusable: 'true', bounds: '[0,2127][255,2337]' })} />`,
+    ].join('\n'))
+    expect(parseUiAutomatorDump(xml).map((e) => [e.identifier, e.checked ?? false, e.selected ?? false])).toEqual([
+      ['form.notify', true, false], ['form.other', false, false], ['tab.form', false, true],
     ])
   })
 
@@ -196,3 +237,55 @@ describe('parseUiAutomatorDump', () => {
     expect(() => parseUiAutomatorDump('')).toThrow()
   })
 })
+describe('secure and focused', () => {
+  const field = (over: Record<string, string>) =>
+    `<node ${attrs({ class: 'android.widget.EditText', clickable: 'true', bounds: '[0,100][1080,200]', ...over })} />`
+
+  // `secure` is stated on every input so a missing one means "unknown", which a capture treats as secret.
+  it('states secure on every input, true only for a password field', () => {
+    const els = parseUiAutomatorDump(wrap([
+      field({ text: 'Email' }),
+      field({ text: '••••', password: 'true' }),
+      `<node ${attrs({ class: 'android.widget.Button', text: 'Go', clickable: 'true', bounds: '[0,300][1080,400]' })} />`,
+    ].join('\n')))
+    expect(els.map((e) => e.secure)).toEqual([false, true, undefined])
+    expect('secure' in els[2]!).toBe(false)
+  })
+
+  it('keeps a password node that has nothing else to keep it, and marks it secure', () => {
+    const els = parseUiAutomatorDump(wrap(
+      `<node ${attrs({ class: 'android.view.View', password: 'true', bounds: '[0,100][1080,200]' })} />`,
+    ))
+    expect(els).toHaveLength(1)
+    expect(els[0]).toMatchObject({ role: 'other', secure: true })
+    // Focused too, when it says so: this is the field typing goes to, whatever its class.
+    const focused = parseUiAutomatorDump(wrap(
+      `<node ${attrs({ class: 'android.view.View', password: 'true', focused: 'true', bounds: '[0,100][1080,200]' })} />`,
+    ))
+    expect(focused[0]).toMatchObject({ secure: true, focused: true })
+  })
+
+  // As `uiautomator dump` printed them on Pixel_6_tapflow (Android 14), Compose sample app, after typing into the
+  // password field: masked text, `password` and `focused` on the field only, and no `hint` attribute at all.
+  it('reads a measured Compose dump', () => {
+    const els = parseUiAutomatorDump(wrap([
+      '<node index="0" text="" resource-id="form.email" class="android.widget.EditText" package="dev.tapflow.sample.compose" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="true" password="false" selected="false" bounds="[53,538][1027,685]" />',
+      '<node index="1" text="••••••••" resource-id="form.password" class="android.widget.EditText" package="dev.tapflow.sample.compose" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="true" scrollable="false" long-clickable="true" password="true" selected="false" bounds="[53,727][1027,874]" />',
+    ].join('\n')))
+    expect(els.map((e) => [e.identifier, e.secure, e.focused ?? null])).toEqual([
+      ['form.email', false, null],
+      ['form.password', true, true],
+    ])
+  })
+
+  // A WebView or Compose host reports `focused` beside the field inside it; only the field receives typing.
+  it('marks focus on an input only', () => {
+    const els = parseUiAutomatorDump(wrap([
+      `<node ${attrs({ class: 'android.webkit.WebView', focused: 'true', scrollable: 'true', bounds: '[0,0][1080,2400]' })} />`,
+      field({ text: 'Email', focused: 'true' }),
+      field({ text: 'Name' }),
+    ].join('\n')))
+    expect(els.map((e) => [e.role, e.focused ?? null])).toEqual([['other', null], ['input', true], ['input', null]])
+  })
+})
+

@@ -266,7 +266,7 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
                       type="button"
                       aria-label={`${formatClock(g.fromMs)} to ${formatClock(g.toMs)}: did not reach the relay`}
                       onClick={() => seek(g.toMs, !playing)}
-                      className="absolute top-0 h-2 rounded-full bg-muted-foreground/40 active:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="absolute top-0 h-2 rounded-full bg-muted-foreground/40 active:!transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       style={{ left: pct(g.fromMs), width: `max(8px, calc(${pct(g.toMs)} - ${pct(g.fromMs)}))` }}
                     />
                   </TooltipTrigger>
@@ -280,7 +280,7 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
                       type="button"
                       aria-label={`${formatClock(st.ms)} ${st.name}${st.status === 'failed' ? ', failed' : ''}`}
                       onClick={() => seek(st.ms, !playing)}
-                      className={`absolute top-0 -ml-1 h-2 w-2 rounded-full active:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${st.status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground'}`}
+                      className={`absolute top-0 -ml-1 h-2 w-2 rounded-full active:!transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${st.status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground'}`}
                       style={{ left: pct(st.ms) }}
                     />
                   </TooltipTrigger>

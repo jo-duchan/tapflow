@@ -370,6 +370,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | `--exclude-tags <tags>` | — | 이 태그 중 하나라도 있는 플로우는 건너뜀(쉼표로 구분). `--include-tags`보다 우선합니다. |
 | `--parallel <n>` | — | 플로우를 릴레이가 고른 기기 최대 `n`대(1~16)에 나눠 실행합니다. 아래 설명을 참고하세요. |
 | `--platform <platform>` | — | `--build` 없이 `--parallel`로 실행할 때의 플랫폼. `ios` 또는 `android` |
+| `--secret <name>` | — | `inputText: { secret: NAME }` 단계가 입력할 수 있는 환경 변수 이름. 여러 개면 반복합니다. [비밀 값](/ko/automation/flows#secrets)을 참고하세요. |
 
 `--session`과 `--device`를 모두 생략하면 부팅된 기기가 정확히 하나일 때 그 기기를 씁니다. 부팅된 기기가 없거나 여러 대면 환경 오류로 멈춥니다.
 

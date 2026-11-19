@@ -157,6 +157,10 @@ const ALLOWED = new Set([
   // shape instead of by name — and the cost is worth paying, since name matching missed two of five
   // copies of one shape when this work was planned.
   'agent-core:UIElementFrame',
+  // Same two field names as `SessionHolder`, different values and purpose: the relay's own record of who drives a
+  // session for Flow Capture — any client kind or none, and a user *id* to compare — where `SessionHolder` is an
+  // AI kind and an email shown to people. Never on the wire.
+  'relay:Holder',
   // `AgentSession` in mcp-server and flow-runner is `SessionInfo` minus `resources` and
   // `capabilities` — a narrower view for a client that reads neither, not a copy. Its field set
   // differs so it never matches; listed so the next reader knows it was considered rather than

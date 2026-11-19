@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/ios-agent",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "iOS simulator agent for tapflow — xcrun simctl control and screen streaming",
   "keywords": [
     "tapflow",
@@ -68,7 +68,7 @@
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/protocol": "workspace:*",
     "@tapflowio/audiotap-helper": "workspace:*",
-    "ws": "^8.22.0"
+    "ws": "^8.22.2"
   },
   "devDependencies": {
     "@tapflowio/relay": "workspace:*",

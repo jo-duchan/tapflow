@@ -134,6 +134,30 @@ describe('a relay client outlives the agent boot it is waiting on', () => {
     ).toBeGreaterThanOrEqual(MIN_MARGIN_MS)
   })
 
+  // Flow Capture's dialog resets a device the session already holds (#1139): no boot poll, but an iOS reinstall can be
+  // the step in flight when the budget runs out — finding the bundle and uninstalling at one command's bound each, the
+  // install at its own — and one more step after it, as at a boot.
+  it('the dialog that resets a held device clears the reset it asked for', () => {
+    const file = 'packages/dashboard/lib/flowCapture/channel.ts'
+    const budget = valueOf({ file: 'packages/agent-core/src/utils/runReset.ts', pattern: /RUN_RESET_BUDGET_MS = ([\d_]+)/ })
+    const command = valueOf({ file: 'packages/ios-agent/src/SimctlWrapper.ts', pattern: /RESET_CMD_TIMEOUT_MS = ([\d_]+)/ })
+    const install = valueOf({ file: 'packages/ios-agent/src/SimctlWrapper.ts', pattern: /REINSTALL_TIMEOUT_MS = ([\d_]+)/ })
+    const steps = [
+      command,
+      valueOf({ file: 'packages/android-agent/src/AndroidAgent.ts', pattern: /RUN_RESET_CMD_TIMEOUT_MS = ([\d_]+)/ }),
+      valueOf({ file: 'packages/ios-agent/src/IOSAgent.ts', pattern: /RUN_RESET_PASTEBOARD_TIMEOUT_MS = ([\d_]+)/ }),
+    ]
+    for (const v of [budget, install, ...steps]) expect(v).toBeGreaterThan(0)
+    const ceiling = budget + 2 * command + install + Math.max(...steps)
+    const deadline = valueOf({ file, pattern: /RUN_RESET_WAIT_MS = ([\d_]+)/ })
+    expect(
+      deadline - ceiling,
+      `the dialog waits ${deadline}ms for a reset against ${ceiling}ms of budget, a reinstall and one more step`,
+    ).toBeGreaterThanOrEqual(MIN_MARGIN_MS)
+    // The waiter, not the constant: the wait it passes is what gives up.
+    expect(read(file)).toMatch(/'device:run-reset-error'[\s\S]{0,160}?\n\s+RUN_RESET_WAIT_MS,/)
+  })
+
   it('the rule rejects the state that motivated it, not just states far from it', () => {
     // The check's own strictness, exercised in both directions against the exact numbers this slice found:
     // `flow-runner` was 120_000 against Android's 120_000. A bare `>=` calls that fine and a bare `>` calls

@@ -143,5 +143,5 @@ These sit in the same sidebar and look close to a row, but are hand-written:
 
 ## Figma
 
-Component set **SidebarMenuButton** in the `Design System` page — `variant` × `size` × `state`, with 5 states. The
-value names were not checked against this spec.
+Component set **SidebarMenuButton** (`1:2278`) on the `Navigation` page of tapflow-design-system — `variant` ×
+`size` × `state`, with 5 states. The names match this spec.

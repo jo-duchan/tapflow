@@ -41,6 +41,34 @@ function make(opts: { state?: 'ready' | 'starting' | 'unavailable'; lit?: string
 
 afterEach(() => vi.useRealTimers())
 
+// The guest helper has no cancel, so a cancelled touch is lifted with an up — never left down (#1115) — and only a
+// single-finger touch: an up sent into an open pinch would lift one of its fingers.
+describe('FoldableInput.touchCancel', () => {
+  it('lifts an open touch with an up, and the end after it sends nothing', async () => {
+    const { input, guest } = make()
+    input.touchStart(0.4, 0.5)
+    expect(input.touchCancel()).toBe(true)
+    await expect(input.touchEndAfterMinContact()).resolves.toBe(false)
+    expect(guest.touch.mock.calls.map((c) => c[1])).toEqual(['d', 'u'])
+  })
+
+  it('leaves an open pinch alone', () => {
+    const { input, guest } = make()
+    input.pinchStart(0.4, 0.5, 0.6, 0.5)
+    expect(input.touchCancel()).toBe(false)
+    expect(guest.touch).not.toHaveBeenCalled()
+  })
+
+  it('sends a held-back up at once', async () => {
+    const { input, guest } = make({ minContactMs: 1000 })
+    input.touchStart(0.4, 0.5)
+    const held = input.touchEndAfterMinContact()
+    expect(input.touchCancel()).toBe(true)
+    await expect(held).resolves.toBe(true)
+    expect(guest.touch.mock.calls.map((c) => c[1])).toEqual(['d', 'u'])
+  })
+})
+
 describe('FoldableInput touches', () => {
   it('sends a tap to the lit panel, in buffer coordinates as given', async () => {
     const { input, guest } = make()

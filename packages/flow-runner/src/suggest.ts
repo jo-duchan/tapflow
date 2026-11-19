@@ -43,11 +43,20 @@ export function suggestSelectors(tree: UIElement[], sel: Selector): SelectorSugg
     if (!yaml) continue
     out.push({
       yaml: `tapOn: ${yaml}`,
-      element: { role: e.role, label: e.role === 'input' ? '' : e.label, ...(e.identifier ? { identifier: e.identifier } : {}) },
+      element: { role: e.role, label: e.role === 'input' || e.secure === true ? '' : e.label, ...(e.identifier ? { identifier: e.identifier } : {}) },
     })
     if (out.length === MAX_SUGGESTIONS) break
   }
   return out
+}
+
+/**
+ * A selector that taps exactly `target` on this screen, or `null` when none does — the same verified forms a
+ * suggestion is built from, for Flow Capture's turning a recorded tap into `tapOn` (#1125).
+ */
+export function selectorFor(tree: UIElement[], target: UIElement): Selector | null {
+  const yaml = firstVerifiedForm(tree, target, {})
+  return yaml === null ? null : parseSelector((parseYaml(`v: ${yaml}`) as { v: unknown }).v, 'capture')
 }
 
 /**
@@ -58,7 +67,9 @@ export function suggestSelectors(tree: UIElement[], sel: Selector): SelectorSugg
  */
 function firstVerifiedForm(tree: UIElement[], target: UIElement, sel: Selector): string | null {
   const timeout = sel.timeoutMs !== undefined ? sel.timeoutMs / 1000 : undefined
-  const named = target.role !== 'input' && target.label.trim().length > 0 && target.label.length <= MAX_NAME
+  // A secure element's label can be what was typed into it, whatever its role (an Android password node of another
+  // class), so it is never a name to select by.
+  const named = target.role !== 'input' && target.secure !== true && target.label.trim().length > 0 && target.label.length <= MAX_NAME
   const id = target.identifier && target.identifier.length <= MAX_NAME ? target.identifier : undefined
 
   const byLabel: Form[] = named

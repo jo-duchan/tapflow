@@ -16,7 +16,7 @@ Only the endpoints below accept a personal access token (PAT), and they accept t
 | PAT scope | Endpoints |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, every webhook endpoint, writing run records (`POST` under `/runs`) |
-| `view` | `GET /apps`, `GET` under `/runs`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, files under `/uploads/` (at the relay root, not under `/api/v1/`), device-session WebSockets opened from a remote machine |
+| `view` | `GET /apps`, `GET` under `/runs`, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `POST /sessions/:sessionId/reach`, files under `/uploads/` (at the relay root, not under `/api/v1/`), device-session WebSockets opened from a remote machine |
 | `agent` | A remote agent's WebSocket connection, accepted only while the member who issued the token is an Admin |
 
 **Roles.** A call made with a PAT is held to its owner's current role. Viewer is read-only: uploading, updating or scheduling deletion of a build, creating, renaming or deleting an app, every webhook endpoint and writing run records return `403` for a Viewer. Reading builds and posting comments work for a Viewer too. The endpoints that check roles read the role on every request, so a role change applies there without signing in again or issuing a new token.
@@ -117,11 +117,12 @@ Return the currently signed-in user's info.
   "email": "admin@example.com",
   "displayName": "Admin",
   "avatarUrl": "/uploads/avatars/user-1.png",
-  "role": "Admin"
+  "role": "Admin",
+  "flowCapture": true
 }
 ```
 
-`avatarUrl` is `null` when there is no profile image.
+`avatarUrl` is `null` when there is no profile image. `flowCapture` says whether the relay remembers this user's QA steps ([`PATCH /api/v1/me/preferences`](#patch-api-v1-me-preferences)).
 
 
 ### `POST /api/v1/auth/change-password`
@@ -752,6 +753,26 @@ File:
 ```
 
 
+### `PATCH /api/v1/me/preferences`
+
+Change the signed-in user's own settings. Call it with the session cookie only; every role can, Viewer included.
+
+```
+Body (JSON):
+  flowCapture  boolean  required
+```
+
+When `flowCapture` is `true`, the relay remembers the taps, swipes and typing this user does in the dashboard, in memory, for the length of the session. It also reads the text field being typed into, its whole contents, so the steps say what was typed, and where the on-screen keyboard is, so a tap on a key is not taken for a tap on the app. On iOS both are read from inside the app under test. A field the app marks as a password is never read. The keys typed and the text pasted into it are kept in memory for the session like any other input. Capture flow uses them only to type into the device again in Match and Verify, and writes just the secret's name to the file. A password shown as plain text, as after tapping a show-password button, is an ordinary field: its value is read and exported as text. Keep it hidden while you record, or remove the step in Edit. Typing into any other field it could not read is recorded as the keys pressed on a US keyboard, which may differ from what the device typed, and Capture flow marks the step **fragile**. It is `true` by default. Setting it to `false` also discards what was already remembered.
+
+**Response `200`**
+
+```json
+{ "flowCapture": false }
+```
+
+Returns `400` when the value is not a boolean.
+
+
 ## Settings {#settings}
 
 ### `GET /api/v1/settings`
@@ -1180,11 +1201,87 @@ Return the UI elements on the session device's current screen.
       "frame": { "x": 0.1, "y": 0.8, "width": 0.8, "height": 0.06 },
       "enabled": true
     }
-  ]
+  ],
+  "interfaceTurn": 90
 }
 ```
 
-`frame` is a 0–1 fraction of the screen size. The error status codes match the screenshot endpoint, with a 15-second timeout.
+`frame` is a 0–1 fraction of the screen size, measured on the screen as the app draws it. The error status codes match the screenshot endpoint, with a 15-second timeout.
+
+`interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
+
+Text fields (`role: "input"`) carry `secure`: `true` for a field that hides what is typed, such as a password, and `false` otherwise. Any other element that reports hiding its text has `secure: true` too. A text field without `secure` means the agent could not tell, so treat it as a password field. The field that is taking typing now has `focused: true`.
+
+A switch or checkbox that is on has `checked: true`, and a selected tab, segment or row has `selected: true`. Both are absent otherwise, and from an agent that does not read them.
+
+### `POST /api/v1/sessions/:sessionId/reach`
+
+Ask where a touch meant for each element lands, for elements read from `ui-tree`. Flows tap the point it returns instead of the element's center, which a tab bar, a floating button or a scrim can cover.
+
+**Request**
+
+```json
+{ "targets": [{ "role": "cell", "label": "Row 13", "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.06 } }] }
+```
+
+Each target is an element as `ui-tree` returned it: `role`, `label`, `frame`, and `identifier` when it has one. At most 64 targets and 64 KB.
+
+**Response `200`**
+
+```json
+{ "results": [{ "state": "reachable", "point": [0.1, 0.9], "atCentre": false, "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.03 } }] }
+```
+
+One result per target, in order:
+
+| `state` | Meaning |
+|---|---|
+| `reachable` | A touch at `point` reaches the element. `point` is 0–1 in the space a touch is sent in: on iOS the device's portrait screen, not the app's turned one, and on Android the screen as Android draws it, as `ui-tree` frames are. `atCentre` says whether that is the element's center. |
+| `occluded` | Something that takes touches covers all of it. `by` names it when known. |
+| `offscreen` | The element is not on the screen. |
+| `missing` | The element was not where it was read. `candidates` counts the elements near it. Read the tree again. |
+| `unknown` | The device cannot judge. `reason` says why. An agent from before this endpoint answers every target this way. |
+
+Returns `400` for a malformed body, `413` for one over 64 KB, `404` when the session does not exist, `409` when its device is shut down, `502` when the agent is offline and `504` after 15 seconds plus 0.3 seconds per target.
+
+
+## Flow Capture
+
+The dashboard uses these endpoints to save what you tested as a flow. They are for the dashboard and may change between releases. Call them with the session cookie only; a PAT gets `401`. The remembered steps include what was typed, so only the user whose steps they are gets an answer. Anyone else gets `404`.
+
+### `POST /api/v1/sessions/:sessionId/capture/snapshot`
+
+Make a fixed copy of the steps remembered so far, and return it. Calling it again makes a new copy. Returns `404` when no steps are remembered.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot`
+
+Return the last copy made. Returns `404` when there is none.
+
+### `DELETE /api/v1/sessions/:sessionId/capture/snapshot`
+
+Discard the copy. Returns `404` when there is none.
+
+### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
+
+Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an input already remembered, sent once. The dashboard sends it after the input. Returns `201` when kept, `200` with `{ "kept": false, "reason": … }` when it was not (`exists`, `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, or a key inside a typed run, `typed` for an input begun within 2 seconds of a typed character when the field typed into is not read as non-secure, `full`), `404` when no steps are remembered for you on this session, `409` when no remembered input has that `requestId` yet or a keyboard or field read it waits on is still out (send it again shortly), `413` for a larger body and `415` for one that is not a JPEG.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
+
+Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none.
+
+### `PUT /api/v1/sessions/:sessionId/capture/pause`
+
+Stop remembering for a while. The dashboard uses it while it replays the remembered steps on the device, so the replay is not remembered as the person's input. The pause lifts on its own after the `ttlMs` in the response (30 seconds), and calling it again extends it. Returns `404` when no steps are remembered. A `404` during a replay means remembering has already ended, so stop the replay.
+
+**Response `200`**
+
+```json
+{ "ok": true, "ttlMs": 30000 }
+```
+
+### `DELETE /api/v1/sessions/:sessionId/capture/pause`
+
+Lift the pause now. Returns `404` when nothing is paused.
 
 
 ## Relay
@@ -1197,14 +1294,17 @@ Return the relay address details the dashboard uses to build addresses for teamm
 
 ```json
 {
-  "lanHost": "192.168.0.10",
+  "lanHost": null,
   "port": 4000,
-  "publicBaseUrl": "https://tap.example.com",
-  "agentRelayUrl": "wss://tap.example.com"
+  "publicBaseUrl": null,
+  "agentRelayUrl": null,
+  "publicUrlWarning": "container-without-public-url",
+  "agentUrlWarning": "container-without-relay-url"
 }
 ```
 
 A value that cannot be determined is `null`. `lanHost` is always `null` when the relay runs in a container.
+`publicUrlWarning` is included only when the relay runs in a container without a public URL for teammate links. `agentUrlWarning` is included only when it runs in a container without `TAPFLOW_RELAY_URL` for agents. Each field is omitted when its condition does not apply.
 
 
 ## Logs

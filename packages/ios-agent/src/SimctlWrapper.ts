@@ -39,12 +39,23 @@ function langToKeyboard(lang: string): string {
 // A hung pasteboard call must not strand the caller: the read path holds a sentinel on the
 // device until it finishes, so "never returns" would leave the device clipboard destroyed.
 const CLIPBOARD_CMD_TIMEOUT_MS = 5_000
+// A field read waits on this, and a capture snapshot waits 1 s for a field read, so it is bounded below that: a read
+// takes about 0.41 s (measured, 5 of 5). Bounded as a whole too, since the runner retries after restarting the service.
+const KEYBOARD_READ_TIMEOUT_MS = 800
+// `launchctl list`, asked when the app observer gets no answer in its 1.5 s: 0.3 s measured (5 of 5). The relay waits
+// 5 s for the read, and every later read on the device queues behind this one, so it is bounded within that. A timeout
+// reads as running (not judged), never as gone.
+const APP_RUNNING_TIMEOUT_MS = 2_000
+// One `defaults` call inside the device, 0.3 s measured; bounded since a boot waits on it.
+const APP_ACCESSIBILITY_TIMEOUT_MS = 5_000
 // A run reset's device-wide commands take about a second each (measured: keychain 1.0 s, privacy 0.5 s, location 0.5 s).
 // A command this bound kills does not land later, which is why iOS needs nothing like Android's pending `pm clear` wait:
 // measured on iOS 26.5 by killing `simctl uninstall` and `simctl keychain reset` mid-flight, each either finished before
 // the kill or never happened, nothing changed in the 3 s after, and an install or keychain add sent right after the kill
 // survived — CoreSimulatorService runs a device's requests in order.
 const RESET_CMD_TIMEOUT_MS = 10_000
+// An install copies the whole bundle, so it grows with the app where the reset's other commands do not.
+const REINSTALL_TIMEOUT_MS = 30_000
 // `Booted` appears in `simctl list` before the system services are up: `bootstatus` took 6–28 s more on an iOS 26.5
 // simulator. A reset sent in that gap reaches tccd and securityd before they serve.
 const BOOT_STATUS_TIMEOUT_MS = 60_000
@@ -128,6 +139,10 @@ const defaultPlistReader: PlistReader = async (path) =>
 
 export class SimctlWrapper {
   private readonly kbd = new KeyboardHelperDaemon()
+  // Devices whose keyboard prefs were written and whose daemon restart then failed: their prefs no longer say what the
+  // daemon types with, so a later set restarts whatever they read (CodeRabbit on #1165). This process's own record; an
+  // agent restarted in between does not have it.
+  private readonly kbdUnconfirmed = new Set<string>()
 
   constructor(
     private readonly runner: SimctlRunner = defaultRunner,
@@ -352,6 +367,37 @@ export class SimctlWrapper {
     await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'uninstall', udid, bundleId)
   }
 
+  /**
+   * The app as a run's fresh install of it, without the build (#1139): the installed bundle copied aside, the app
+   * uninstalled and the copy installed. Clearing its files keeps notification permission and App Group containers,
+   * which only an uninstall drops — Maestro's `clearState` and Detox's `resetAppState` reinstall for the same reason.
+   * Measured 0.6–0.75 s for a 47 MB app, 0.8–0.9 s with every core busy. An app that is not installed is left alone,
+   * as `clearAppDataIfInstalled` leaves one.
+   */
+  async reinstallAppInPlace(udid: string, bundleId: string): Promise<void> {
+    let bundle: string
+    try {
+      bundle = (await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'get_app_container', udid, bundleId, 'app')).trim()
+    } catch (e) {
+      if (/No such file or directory/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))) return
+      throw e
+    }
+    if (!bundle.startsWith('/')) throw new PlatformError(`cannot resolve the installed bundle of ${bundleId}: ${bundle || 'empty simctl output'}`)
+    const aside = await fs.mkdtemp(join(tmpdir(), 'tapflow-reinstall-'))
+    try {
+      const copy = join(aside, bundle.split('/').pop()!)
+      await fs.cp(bundle, copy, { recursive: true, verbatimSymlinks: true })
+      await this.runner.execWithOpts({ timeoutMs: RESET_CMD_TIMEOUT_MS }, 'uninstall', udid, bundleId)
+      // Once more from the copy before giving up: after the uninstall it is the only one, and the finally deletes it.
+      const install = () => this.runner.execWithOpts({ timeoutMs: REINSTALL_TIMEOUT_MS }, 'install', udid, copy)
+      await install().catch(install).catch((e: unknown) => {
+        throw new PlatformError(`${bundleId} was uninstalled and could not be installed again: ${(e as Error).message.split('\n')[0]}`)
+      })
+    } finally {
+      await fs.rm(aside, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
   // pm-clear analog for the simulator: wipe the app's data-container contents
   // (Documents / Library / tmp) instead of uninstalling, so the installed
   // binary survives and flow-runner clearState → launchApp keeps working.
@@ -491,11 +537,83 @@ export class SimctlWrapper {
 
     await this.runner.exec('spawn', udid, 'defaults', 'write', '-g', 'AppleKeyboards', '-array', ...keyboards)
 
-    // Restart the keyboard daemon so it picks up the new settings immediately.
-    // Errors are silently ignored — changes will take effect on next text field focus if the daemon isn't running yet.
-    try {
-      await this.runner.exec('spawn', udid, 'launchctl', 'kickstart', '-k', 'system/com.apple.kbd')
-    } catch { /* expected on some iOS versions */ }
+    await this.restartKeyboardDaemon(udid)
+  }
+
+  /**
+   * Put the device's keyboard language back to its first keyboard (#1134). The language a person switched to — Caps
+   * Lock on a device with two keyboards — is stored as `KeyboardLastUsed` and `KeyboardsCurrentAndNext` in
+   * `com.apple.keyboard.preferences` (found by diffing the simulator's preferences across a Caps Lock press, iOS 26.4),
+   * not in `AppleKeyboards`, whose order does not reset it. Written, then the keyboard daemon restarted; a running app
+   * keeps its language until it is launched again (measured both ways).
+   */
+  async resetKeyboardLanguage(udid: string, timeoutMs?: number): Promise<void> {
+    await this.setKeyboardLanguage(udid, undefined, timeoutMs)
+  }
+
+  /**
+   * Put the device's keyboard in `keyboard` — an `AppleKeyboards` entry, as `keyboardLanguage` reads it — or in its
+   * first when absent, the way `resetKeyboardLanguage` does (#1135: a replay starts from the recording's keyboard).
+   * `false` when the device has no such keyboard, and nothing is written.
+   */
+  async setKeyboardLanguage(udid: string, keyboard?: string, timeoutMs?: number): Promise<boolean> {
+    // Bounded as a whole by `timeoutMs` when given (a run's reset budget): each call gets what is left of it, so up to
+    // five calls cannot take five budgets. Unbounded otherwise, as these always were.
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs
+    const exec = (...args: string[]) => this.execBy(deadline, ...args)
+    const out = await exec('spawn', udid, 'defaults', 'read', '-g', 'AppleKeyboards')
+    const keyboards = [...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]!)
+    const target = keyboard ?? keyboards[0]
+    if (!target || !keyboards.includes(target)) return false
+    const next = keyboards.find((k) => k !== target && !k.startsWith('emoji')) ?? target
+    // Already so: the daemon is not restarted. A restart right after another one (a run reset's, then a replay's
+    // keyboard-set) took 10.3 s, against 0.37 s cold (measured, iOS 26.5), and Match paid it on every run. Both keys must
+    // say so: the daemon writes `KeyboardLastUsed` when a person switches language (Caps Lock), so a device left with it
+    // and the list disagreeing (measured: ko and en, typing in ko) is restarted.
+    // Not when the last restart after a write failed: the daemon is then behind its prefs (`kbdUnconfirmed`).
+    const prefs = await exec('spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences').catch(() => '')
+    if (!this.kbdUnconfirmed.has(udid) && keyboardPrefsAre(prefs, [target, target, next])) return true
+    // Unconfirmed from the first write: a second write that fails can leave the prefs matching (the list already was)
+    // with no restart behind them (CodeRabbit on #1165). Cleared only by a restart that succeeded.
+    this.kbdUnconfirmed.add(udid)
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', target)
+    await exec('spawn', udid, 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array', target, target, next)
+    if (await this.restartKeyboardDaemon(udid, deadline)) this.kbdUnconfirmed.delete(udid)
+    return true
+  }
+
+  /** The keyboard the device types with now (`KeyboardLastUsed`, an `AppleKeyboards` entry), or `undefined` before any
+   *  was used or when it cannot be read. */
+  async keyboardLanguage(udid: string): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const out = await Promise.race([
+      this.runner
+        .execWithOpts({ timeoutMs: KEYBOARD_READ_TIMEOUT_MS }, 'spawn', udid, 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed')
+        .catch(() => ''),
+      new Promise<string>((resolve) => { timer = setTimeout(() => resolve(''), KEYBOARD_READ_TIMEOUT_MS) }),
+    ]).finally(() => clearTimeout(timer))
+    const value = out.trim()
+    return value === '' ? undefined : value
+  }
+
+  // Restart the keyboard daemon so it picks up the new settings. `com.apple.TextInput.kbd` in the foreground user
+  // domain on iOS 26.4 (measured), where `system/com.apple.kbd`, used until #1134, does not exist and failed in silence.
+  // The old name is still tried when the new one fails, for an older runtime nobody has measured. Errors are ignored —
+  // changes take effect on the next text field focus if the daemon isn't running yet.
+  private async restartKeyboardDaemon(udid: string, deadline?: number): Promise<boolean> {
+    for (const service of ['user/foreground/com.apple.TextInput.kbd', 'system/com.apple.kbd']) {
+      try {
+        await this.execBy(deadline, 'spawn', udid, 'launchctl', 'kickstart', '-k', service)
+        return true
+      } catch { /* try the next name */ }
+    }
+    return false
+  }
+
+  /** A simctl call that ends by `deadline` (epoch ms), or unbounded without one. */
+  private execBy(deadline: number | undefined, ...args: string[]): Promise<string> {
+    if (deadline === undefined) return this.runner.exec(...args)
+    return this.runner.execWithOpts({ timeoutMs: Math.max(1, deadline - Date.now()) }, ...args)
   }
 
   async rotate(udid: string, orientation: 'portrait' | 'landscapeLeft' | 'landscapeRight' | 'portraitUpsideDown'): Promise<void> {
@@ -527,6 +645,37 @@ export class SimctlWrapper {
   }
 
   /**
+   * App accessibility (`ApplicationAccessibilityEnabled` in `com.apple.Accessibility`): what makes SwiftUI and React
+   * Native build the accessibility nodes the app observer names a touch by. `null` when the device has never set it.
+   * Takes effect at an app's next launch, not in one already running (measured, iOS 26.5).
+   */
+  async readAppAccessibility(udid: string): Promise<boolean | null> {
+    try {
+      const out = await this.runner.execWithOpts({ timeoutMs: APP_ACCESSIBILITY_TIMEOUT_MS }, 'spawn', udid, 'defaults', 'read', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled')
+      return out.trim() === '1'
+    } catch (e) {
+      // `defaults read` of a key the domain lacks exits 1 saying so; anything else is a failure to say.
+      if (/does not exist/.test(String((e as { stderr?: string }).stderr ?? (e as Error).message))) return null
+      throw e
+    }
+  }
+
+  /** Set app accessibility, or remove the key (`null`) to leave the device as it was before anything set it. */
+  async writeAppAccessibility(udid: string, value: boolean | null): Promise<void> {
+    const args = value === null
+      ? ['spawn', udid, 'defaults', 'delete', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled']
+      : ['spawn', udid, 'defaults', 'write', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled', '-bool', value ? 'true' : 'false']
+    try {
+      await this.runner.execWithOpts({ timeoutMs: APP_ACCESSIBILITY_TIMEOUT_MS }, ...args)
+    } catch (e) {
+      // Removing a key already gone leaves the device as asked. `defaults delete` says so as the domain "not found"
+      // when the key is the one it would have held (measured, iOS 26.5), and as the pair not existing otherwise.
+      if (value === null && /does not exist|not found/.test((e as Error).message)) return
+      throw e
+    }
+  }
+
+  /**
    * Set an environment variable for **every process the simulator starts from now on** (#607).
    *
    * That breadth is the delivery mechanism, not an accident: the dylib this arms has to reach the
@@ -541,6 +690,12 @@ export class SimctlWrapper {
     await this.runner.exec('spawn', udid, 'launchctl', 'setenv', name, value)
   }
 
+  /** Whether `bundleId` has a process on the device: its `UIKitApplication:<bundle>[…]` job in `launchctl list`. */
+  async appRunning(udid: string, bundleId: string): Promise<boolean> {
+    const out = await this.runner.execWithOpts({ timeoutMs: APP_RUNNING_TIMEOUT_MS }, 'spawn', udid, 'launchctl', 'list')
+    return out.split('\n').some((line) => line.includes(`UIKitApplication:${bundleId}[`) && /^\d+\s/.test(line.trim()))
+  }
+
   async showSoftwareKeyboard(udid: string): Promise<void> {
     await this.kbd.show(udid)
   }
@@ -552,4 +707,17 @@ export class SimctlWrapper {
   stopKeyboardDaemon(): void {
     this.kbd.stop()
   }
+}
+
+/** Whether `defaults read com.apple.keyboard.preferences` says `list[0]` is the keyboard last used and the
+ *  current-and-next list is `list`, as `setKeyboardLanguage` writes them. Anything unreadable is not. */
+export function keyboardPrefsAre(prefs: string, list: readonly string[]): boolean {
+  // Quoted when it holds `;` or `=`, as every keyboard name does: `"ko_KR@sw=Korean;hw=Automatic"`. The key starts a
+  // line or follows `{`/`;`, so a key that merely ends in the name does not count.
+  const m = /(?:^|[\s{;])KeyboardLastUsed\s*=\s*(?:"([^"]*)"|([^;\s]+));/.exec(prefs)
+  const lastUsed = m?.[1] ?? m?.[2]
+  const body = /(?:^|[\s{;])KeyboardsCurrentAndNext\s*=\s*\(([^)]*)\)/.exec(prefs)?.[1]
+  if (lastUsed !== list[0] || body === undefined) return false
+  const items = [...body.matchAll(/"([^"]*)"|([^\s,]+)/g)].map((x) => x[1] ?? x[2])
+  return items.length === list.length && items.every((k, i) => k === list[i])
 }

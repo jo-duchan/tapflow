@@ -108,10 +108,17 @@ export interface RunResetRequest {
  * - `privacy-services`: iOS `simctl privacy reset all` — only the services simctl names; notifications are not one.
  * - `pasteboard`: set to an empty string, which is not the same as nothing ever copied.
  * - `location`: iOS simulated location cleared.
+ * - `app-reinstall`: `device:run-reset` on iOS — the installed app copied aside, uninstalled and installed again, so it
+ *   starts as a run's freshly installed build does: clearing its files leaves notification permission and App Group
+ *   containers, which nothing but an uninstall drops (#1139).
+ * - `network`: `device:run-reset` only — the device back online with no condition, as every boot leaves it.
+ * - `orientation`: `device:run-reset` only — the device turned upright, as a run's boot leaves it.
  *
  * Device-wide except the app items. An item a platform does not do is never reported, so absence means not reset.
  */
-export type RunResetItem = 'app-uninstall' | 'app-files' | 'app-data' | 'keychain' | 'privacy-services' | 'pasteboard' | 'location'
+export type RunResetItem =
+  | 'app-uninstall' | 'app-files' | 'app-data' | 'app-reinstall' | 'keychain' | 'privacy-services' | 'pasteboard' | 'location'
+  | 'network' | 'orientation'
 
 /** What the agent actually reset. The only evidence a reset happened: a relay or agent that predates it drops the
  *  request without a word. */
@@ -252,14 +259,64 @@ export interface UIElement {
   role: UIElementRole
   label: string
   identifier?: string
-  /** A text field's placeholder (iOS `placeholderValue`, Android `hint`), apart from `label` on purpose: a
+  /** A text field's placeholder (iOS `placeholderValue`; Android's dump carries no `hint`, measured, so Android sends
+   *  none), apart from `label` on purpose: a
    *  placeholder is not a name, and folding it into one hides the app's missing label. Absent when there is
    *  none — and from an agent that predates the field, which reads the same as none. */
   placeholder?: string
   frame: UIElementFrame
   enabled: boolean
   rawRole?: string
+  /** Whether a text field hides what is typed into it (iOS `SecureTextField`, Android `password`). Stated as
+   *  `true` or `false` on every `role: 'input'` element, and `true` on any other element that says it hides its text
+   *  (an Android password node of another class); absent on the rest, so an input **without** it
+   *  means "unknown" — an agent that predates the field, or one that cannot tell — and a consumer deciding
+   *  whether typed text may be written down treats unknown as secret. A secure element's `label` can hold
+   *  what was typed: never store it or build a selector from it. */
+  secure?: boolean
+  /** The element has text-input focus — where typing goes now. Not view or button focus: iOS also marks a
+   *  focused button and Android a focused host view, and neither receives the text. Present only when true. */
+  focused?: boolean
+  /** A switch or checkbox that is on (iOS a switch's `value: 1`, Android `checked`). Present only when true, and only
+   *  from an agent that reads it, so an absent one is off or unknown. What a tap on it changed, where nothing else in
+   *  the tree does (#1125, a tap's expected effect). */
+  checked?: boolean
+  /** Selected: a tab, a segment, a row (iOS `Selected`, Android `selected`). Present only when true, as `checked`. */
+  selected?: boolean
 }
+
+/**
+ * An element to reach, as a tree read reported it: the agent finds it again in its own read and answers where a touch
+ * meant for it lands (#1125). `frame` is in the tree's space, and picks the nearest when more than one has the role,
+ * identifier and label.
+ */
+export interface ReachTarget {
+  role: UIElementRole
+  rawRole?: string
+  label: string
+  identifier?: string
+  frame: UIElementFrame
+}
+
+/**
+ * Where a touch meant for an element lands, judged by the platform (iOS XCTest's hit point, Android the topmost node
+ * that takes the touch), not by its frame's centre, which another element can cover — a row under a tab bar.
+ *
+ * - `reachable`: `point` takes the touch to the element, in the **touch space** (the portrait framebuffer, as an
+ *   `input:touch:*` point; never turned by `interfaceTurn`). `atCentre`: the frame's centre does too, so nothing covers
+ *   it there — what "fully on screen" means for a scroll to it. `frame`: the element as the agent judged it.
+ * - `occluded`: a touch anywhere on it lands on something else; `by` names that, when the platform says.
+ * - `offscreen`: no part of it is on screen.
+ * - `missing`: the agent's read has no such element, or more than one equally near (`candidates`): read again.
+ * - `unknown`: the agent cannot judge — one without `reach`, a device whose reader cannot, a private API gone.
+ *   Never a reach: a client that taps anyway says the tap was not checked.
+ */
+export type ReachResult =
+  | { state: 'reachable'; point: [number, number]; atCentre: boolean; frame: UIElementFrame }
+  | { state: 'occluded'; by?: string }
+  | { state: 'offscreen' }
+  | { state: 'missing'; candidates: number }
+  | { state: 'unknown'; reason: string }
 
 /** `agents:listed` groups devices by agent machine. */
 export interface SessionInfo {
@@ -644,6 +701,101 @@ export interface UiTreeRequest {
   requestId: string
 }
 
+/** Relay → agent: where touches meant for `targets` land (`ReachResult`). Sent only to an agent naming `reach`. */
+export interface UiReachRequest {
+  type: 'ui:reach:request'
+  sessionId: string
+  requestId: string
+  targets: ReachTarget[]
+}
+
+/**
+ * The keyboard-focused text field's value, for Flow Capture (#1135). The relay asks while a person it is recording has
+ * stopped typing, and keeps the answer in the capture; nothing else reads it. **Never forwarded**: the answer is the
+ * field's whole contents — what the person typed, and any text the app or AutoFill put there — so it goes no further
+ * than the capture the relay already keeps typed text in. Sent only to an agent
+ * whose capabilities include `field-value`.
+ */
+export interface UiFieldRequest {
+  type: 'ui:field:request'
+  sessionId: string
+  requestId: string
+}
+
+/**
+ * Put the device's keyboard back to its first language, because another person has taken it (#1134). A device keeps
+ * the language a tester switched to (Caps Lock on a device with two keyboards), and the next tester's keys would type
+ * in it. Takes effect from the next app launch. Sent only to an agent whose capabilities include `keyboard-reset`.
+ */
+/**
+ * Put the device's keyboard in the language a replay starts from (#1135): the one the recording first saw, or the
+ * device's first when `keyboard` is absent. Answered, unlike `device:keyboard-reset`, because Flow Capture launches
+ * the app only after it: a running iOS app keeps the language it has until it is launched again (measured), and an
+ * Android keyboard can be switched only while it is up. Browser → relay → agent, unchanged; sent only to an agent
+ * naming `keyboard-set`.
+ */
+export interface DeviceKeyboardSet {
+  type: 'device:keyboard-set'
+  sessionId: string
+  requestId: string
+  payload: { keyboard?: string }
+}
+
+export interface DeviceKeyboardSetDone {
+  type: 'device:keyboard-set-done'
+  sessionId: string
+  requestId: string
+}
+
+/** `keyboard-hidden`: an Android keyboard can be read and switched only while it is up; ask again once it is. */
+export interface DeviceKeyboardSetError extends SessionScoped {
+  type: 'device:keyboard-set-error'
+  message: string
+  requestId: string
+  reason?: 'keyboard-hidden' | 'unsupported' | 'failed'
+}
+
+export type DeviceKeyboardSetReply = DeviceKeyboardSetDone | DeviceKeyboardSetError
+export type DeviceKeyboardSetReplyBody<T = DeviceKeyboardSetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
+
+export interface DeviceKeyboardReset {
+  type: 'device:keyboard-reset'
+  sessionId: string
+}
+
+/**
+ * Reset the session's booted device the way `tapflow flow run` resets one before a run (#1139), so Flow Capture's
+ * Match and Verify start where the exported flow will in CI: `apps` reset (iOS reinstalls each in place, Android
+ * `pm clear`s it), then the device-wide items, the network back online and the device upright. The agent's report says
+ * what was done; an item it does not do is absent. Browser → relay → agent, unchanged; sent only to an agent naming
+ * `run-reset`. It wipes device-wide state (the keychain, every app's privacy grants), so only the session's holder may.
+ */
+export interface DeviceRunReset {
+  type: 'device:run-reset'
+  sessionId: string
+  requestId: string
+  payload: { apps: string[] }
+}
+
+export interface DeviceRunResetDone {
+  type: 'device:run-reset-done'
+  sessionId: string
+  requestId: string
+  report: RunResetReport
+}
+
+/** `unsupported`: the agent does not take the request. Any other error: the device went (shut down, restarted) or no
+ *  reset could start; a report is never partial behind a `-done`. */
+export interface DeviceRunResetError extends SessionScoped {
+  type: 'device:run-reset-error'
+  message: string
+  requestId: string
+  reason?: 'unsupported'
+}
+
+export type DeviceRunResetReply = DeviceRunResetDone | DeviceRunResetError
+export type DeviceRunResetReplyBody<T = DeviceRunResetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
+
 export type RelayToAgent =
   | AgentRegistered
   | AgentDevicesApplied
@@ -654,6 +806,12 @@ export type RelayToAgent =
   | AppLaunchToAgent
   | ScreenshotRequest
   | UiTreeRequest
+  | UiReachRequest
+  | UiFieldRequest
+  | DeviceKeyboardReset
+  | UiKeyboardRequest
+  | DeviceKeyboardSet
+  | DeviceRunReset
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1221,6 +1379,8 @@ export type RelayOrAgentToBrowser =
   | DeviceBootError
   | OpenUrlError
   | AppClearStateError
+  | DeviceKeyboardSetError
+  | DeviceRunResetError
   | InputError
   // Moved out of `AgentToBrowser` in L5c: the relay originates this one now. An `input:type` whose session
   // the sender does not hold is refused here, and it has to be refused in *this* shape — the waiters in
@@ -1654,6 +1814,8 @@ export type AgentToBrowser =
   | DeviceShutdownDone
   | AppLaunchDone
   | AppClearStateDone
+  | DeviceKeyboardSetDone
+  | DeviceRunResetDone
   | OpenUrlDone
   | InputDone
   | InputTypeDone
@@ -1757,11 +1919,32 @@ export interface ScreenshotError {
   message: string
 }
 
+/** Agent → relay: one `ReachResult` per target of the `ui:reach:request`, in its order. Consumed by the relay. */
+export interface UiReachResponse {
+  type: 'ui:reach:response'
+  sessionId: string
+  requestId: string
+  results: ReachResult[]
+}
+
 export interface UiTreeResponse {
   type: 'ui:tree:response'
   sessionId: string
   requestId: string
   elements: UIElement[]
+  /**
+   * How many quarter turns **clockwise** the portrait framebuffer takes to stand the app's interface up — the
+   * convention `ChromeData.streamRotation` uses, and the same value when the app turns with the device. The
+   * elements' frames are in that upright interface; a touch is in the framebuffer, so a client placing a touch
+   * from a frame turns the point by this first (`@tapflowio/protocol/screen` `toFramePoint`).
+   *
+   * **The app's, not the device's.** A portrait-locked app on a device held sideways stays 0, and an app on a device
+   * held upside down usually stays in the landscape it was in. Sent by the iOS agent, read from the app itself.
+   * **Absent means no information**: Android (whose tree and touches share the display's space), an older agent,
+   * a multi-panel device (#1116) or a reading that failed. A client then turns nothing, which is what every
+   * client did before this field.
+   */
+  interfaceTurn?: 0 | 90 | 180 | 270
 }
 
 /** Request-scoped, for the same reasons as `ScreenshotError`. */
@@ -1772,6 +1955,125 @@ export interface UiTreeError {
   message: string
 }
 
+/**
+ * The soft keyboard as an agent reads it (#1135): whether it is up and where it takes touches, in the display's space
+ * (`rect`) and, when the dashboard sends that device's touches in its video frame's space (Android body mode), in that
+ * space too (`frameRect`). `shown: null` is "could not tell", never "hidden".
+ */
+export interface KeyboardState {
+  shown: boolean | null
+  /** Fractions (0–1) of the screen, like a touch's point. */
+  rect?: { x: number; y: number; width: number; height: number }
+  frameRect?: { x: number; y: number; width: number; height: number }
+  /** The home screen is in front, not an app: what Flow Capture's default range leaves out before the app was opened from
+   *  its icon. Android: the window the keyboard would type into belongs to the launcher. iOS: the app under test is not
+   *  in front, which also counts another app (Safari for a sign-in) — only where it starts a capture does it matter.
+   *  Absent when it cannot be told. Not about the keyboard; carried here because it is read with it, after each input. */
+  onHome?: boolean
+}
+
+/** The keyboard-focused text field, as `ui:field:response` carries it. */
+export interface FocusedField {
+  identifier: string
+  placeholder: string
+  /** In points, in the app as drawn — used to tell one field from another, never to place a touch. */
+  frame: UIElementFrame
+  /** What the field holds. **Absent on a secure field**, whose `•••` would still give its length away. */
+  value?: string
+  secure: boolean
+}
+
+/** Why a field read gave no value. Open to what an agent adds: a reader treats one it does not know as `failed`. */
+export type FieldReadReason = 'no-app' | 'no-focus' | 'ambiguous' | 'secure' | 'failed'
+
+export interface UiFieldResponse {
+  type: 'ui:field:response'
+  sessionId: string
+  requestId: string
+  /** `null` when no single text field has keyboard focus, or the read failed: `reason` says which. */
+  field: FocusedField | null
+  reason?: FieldReadReason
+  /** The soft keyboard at the same moment. Absent from an agent that does not report it: unknown, not hidden. */
+  keyboard?: KeyboardState
+  /** The keyboard's language as the device names it (`한국어 (두벌식)`, `ko_KR@sw=Korean;hw=Automatic`): what a
+   *  replay aligns the device to before it types. Absent when it cannot be read. */
+  language?: string
+}
+
+/** Where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app (#1135). Cheap: ~30 ms on
+ *  Android (`dumpsys window`), one file round-trip with the app on iOS (the app observer). Sent only to an agent naming `keyboard-state`. */
+export interface UiKeyboardRequest {
+  type: 'ui:keyboard:request'
+  sessionId: string
+  requestId: string
+}
+
+export interface UiKeyboardResponse {
+  type: 'ui:keyboard:response'
+  sessionId: string
+  requestId: string
+  keyboard: KeyboardState
+}
+
+/**
+ * What one touch-down hit while a person was recorded (record-time observation): on iOS the app observer reports it from
+ * inside the app; on Android the agent reads it from outside (the accessibility tree at the point, the app's frames;
+ * android-agent AGENTS.md). Named by the gesture's `requestId` (its `input:touch:end`'s). Facts only — what Capture
+ * makes of them is flow-runner's. Only touches on the app under test are reported.
+ */
+export interface TouchObservation {
+  /** Where the touch went down, normalised, in the device's portrait space (the touch path's). */
+  point: { x: number; y: number }
+  /** A list under the touch was still gliding or bouncing: on iOS such a touch stops the list and activates nothing. */
+  moving: boolean
+  /** Where the touch landed when it was not on the app's own views: the soft keyboard, a web view, Flutter. Nothing
+   *  else is said about such a touch. */
+  surface?: 'keyboard' | 'web' | 'flutter'
+  /** The accessibility element at the point, and its nearest container marked a button (a grid cell over its
+   *  subtitle). Absent when the app built none there (app accessibility off, a touch mid-scroll). */
+  element?: ObservedElement
+  button?: ObservedElement
+  /** The platform's count for a quick repeat at one spot — iOS's `UITouch.tapCount`, Android's double-tap timeout
+   *  counted by the agent: 2 for a double tap's second touch. Android leaves it out on a drag. */
+  tapCount?: number
+  /**
+   * Whether the app acted on this touch: a control it listens to fired, an action was sent, a list selected a row, or
+   * a gesture of the app's own was recognised, from the touch-down until shortly after the lift. Absent is unknown —
+   * never "no": an older agent, a touch on a `surface`, a drag, on iOS a view that handles touches itself or React
+   * Native, or a verdict that could not be reached in time (Android's own unknowns: android-agent AGENTS.md). On iOS it
+   * arrives later than the rest, as a second `capture:touched` for the same gesture; Android sends one report with it.
+   */
+  acted?: boolean
+  /**
+   * This touch-down's number in the app's process, from 1, counting only touches made while someone was recorded:
+   * a new process starts again at 1. What says a report is the first touch in an app just opened, which a home-screen
+   * tap before it (the icon's, which no app reports) can be told from. Absent from an older agent.
+   */
+  seq?: number
+}
+
+/** An element as the app's accessibility names it. `label` is absent for a text input, whose label can be its text. */
+export interface ObservedElement {
+  identifier?: string
+  label?: string
+  /** `UIAccessibilityTraits` on iOS; Android sets only the button bit (1), where the UI tree's role is `button`. */
+  traits: number
+  /** A text input: named by its identifier only. */
+  input?: boolean
+  /** In the app as drawn, normalised, as the UI tree's frames are. */
+  frame?: UIElementFrame
+}
+
+/** Agent → relay: a `TouchObservation` for the gesture `requestId` ended. Sent only to a relay that asked for them
+ *  (`touchObservations` on the boot), since an older one logs every message type it does not know. A gesture can get
+ *  two: the second, once the app's verdict (`acted`) is in, repeats the first with it, and replaces it. */
+export interface CaptureTouched {
+  type: 'capture:touched'
+  sessionId: string
+  requestId: string
+  observation: TouchObservation
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -1779,7 +2081,11 @@ export type AgentToRelay =
   | ScreenshotDone
   | ScreenshotError
   | UiTreeResponse
+  | UiReachResponse
   | UiTreeError
+  | UiFieldResponse
+  | UiKeyboardResponse
+  | CaptureTouched
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
@@ -1900,6 +2206,11 @@ export interface InputKey {
    * would be minted for a waiter that does not exist. Nor does `input:rotate`, for the same reason.
    */
   requestId: string
+  /**
+   * `code` is a `KeyboardEvent.code`, plus one tapflow names: `ImeAction`, the focused field's own action (Done, Next,
+   * Search, Go) as its keyboard would press it — Return on iOS, the field's IME action on Android (#1135). A flow's
+   * `imeAction` step sends it; a key on a person's keyboard never does.
+   */
   payload: { code: string; modifiers?: number }
 }
 
@@ -2004,8 +2315,10 @@ export interface SessionLeave {
   sessionId: string
 }
 
-// `external` and `automation` are added by the relay on the way through — the browser never sets them.
-// Undeclared on purpose: the parser strips both from what a browser sends, and the relay sets them after it.
+// `external`, `automation`, `observed` and `touchObservations` are added by the relay on the way through — the browser never sets them.
+// Undeclared on purpose: the parser strips them from what a browser sends, and the relay sets them after it.
+// `observed`: the booting person is one Flow Capture records — what the iOS agent turns touch observation and app
+// accessibility on by. Not gated by the Mac's memory: neither starts anything on the Mac.
 export interface DeviceBoot {
   type: 'device:boot'
   sessionId: string
@@ -2167,6 +2480,22 @@ export interface InputTouchEnd {
   payload?: Point
 }
 
+/**
+ * Lift the open touch **without completing it**: the app sees its touch cancelled, not a tap (#1115) — nor a long press,
+ * if the cancel arrives before the app recognised one; a long press the app already acted on cannot be undone.
+ * Sent by a client leaving a session mid-gesture, followed by an `input:touch:end` — an agent that knows this message
+ * has nothing left for that end to complete, and one that predates it (or a relay that drops it) completes the gesture
+ * with the end as before, so no pairing is worse than today. No ack and no `requestId`: it is a terminal frame, but the
+ * client sending it is leaving and nothing waits on it. No coordinates: the touch is cancelled where it is.
+ *
+ * There is no pinch counterpart on purpose. A pinch is applied by its moves, so ending one with a cancel changes little
+ * that an end does not, and scrcpy keeps pointers a cancel leaves behind, which would corrupt the next tap.
+ */
+export interface InputTouchCancel {
+  type: 'input:touch:cancel'
+  sessionId: string
+}
+
 export interface InputPinchStart {
   type: 'input:pinch:start'
   sessionId: string
@@ -2288,10 +2617,13 @@ export type BrowserToRelay =
   | AppInstallToRelay
   | AppLaunchToRelay
   | AppClearState
+  | DeviceKeyboardSet
+  | DeviceRunReset
   | OpenUrl
   | InputTouchStart
   | InputTouchMove
   | InputTouchEnd
+  | InputTouchCancel
   | InputPinchStart
   | InputPinchMove
   | InputPinchEnd

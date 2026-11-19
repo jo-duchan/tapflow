@@ -15,7 +15,7 @@ import {
   SessionUnavailableError,
 } from '../RelayClient.js'
 import { RelayDriver } from '../RelayDriver.js'
-import { TransientQueryError, isEnvironmentStepFailure } from '../errors.js'
+import { DeviceLacksError, TransientQueryError, isEnvironmentStepFailure } from '../errors.js'
 
 // Minimal Response stub for the ui-tree GET.
 function jsonResponse(status: number, body: unknown): Response {
@@ -70,6 +70,17 @@ describe('RelayClient.queryUITree — transient vs permanent classification', ()
     await expect(client().queryUITree('s1', AbortSignal.timeout(10))).rejects.toBeInstanceOf(TransientQueryError)
   })
 
+  // Review of #1152: a reach cut off at its step's deadline while its body was still arriving read as invalid JSON,
+  // a permanent failure, where one cut off before the headers came is transient.
+  it('a body cut off by the signal while it arrived → TransientQueryError, not invalid JSON', async () => {
+    const controller = new AbortController()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode('[{"state":')); controller.abort(new DOMException('timed out', 'TimeoutError')); c.error(new DOMException('timed out', 'TimeoutError')) },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const target = { role: 'button' as const, label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 } }
+    await expect(client().reach('s1', [target], controller.signal)).rejects.toBeInstanceOf(TransientQueryError)
+  })
+
   it('carries the server error message', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(502, { error: 'is the app running in the foreground?' }))
     await expect(client().queryUITree('s1')).rejects.toThrow('is the app running in the foreground?')
@@ -80,6 +91,8 @@ describe('RelayClient.queryUITree — transient vs permanent classification', ()
     { elements: [{}] },
     { elements: [{ role: 'button', label: 'x', frame: { x: -1, y: 0, width: 1, height: 1 }, enabled: true }] },
     { elements: [{ role: 'future-role', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true }] },
+    { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, secure: 'true' }] },
+    { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, focused: 1 }] },
   ])('classifies invalid response shapes as permanent relay errors', async (body) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -148,7 +161,7 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
         }
         // The five acked requests, per protocol/AGENTS.md — the four terminal frames and `input:type`.
         // Opening and move frames are silent by contract.
-        if (msg['type'] === 'input:touch:end' || msg['type'] === 'input:key') {
+        if (msg['type'] === 'input:touch:end' || msg['type'] === 'input:key' || msg['type'] === 'input:button' || msg['type'] === 'input:pinch:end') {
           const reply = ack(msg)
           if (reply) ws.send(JSON.stringify(reply))
         }
@@ -255,11 +268,184 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     for (const m of moves) expect(m).not.toHaveProperty('requestId')
   })
 
+  // The overshoot fix: a held swipe ends on its end point before the lift (the cadence is holdStill's own test).
+  it('swipe with a hold moves onto the end point before it lifts', async () => {
+    const { client, received } = await capture()
+    await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 100)
+    const touch = received.filter((m) => String(m['type']).startsWith('input:touch:'))
+    const end = touch.findIndex((m) => m['type'] === 'input:touch:end')
+    const last = touch[end - 1]!
+    expect(last['type']).toBe('input:touch:move')
+    const p = last['payload'] as { x: number; y: number }
+    expect(Math.abs(p.y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
+  })
+
   it('pressKey sends a usable id', async () => {
     const { client, received } = await capture()
     await client.pressKey('s1', 'Enter')
 
     usable(received.find((m) => m['type'] === 'input:key'), 'input:key')
+  })
+
+  it('pressKey sends its modifiers as the HID bitmap, and none as 0', async () => {
+    const { client, received } = await capture()
+    await client.pressKey('s1', 'KeyA', ['shift', 'meta'])
+    await client.pressKey('s1', 'Enter')
+    expect(received.filter((m) => m['type'] === 'input:key').map((m) => m['payload'])).toEqual([
+      { code: 'KeyA', modifiers: 0x0a }, { code: 'Enter', modifiers: 0 },
+    ])
+  })
+
+  it('pressButton sends the name with a usable id', async () => {
+    const { client, received } = await capture()
+    await client.pressButton('s1', 'volume_up')
+    const sent = received.find((m) => m['type'] === 'input:button')
+    usable(sent, 'input:button')
+    expect(sent!['payload']).toEqual({ name: 'volume_up' })
+  })
+
+  // A long press is the app's timer seeing a pointer stay down, so there is nothing to move.
+  it('longPress holds one point for the duration, with no moves, and acks on the end', async () => {
+    const { client, received } = await capture()
+    const at: Record<string, number> = {}
+    const started = Date.now()
+    await client.longPress('s1', 0.3, 0.7, 120)
+    at['done'] = Date.now() - started
+    const start = received.find((m) => m['type'] === 'input:touch:start')
+    const end = received.find((m) => m['type'] === 'input:touch:end')
+    expect(start).toMatchObject({ payload: { x: 0.3, y: 0.7 } })
+    expect(start).not.toHaveProperty('requestId')
+    usable(end, 'input:touch:end')
+    expect(end).toMatchObject({ payload: { x: 0.3, y: 0.7 } })
+    expect(received.some((m) => m['type'] === 'input:touch:move')).toBe(false)
+    expect(at['done']).toBeGreaterThanOrEqual(115)
+  })
+
+  // Android's adb path replays the hold after the end arrives, so the ack comes that much later than a tap's.
+  it('longPress waits for its ack a hold longer than a tap does', async () => {
+    const { client } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.tap('s1', 0.5, 0.5)
+      await client.longPress('s1', 0.5, 0.5, 40)
+    } finally {
+      spy.mockRestore()
+    }
+    const tapWait = Math.max(...timeouts.slice(0, timeouts.indexOf(40)))
+    expect(timeouts).toContain(tapWait + 40)
+  })
+
+  // A swipe that stays put is replayed as a long press there too, as long as the swipe lasted.
+  it('swipe waits for its ack its own duration longer than a tap does', async () => {
+    const { client } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.swipe('s1', [0.5, 0.5], [0.5, 0.5], 80)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timeouts).toContain(10_000 + 80)
+  })
+
+  it('a held swipe waits for its ack its hold longer too, and a hold that is not a time is none', async () => {
+    const { client, received } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 50)
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, Number.NaN)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timeouts).toContain(10_000 + 40 + 50)
+    expect(timeouts).toContain(10_000 + 40)
+    expect(received.filter((m) => m['type'] === 'input:touch:end')).toHaveLength(2)
+  })
+
+  // Both agents inject a move the moment it arrives, so a pinch sent at once is a jump. `pinch:end` carries no
+  // position, so the last move has to be the end.
+  it('pinch paces its moves over the duration, ends on the end position, and acks on pinch:end', async () => {
+    const { client, received } = await capture()
+    const stamps: number[] = []
+    const started = Date.now()
+    const done = client.pinch('s1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 160)
+    const watch = setInterval(() => { stamps.push(received.filter((m) => m['type'] === 'input:pinch:move').length) }, 10)
+    await done
+    clearInterval(watch)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(150)
+    const start = received.find((m) => m['type'] === 'input:pinch:start')
+    expect(start).toEqual({ type: 'input:pinch:start', sessionId: 's1', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+    const moves = received.filter((m) => m['type'] === 'input:pinch:move')
+    expect(moves).toHaveLength(8)
+    for (const m of moves) expect(m).not.toHaveProperty('requestId')
+    const last = moves.at(-1)!['payload'] as { f0: { x: number }; f1: { x: number } }
+    expect(last.f0.x).toBeCloseTo(0.2, 9)
+    expect(last.f1.x).toBeCloseTo(0.8, 9)
+    usable(received.find((m) => m['type'] === 'input:pinch:end'), 'input:pinch:end')
+    // Spread out rather than sent together: some sample saw a move count strictly between none and all.
+    expect(stamps.some((n) => n > 0 && n < 8)).toBe(true)
+  })
+
+  // Nothing on the relay or the agent lifts a pointer its client left down, and a cancel lands inside a long press.
+  it.each([
+    ['longPress', (c: RelayClient) => c.longPress('s1', 0.3, 0.7, 2000), 'input:touch:end'],
+    ['pinch', (c: RelayClient) => c.pinch('s1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 2000), 'input:pinch:end'],
+    ['swipe', (c: RelayClient) => c.swipe('s1', [0.1, 0.1], [0.9, 0.9], 2000), 'input:touch:end'],
+  ] as const)('leaving mid-%s ends the gesture before the leave, and sends nothing after it', async (_, gesture, end) => {
+    const { client, received } = await capture()
+    const running = gesture(client).catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 300))
+    client.leaveSession('s1')
+    expect(await running).toBeInstanceOf(SessionLeftError)
+    await new Promise((r) => setTimeout(r, 100))
+    const types = received.map((m) => m['type'])
+    const ends = types.filter((t) => t === end)
+    expect(ends).toHaveLength(1)
+    expect(types.indexOf(end)).toBeLessThan(types.indexOf('session:leave'))
+    expect(types.slice(types.indexOf('session:leave') + 1)).toEqual([])
+    if (end === 'input:touch:end') {
+      expect(received.find((m) => m['type'] === end)).toHaveProperty('payload')
+      // A touch is cancelled first, so an agent that knows the cancel has nothing left for the end (#1115).
+      expect(types.filter((t) => t === 'input:touch:cancel')).toHaveLength(1)
+      expect(types.indexOf('input:touch:cancel')).toBe(types.indexOf(end) - 1)
+    } else expect(types).not.toContain('input:touch:cancel')
+  })
+
+  it('a gesture the leave ended does not touch one opened after a re-join', async () => {
+    const { client, received } = await capture()
+    const first = client.longPress('s1', 0.1, 0.1, 400).catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 100))
+    client.leaveSession('s1')
+    await client.joinSession('s1')
+    const second = client.longPress('s1', 0.9, 0.9, 600)
+    expect(await first).toBeInstanceOf(SessionLeftError)
+    await second
+    const ends = received.filter((m) => m['type'] === 'input:touch:end').map((m) => m['payload'])
+    // One end for the gesture the leave closed, one for the second gesture's own release, none sent by the first.
+    expect(ends).toEqual([{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }])
+  })
+
+  it('a refused pinch names the reason', async () => {
+    const { client } = await capture((m) => ({
+      type: 'input:error', sessionId: m['sessionId'], requestId: m['requestId'], reason: 'unsupported', message: 'pinch is not available on this path',
+    }))
+    const err = await client.pinch('s1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 16).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(InputRefusedError)
+    expect((err as InputRefusedError).reason).toBe('unsupported')
   })
 
   it('a refused input fails the step, naming the reason (#512)', async () => {
@@ -1113,7 +1299,7 @@ describe('RelayClient — session lifecycle (#512, finding 4)', () => {
       message: 'session s1 rebounded to a new agent while this boot was in flight',
     }, 's1')
     const bootErr = await boot.catch((e: unknown) => e)
-    const stub = { queryUITree: async (): Promise<never> => { throw bootErr } } as unknown as RelayClient
+    const stub = { queryUITreeWithTurn: async (): Promise<never> => { throw bootErr } } as unknown as RelayClient
     const err = await new RelayDriver(stub, 's1').queryUITree().catch((e: unknown) => e)
     expect(err).toBe(bootErr) // the guard marks without replacing the object
     expect(isEnvironmentStepFailure(err)).toBe(true)
@@ -1848,5 +2034,165 @@ describe('RelayClient launch options', () => {
     await client.launchApp('s1', 7)
     expect(received.some((m) => m['type'] === 'agents:list')).toBe(false)
     expect(Object.keys(received.find((m) => m['type'] === 'app:launch')!)).toEqual(['type', 'sessionId', 'requestId', 'buildId'])
+  })
+})
+
+describe('RelayClient.chrome — the device\'s buttons, for checking a flow before it runs', () => {
+  let wss: WebSocketServer | null = null
+
+  afterEach(async () => {
+    const s = wss
+    wss = null
+    if (!s) return
+    for (const c of s.clients) c.terminate()
+    await new Promise<void>((r) => s.close(() => r()))
+  })
+
+  async function joined(chromeAfterMs: number | null) {
+    wss = new WebSocketServer({ port: 0 })
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as Record<string, unknown>
+        if (msg['type'] !== 'session:start') return
+        ws.send(JSON.stringify({ type: 'session:joined', sessionId: msg['sessionId'], capabilities: [] }))
+        if (chromeAfterMs !== null) {
+          setTimeout(() => ws.send(JSON.stringify({ type: 'session:chrome', sessionId: msg['sessionId'], payload: { buttons: [], streamType: 'h264' } })), chromeAfterMs)
+        }
+      })
+    })
+    const port = (wss.address() as { port: number }).port
+    const client = new RelayClient(`ws://localhost:${port}`, '')
+    await client.connect()
+    await client.joinSession('s1')
+    return client
+  }
+
+  it('keeps the chrome the relay sent at join, with nothing waiting for it', async () => {
+    const client = await joined(0)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(await client.chrome('s1', 1)).toEqual({ buttons: [], streamType: 'h264' })
+    client.disconnect()
+  })
+
+  it('waits for one still to come, and answers null when none does', async () => {
+    const late = await joined(40)
+    expect(await late.chrome('s1', 2000)).toEqual({ buttons: [], streamType: 'h264' })
+    late.disconnect()
+    const first = wss!
+    for (const c of first.clients) c.terminate()
+    await new Promise<void>((r) => first.close(() => r()))
+    const never = await joined(null)
+    expect(await never.chrome('s1', 30)).toBeNull()
+    never.disconnect()
+  })
+})
+
+describe('RelayClient.setOrientation / setPosture — wait for the state, not the first event', () => {
+  let wss: WebSocketServer | null = null
+  afterEach(async () => {
+    const s = wss
+    wss = null
+    if (!s) return
+    for (const c of s.clients) c.terminate()
+    await new Promise<void>((r) => s.close(() => r()))
+  })
+
+  const iosChrome = (streamRotation?: number, extra: Record<string, unknown> = {}) => ({
+    framePng: '', bezelWidth: 1, bezelHeight: 1, compositeWidth: 1, compositeHeight: 1,
+    padding: { left: 0, right: 0, top: 0, bottom: 0 }, screenRect: { x: 0, y: 0, width: 1, height: 1 },
+    screenCornerRadius: 0, logicalWidth: 1, logicalHeight: 1, buttons: [], ...(streamRotation === undefined ? {} : { streamRotation }), ...extra,
+  })
+
+  /** A relay that sends `initial` after the join and answers each request with the frames `answer` returns. */
+  async function relay(initial: Record<string, unknown>[], answer: (m: Record<string, unknown>) => Record<string, unknown>[]) {
+    const received: Record<string, unknown>[] = []
+    wss = new WebSocketServer({ port: 0 })
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as Record<string, unknown>
+        received.push(msg)
+        if (msg['type'] === 'session:start') {
+          ws.send(JSON.stringify({ type: 'session:joined', sessionId: 's1', capabilities: [] }))
+          for (const f of initial) ws.send(JSON.stringify({ sessionId: 's1', ...f }))
+          return
+        }
+        for (const f of answer(msg)) setTimeout(() => ws.send(JSON.stringify({ sessionId: 's1', ...f })), 20)
+      })
+    })
+    const client = new RelayClient(`ws://localhost:${(wss.address() as { port: number }).port}`, '')
+    await client.connect()
+    await client.joinSession('s1')
+    await new Promise((r) => setTimeout(r, 30))
+    return { client, received }
+  }
+
+  it('sends nothing when the device is already held that way', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: iosChrome(270) }], () => [])
+    await client.setOrientation('s1', 'landscape', 500)
+    expect(received.some((m) => m['type'] === 'input:rotate')).toBe(false)
+  })
+
+  // An Android body coming upright sends several chromes on the way; only the one that names the target ends the wait.
+  it('turns, and waits past an intermediate chrome for the one that names the target', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 90 } }], (m) =>
+      m['type'] === 'input:rotate'
+        ? [{ type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 90 } }, { type: 'session:chrome', payload: { buttons: [], streamType: 'h264', bodyRotation: 0 } }]
+        : [])
+    await client.setOrientation('s1', 'portrait', 1000)
+    expect(received.find((m) => m['type'] === 'input:rotate')).toMatchObject({ payload: { orientation: 'portrait' } })
+  })
+
+  it('turns an upside-down device to portrait rather than calling it done', async () => {
+    const { client, received } = await relay([{ type: 'session:chrome', payload: iosChrome(180) }], (m) =>
+      m['type'] === 'input:rotate' ? [{ type: 'session:chrome', payload: iosChrome(0) }] : [])
+    await client.setOrientation('s1', 'portrait', 1000)
+    expect(received.some((m) => m['type'] === 'input:rotate')).toBe(true)
+  })
+
+  it('refuses a device that cannot say which way it is held, as a device that lacks it', async () => {
+    const { client } = await relay([{ type: 'session:chrome', payload: iosChrome(90, { scaleBasis: 2000 }) }], () => [])
+    await expect(client.setOrientation('s1', 'landscape', 300)).rejects.toBeInstanceOf(DeviceLacksError)
+  })
+
+  it('fails as the environment when the turn never shows', async () => {
+    const { client } = await relay([{ type: 'session:chrome', payload: iosChrome(0) }], () => [])
+    const err = await client.setOrientation('s1', 'landscape', 200).catch((e: unknown) => e)
+    expect(isEnvironmentStepFailure(err)).toBe(true)
+    expect(err).not.toBeInstanceOf(DeviceLacksError)
+    expect((err as Error).message).toMatch(/did not report landscape/)
+  })
+
+  const two = (currentId: string) => ({ type: 'device:postures', payload: { postures: [{ id: 'closed', label: 'Folded' }, { id: 'open', label: 'Unfolded' }], currentId } })
+
+  // iOS sends an empty list before the device is ready and in the middle of a fold (measured).
+  it('waits past an empty list, then folds and waits for the posture to be current', async () => {
+    const { client, received } = await relay([{ type: 'device:postures', payload: { postures: [], currentId: null } }], (m) =>
+      m['type'] === 'input:posture' ? [{ type: 'device:postures', payload: { postures: [], currentId: null } }, two('closed')] : [])
+    const pending = client.setPosture('s1', 'folded', 1000)
+    // A second empty list while it waits must not end the wait either: only one with postures in it does.
+    const push = (f: Record<string, unknown>) => { for (const c of wss!.clients) c.send(JSON.stringify({ sessionId: 's1', ...f })) }
+    setTimeout(() => push({ type: 'device:postures', payload: { postures: [], currentId: null } }), 30)
+    setTimeout(() => push(two('open')), 80)
+    await pending
+    expect(received.find((m) => m['type'] === 'input:posture')).toMatchObject({ payload: { postureId: 'closed' } })
+  })
+
+  it('sends nothing when the device is already in that posture', async () => {
+    const { client, received } = await relay([two('closed')], () => [])
+    await client.setPosture('s1', 'folded', 500)
+    expect(received.some((m) => m['type'] === 'input:posture')).toBe(false)
+  })
+
+  it('refuses a device with no postures as one that lacks them, and a list of three as uncertain', async () => {
+    const none = await relay([{ type: 'device:postures', payload: { postures: [], currentId: null } }], () => [])
+    await expect(none.client.setPosture('s1', 'unfolded', 200)).rejects.toBeInstanceOf(DeviceLacksError)
+    none.client.disconnect()
+    const first = wss!
+    for (const c of first.clients) c.terminate()
+    await new Promise<void>((r) => first.close(() => r()))
+    const three = await relay([{ type: 'device:postures', payload: { postures: [{ id: '1', label: 'a' }, { id: '2', label: 'b' }, { id: '3', label: 'c' }], currentId: '1' } }], () => [])
+    const err = await three.client.setPosture('s1', 'unfolded', 200).catch((e: unknown) => e)
+    expect((err as Error).message).toMatch(/offers 3 postures/)
+    expect(err).not.toBeInstanceOf(DeviceLacksError)
   })
 })

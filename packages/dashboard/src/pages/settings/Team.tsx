@@ -24,7 +24,9 @@ import {
 } from '@/components/ui/table'
 import { UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
-import { joinPath, loadTeammateBases } from '@/lib/publicLink'
+import { joinPath, loadTeammateBases, type PublicUrlWarningReason } from '@/lib/publicLink'
+import { PublicUrlWarning } from '@/components/PublicUrlWarning'
+import { publicUrlWarningAnnouncement } from '@/components/relayUrlWarningCopy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getTeamMembers, queryKeys } from '@/lib/queries'
 import { ListStateRow } from '@/components/ListStateRow'
@@ -64,14 +66,14 @@ function copyToClipboard(text: string): Promise<boolean> {
  * A link the Admin hands to a teammate, shown whether or not it was copied. Focus goes to it on mount,
  * where it can be selected and copied by hand — the only way on a plain-HTTP page.
  */
-function CopyableLink({ link, copied, noun }: { link: string; copied: boolean; noun: string }) {
+function CopyableLink({ link, copied, noun, warningId }: { link: string; copied: boolean; noun: string; warningId?: string }) {
   const labelId = useId()
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => { ref.current?.focus() }, [link])
   return (
     <>
       <p id={labelId} className="text-sm text-muted-foreground">{copied ? `${noun[0].toUpperCase()}${noun.slice(1)} copied to clipboard:` : `Copy this ${noun}:`}</p>
-      <Input ref={ref} readOnly value={link} aria-labelledby={labelId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
+      <Input ref={ref} readOnly value={link} aria-labelledby={labelId} aria-describedby={warningId} onFocus={(e) => e.currentTarget.select()} className="font-mono" />
     </>
   )
 }
@@ -94,7 +96,15 @@ export function TeamSettings() {
   const [linkCopied, setLinkCopied] = useState(false)
   const [inviteStatus, setInviteStatus] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [invitePublicUrlWarning, setInvitePublicUrlWarning] = useState<PublicUrlWarningReason>()
+  const inviteWarningId = useId()
+  const inviteMountedRef = useRef(true)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
+
+  useEffect(() => {
+    inviteMountedRef.current = true
+    return () => { inviteMountedRef.current = false }
+  }, [])
 
   const { register, handleSubmit, control, reset, setError, formState: { errors, isSubmitting, submitCount } } = useForm<InviteData>({
     shouldFocusError: false, // FormErrorCount focuses, once the field is described (#824)
@@ -114,6 +124,7 @@ export function TeamSettings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, role: data.role }),
       })
+      if (!inviteMountedRef.current) return
       // The relay refuses an address that already has an account: an invitation never changes one.
       if (res.status === 409) {
         setError('email', { message: 'Already a member. Change their role in the list instead.' })
@@ -124,7 +135,9 @@ export function TeamSettings() {
       // The relay returns the link it mailed (#788). It has none to offer when its only address is one a
       // teammate cannot open, and then the link is built from the teammate base.
       const link = json.inviteUrl ?? joinPath((await loadTeammateBases()).linkBase, `/invite?token=${json.token}`)
+      if (!inviteMountedRef.current) return
       const copied = await copyToClipboard(link)
+      if (!inviteMountedRef.current) return
       setInviteLink(link)
       setLinkCopied(copied)
       // Toasts render outside the dialog, and an open dialog hides everything outside it from assistive
@@ -138,16 +151,29 @@ export function TeamSettings() {
         toast.warning('Email could not be sent. Copy the invite link from the dialog, and check your SMTP settings.')
       }
     } catch {
+      if (!inviteMountedRef.current) return
       toast.error('Failed to create invite link')
       setInviteStatus('Failed to create invite link.')
     }
   }
 
   function handleDialogClose(open: boolean) {
+    if (!open && isSubmitting) {
+      setInviteStatus('Invite creation is still in progress. Wait for it to finish before closing this dialog.')
+      return
+    }
     setInviteOpen(open)
     // Cleared on the way in, not on the way out: a closing dialog stays on screen through its exit animation,
     // and clearing it then showed the empty form fading out in place of what was just issued.
-    if (open) { setInviteLink(''); setLinkCopied(false); setInviteStatus(''); reset() }
+    if (open) {
+      setInviteLink(''); setLinkCopied(false); setInviteStatus(''); setInvitePublicUrlWarning(undefined); reset()
+      void loadTeammateBases().then((bases) => {
+        setInvitePublicUrlWarning(bases.publicUrlWarning)
+        if (bases.publicUrlWarning) {
+          setInviteStatus((current) => current ? `${current} ${publicUrlWarningAnnouncement}` : publicUrlWarningAnnouncement)
+        }
+      })
+    }
   }
 
   async function handleRoleChange(id: number, role: string) {
@@ -239,13 +265,14 @@ export function TeamSettings() {
             <DialogHeader><DialogTitle>Invite team member</DialogTitle></DialogHeader>
             {/* Mounted before the outcome arrives, so the change is announced. */}
             <p role="status" className="sr-only">{inviteStatus}</p>
+            {invitePublicUrlWarning && <PublicUrlWarning id={inviteWarningId} />}
             {inviteLink ? (
               <div className="flex flex-col gap-3 pt-2">
-                <CopyableLink link={inviteLink} copied={linkCopied} noun="invite link" />
+                <CopyableLink link={inviteLink} copied={linkCopied} noun="invite link" warningId={invitePublicUrlWarning ? inviteWarningId : undefined} />
                 <Button onClick={() => handleDialogClose(false)}>Done</Button>
               </div>
             ) : (
-              <form onSubmit={handleSubmit(onInvite)} className="flex flex-col gap-4 pt-2">
+              <form onSubmit={(event) => { void handleSubmit(onInvite)(event) }} className="flex flex-col gap-4 pt-2">
                 <div className="grid gap-2">
                   <Label htmlFor="invite-email">Email</Label>
                   <Input id="invite-email" type="email" aria-required="true" aria-invalid={!!errors.email} aria-describedby={errors.email ? 'email-error' : undefined} {...register('email')} />

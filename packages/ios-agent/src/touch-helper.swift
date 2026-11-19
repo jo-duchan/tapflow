@@ -18,6 +18,7 @@
 //   type 9 = key press     ([0]=modifierBitmap u8, [1–3]=pad, [4–7]=hidUsage u32BE, page=0x07)
 //   type 10 = HID button down (a=usagePage u32BE, b=usage u32BE) — real-time hold, no auto-up
 //   type 11 = HID button up   (a=usagePage u32BE, b=usage u32BE)
+//   type 13 = touch cancel    (x, y unused — last saved coords; an up where the touch cannot be cancelled)
 //
 // Single-touch: IndigoHIDMessageForMouseNSEvent(p, delta=0, target=0x32, NSEventType, size, edge)
 // Two-finger:   IndigoHIDMessageForMouseNSEvent(p1, p2, target, eventType, direction, 1.0,1.0,1.0,1.0)
@@ -334,12 +335,14 @@ let kIndigoHIDTargetDigitizer: UInt32 = 0x32
 
 let kNormalizedSize = CGSize(width: 1.0, height: 1.0)
 
-func inject(x: Double, y: Double, eventType: UInt) {
+/// Returns whether the event went out on the digitizer path, which is the one a cancel can be sent on.
+@discardableResult
+func inject(x: Double, y: Double, eventType: UInt) -> Bool {
     if useDigitizerPath {
-        injectDigitizer(x: x, y: y, eventType: eventType)
-    } else {
-        injectMouse(x: x, y: y, eventType: eventType)
+        return injectDigitizer(x: x, y: y, eventType: eventType)
     }
+    injectMouse(x: x, y: y, eventType: eventType)
+    return false
 }
 
 func injectMouse(x: Double, y: Double, eventType: UInt) {
@@ -357,24 +360,32 @@ func injectMouse(x: Double, y: Double, eventType: UInt) {
 // UIBackdropView (folder blur) and system gesture layers only respond to digitizer-class events;
 // mouse-class events from IndigoHIDMessageForMouseNSEvent are silently ignored by those layers.
 // byte patches: 0x6c/0x10c = 0x32 (kIOHIDEventFieldDigitizerIsDisplayIntegrated — marks as real finger)
-func injectDigitizer(x: Double, y: Double, eventType: UInt) {
+//
+// `cancel` lifts the touch as cancelled (#1115): mask Range|Touch|Cancel (0x83) with no contact, which the app receives
+// as `touchesCancelled` rather than a tap — measured on Xcode 26 and 27.1, UIKit and SwiftUI. It returns false instead
+// of falling back to the mouse path, whose events carry no cancel: the caller then sends an up.
+@discardableResult
+func injectDigitizer(x: Double, y: Double, eventType: UInt, cancel: Bool = false) -> Bool {
     guard let createParent = mkDigitizer, let createFinger = mkFinger,
           let appendFn = appendEv, let trackpadFn = indigoTrackpad else {
-        injectMouse(x: x, y: y, eventType: eventType); return
+        if cancel { return false }
+        injectMouse(x: x, y: y, eventType: eventType); return false
     }
     let ts = mach_absolute_time()
-    let isUp: Bool      = eventType == kNSLeftMouseUp
-    let mask: UInt32    = isUp ? 0x06 : 0x07   // 0x07=Range|Touch|Position, 0x06=Touch|Position
+    let isUp: Bool      = eventType == kNSLeftMouseUp || cancel
+    let mask: UInt32    = cancel ? 0x83 : isUp ? 0x06 : 0x07   // 0x07=Range|Touch|Position, 0x06=Touch|Position, 0x83=Range|Touch|Cancel
     let contact: UInt32 = isUp ? 0 : 1
     guard let parent = createParent(nil, ts, 2, 0, 1, mask, 0, x, y, 0, 0, 0, contact, contact, 0),
           let finger = createFinger(nil, ts, 1, 1, mask, x, y, 0, 0, 0, contact, contact, 0) else {
         fputs("warn: IOHIDEventCreate returned nil — mouse fallback\n", stderr)
-        injectMouse(x: x, y: y, eventType: eventType); return
+        if cancel { return false }
+        injectMouse(x: x, y: y, eventType: eventType); return false
     }
     appendFn(parent, finger, 0)
     guard let msgPtr = trackpadFn(parent) else {
         fputs("warn: IndigoHIDMessageForTrackpadEventFromHIDEventRef returned nil\n", stderr)
-        injectMouse(x: x, y: y, eventType: eventType); return
+        if cancel { return false }
+        injectMouse(x: x, y: y, eventType: eventType); return false
     }
     // Routing tag: iOS ignores trackpad messages without this — including normal UI touches.
     // Use malloc_size (not a header field) to safely check the second slot.
@@ -383,6 +394,7 @@ func injectDigitizer(x: Double, y: Double, eventType: UInt) {
         msgPtr.storeBytes(of: UInt32(0x32), toByteOffset: 0x10c, as: UInt32.self)
     }
     sendMsg(hidClient, sendSel, msgPtr, true, nil, nil)
+    return true
 }
 
 func injectTwoFinger(x1: Double, y1: Double, x2: Double, y2: Double, direction: UInt32) {
@@ -502,6 +514,10 @@ func pressLegacyButton(code: UInt32) {
 
 // MARK: - Stdin read loop
 
+// How the current single-finger touch went down: none, the digitizer path (cancellable) or the mouse path (not).
+// A cancel with nothing down is dropped: one sent with no touch in progress crashed backboardd in another tool.
+enum TouchDown { case none, digitizer, mouse }
+var touchDown = TouchDown.none
 var lastX: Double = 0
 var lastY: Double = 0
 var pinchLastX1: Double = 0
@@ -540,6 +556,7 @@ DispatchQueue.global(qos: .userInteractive).async {
             let y2 = f32BE(rest, offset: 12)
             switch type {
             case 6:
+                touchDown = .none
                 pinchLastX1 = x1; pinchLastY1 = y1
                 pinchLastX2 = x2; pinchLastY2 = y2
                 injectTwoFinger(x1: x1, y1: y1, x2: x2, y2: y2, direction: kDirDown)
@@ -560,11 +577,20 @@ DispatchQueue.global(qos: .userInteractive).async {
             switch type {
             case 1:
                 lastX = x; lastY = y
-                inject(x: x, y: y, eventType: kNSLeftMouseDown)
+                touchDown = inject(x: x, y: y, eventType: kNSLeftMouseDown) ? .digitizer : .mouse
             case 2:
                 lastX = x; lastY = y
                 inject(x: x, y: y, eventType: kNSLeftMouseDragged)
             case 3:
+                touchDown = .none
+                inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
+            case 13:
+                // Cancel the touch (#1115). Never leaves it down: where the cancel cannot be sent, it is lifted with an
+                // up, which is what an end does.
+                let down = touchDown
+                touchDown = .none
+                if down == .none { break }
+                if down == .digitizer && injectDigitizer(x: lastX, y: lastY, eventType: kNSLeftMouseUp, cancel: true) { break }
                 inject(x: lastX, y: lastY, eventType: kNSLeftMouseUp)
             case 4:
                 let usagePage = u32BE(rest, offset: 0)

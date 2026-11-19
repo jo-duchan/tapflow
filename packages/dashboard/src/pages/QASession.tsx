@@ -120,7 +120,8 @@ function QASessionPage() {
   } = useAgentSession(os, (listed) => onListedRef.current(listed));
 
   const selectedSession = agentGroups.find((s) => s.agentName === selectedAgent);
-  const isAdmin = useAuth().user?.role === 'Admin';
+  const me = useAuth().user;
+  const isAdmin = me?.role === 'Admin';
   const {
     osVersions, osVersion, setOsVersion,
     deviceSearch, setDeviceSearch, versionedDevices, deviceGroups, hiddenCount, showHidden, setShowHidden,
@@ -360,6 +361,7 @@ function QASessionPage() {
                 resetMode={resumed ? 'app-only' : appliedResetMode}
                 onRecordingUploaded={handleRecordingUploaded}
                 onSessionEnded={onSessionEnded}
+                capturingSteps={me?.flowCapture}
               />
             </div>
           ) : selectedAgent ? (

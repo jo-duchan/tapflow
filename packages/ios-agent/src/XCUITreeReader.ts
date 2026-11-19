@@ -4,8 +4,10 @@ import { createHash, randomUUID } from 'crypto'
 import { readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join, relative } from 'path'
 import type { UIElement } from '@tapflowio/agent-core'
+import type { FieldReadReason, FocusedField, KeyboardState, ReachResult, ReachTarget } from '@tapflowio/protocol'
+import { toFramePoint } from '@tapflowio/protocol/screen'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
-import { parseTreeText } from './xcuiTree.js'
+import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
 
 const logger = createLogger('ios-agent:xcui-tree')
 const execFileAsync = promisify(execFile)
@@ -128,6 +130,9 @@ async function answers(port: number, token: string): Promise<boolean> {
 // Drives the resident XCUITest tree runners, one per simulator: builds the runner once, launches it per device
 // (staying resident), and queries GET /tree over the simulator-shared loopback. Replaces the AXUIElement path
 // (UITreeReader), which required a Simulator.app window.
+/** How long a runner nobody kept is left attached after its last request ends (see `kept`). */
+export const RUNNER_IDLE_MS = 30_000
+
 export class XCUITreeReader {
   private readonly runners = new Map<string, RunnerHandle>()
   private readonly starting = new Map<string, Promise<ReadyRunner>>()
@@ -139,8 +144,37 @@ export class XCUITreeReader {
   // stop()'s share, so stopping everything also cancels a device that is only building and holds no handle yet.
   private readonly generations = new Map<string, number>()
   private epoch = 0
+  // A runner an automation client's boot warmed stays for the device's life. Any other — started by a person's Capture
+  // dialog asking for a tree or a reach — is released once no request has been in flight for `idleMs`: an attached
+  // runner made a busy SwiftUI app visibly lag with no query running (measured on Food Truck, iOS 26.5), so one left
+  // behind would bring the lag back for the rest of the person's session.
+  private readonly kept = new Set<string>()
+  private readonly inFlight = new Map<string, number>()
+  private readonly idle = new Map<string, ReturnType<typeof setTimeout>>()
 
-  constructor(private readonly native: RunnerNative = defaultNative) {}
+  constructor(private readonly native: RunnerNative = defaultNative, private readonly idleMs = RUNNER_IDLE_MS) {}
+
+  private begin(udid: string): void {
+    this.inFlight.set(udid, (this.inFlight.get(udid) ?? 0) + 1)
+    clearTimeout(this.idle.get(udid))
+    this.idle.delete(udid)
+  }
+
+  private end(udid: string): void {
+    const left = (this.inFlight.get(udid) ?? 1) - 1
+    if (left > 0) { this.inFlight.set(udid, left); return }
+    this.inFlight.delete(udid)
+    if (this.kept.has(udid) || !this.runners.has(udid)) return
+    // One timer per device: a second left pending would delete the newer one's entry when it fired, and stop a runner
+    // started after it before that runner's own idle time ran out.
+    clearTimeout(this.idle.get(udid))
+    const timer = setTimeout(() => {
+      this.idle.delete(udid)
+      if (!this.kept.has(udid) && !this.inFlight.has(udid)) this.stopIfDevice(udid)
+    }, this.idleMs)
+    timer.unref?.()
+    this.idle.set(udid, timer)
+  }
 
   private destination(udid: string): string {
     // No arch — xcodebuild resolves it (arm64 on Apple Silicon, x86_64 on Intel).
@@ -216,12 +250,14 @@ export class XCUITreeReader {
    * Start the runner before anything asks for a tree, for a device an automation client just booted. A cold
    * start is about 3 s on a running simulator and 8–9 s right after a boot (iOS 26.5), and on the first query
    * that time is spent inside the step's selector timeout (10 s by default). Manual sessions are not warmed:
-   * they never read the tree, and a runner costs about 650 MB per device.
+   * they never read the tree, and an attached runner makes a busy app lag (and costs 110–360 MB, measured). A device
+   * warmed here keeps its runner until `unkeep` or a stop.
    *
    * Each device has its own runner, so warming one never touches another's. A read during the warm-up waits on
    * the same launch.
    */
   warm(udid: string): void {
+    this.kept.add(udid)
     if (this.starting.has(udid)) return
     const held = this.runners.get(udid)
     let generation = this.generation(udid)
@@ -241,7 +277,8 @@ export class XCUITreeReader {
     check.then(() => {
       // The device may have been shut down while the probe was out.
       if (this.generation(udid) !== generation) return
-      return this.ensureRunner(udid)
+      // `unkeep` during the launch found no runner to time out, and nothing else would.
+      return this.ensureRunner(udid).then(() => this.releaseIfIdle(udid))
     }).catch((e: Error) => {
       // Stopped on purpose (the device was shut down mid-start) is not a fault worth sending anyone to Xcode for.
       if (this.generation(udid) !== generation) logger.debug(`tree runner warm-up for ${udid} cancelled: ${e.message}`)
@@ -329,7 +366,21 @@ export class XCUITreeReader {
   }
 
   async read(udid: string, bundleId: string): Promise<UIElement[]> {
+    return (await this.readWithTurn(udid, bundleId)).elements
+  }
+
+  /** The tree with the app's interface turn the runner read beside it (`UiTreeResponse.interfaceTurn`). */
+  async readWithTurn(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     if (!bundleId) throw new PlatformError('UI tree query needs a foreground app — launch an app first')
+    this.begin(udid)
+    try {
+      return await this.readTree(udid, bundleId)
+    } finally {
+      this.end(udid)
+    }
+  }
+
+  private async readTree(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
     const handle = await this.ensureRunner(udid)
     let text: string
     try {
@@ -349,10 +400,43 @@ export class XCUITreeReader {
     // Load-bearing for launch readiness too: while a launched app is still starting the runner answers a "not found"
     // query chain, and this error is what tells flow-runner's `launchApp` the screen is not up yet (see agent-core's
     // `DeviceAgent.launchApp`). Turning it into an empty tree would make every launch read as ready at once.
-    if (!text.includes('Element subtree:') && !text.includes('Application,')) {
+    const { body, interfaceTurn } = splitInterfaceTurn(text)
+    if (!body.includes('Element subtree:') && !body.includes('Application,')) {
       throw new PlatformError(`tree runner returned an unexpected response for ${bundleId} — is the app running in the foreground?`)
     }
-    return parseTreeText(text)
+    const elements = parseTreeText(body)
+    return interfaceTurn === undefined ? { elements } : { elements, interfaceTurn }
+  }
+
+  /**
+   * Where touches meant for `targets` land, as the runner's XCTest judges them (`/reach`, #1125). Every target `unknown`
+   * when the runner cannot answer: the client taps then knowing the tap was not checked. ~130 ms a target (measured).
+   */
+  async reach(udid: string, bundleId: string, targets: ReachTarget[]): Promise<ReachResult[]> {
+    const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
+    if (!bundleId) return unknown('no app has been launched or installed')
+    this.begin(udid)
+    try {
+      return await this.reachOnce(udid, bundleId, targets, unknown)
+    } finally {
+      this.end(udid)
+    }
+  }
+
+  private async reachOnce(udid: string, bundleId: string, targets: ReachTarget[], unknown: (reason: string) => ReachResult[]): Promise<ReachResult[]> {
+    const handle = await this.ensureRunner(udid)
+    const q = encodeURIComponent(Buffer.from(JSON.stringify(targets)).toString('base64'))
+    try {
+      const r = await fetch(`http://localhost:${handle.port}/reach?bundleId=${encodeURIComponent(bundleId)}&targets=${q}`, {
+        signal: AbortSignal.timeout(5_000 + 300 * targets.length),
+      })
+      if (!r.ok) return unknown(`the tree runner answered ${r.status}`)
+      const results = ((await r.json()) as { results?: unknown }).results
+      return Array.isArray(results) && results.length === targets.length ? results as ReachResult[] : unknown('the tree runner answered for other elements')
+    } catch (e) {
+      if (refused(e)) this.dropRunner(udid, handle)
+      return unknown('the tree runner did not answer')
+    }
   }
 
   // Drop one device's runner, if `handle` is still the one it holds. Every fault path goes through here rather than
@@ -364,9 +448,29 @@ export class XCUITreeReader {
     this.killHandle(handle)
   }
 
+  /**
+   * A device booted for a person after an automation client warmed it: its runner is no longer kept, and goes the way of
+   * any other once idle — or a person picking the device up after a flow run would keep the runner, and its lag, all
+   * session.
+   */
+  unkeep(udid: string): void {
+    if (!this.kept.delete(udid)) return
+    this.releaseIfIdle(udid)
+  }
+
+  // Start the idle countdown for a runner nothing is asking, as the end of a request would (`end` leaves a kept one).
+  private releaseIfIdle(udid: string): void {
+    if (this.inFlight.has(udid)) return
+    this.inFlight.set(udid, 1)
+    this.end(udid)
+  }
+
   // Stop every device's runner, including launches still building (agent shutdown).
   stop(): void {
     this.epoch++
+    this.kept.clear()
+    for (const timer of this.idle.values()) clearTimeout(timer)
+    this.idle.clear()
     for (const handle of this.runners.values()) this.killHandle(handle)
     this.runners.clear()
   }
@@ -374,6 +478,9 @@ export class XCUITreeReader {
   // Stop this device's runner, or the launch starting one for it — on device shutdown and before an erase.
   stopIfDevice(udid: string): void {
     this.bumpGeneration(udid)
+    this.kept.delete(udid)
+    clearTimeout(this.idle.get(udid))
+    this.idle.delete(udid)
     const handle = this.runners.get(udid)
     if (!handle) return
     this.runners.delete(udid)
@@ -403,4 +510,57 @@ export class XCUITreeReader {
     }, 3000)
     timer.unref?.()
   }
+}
+
+const READ_REASONS = new Set<string>(['no-app', 'no-focus', 'ambiguous', 'secure'])
+
+const ORIENTATION_TURN = { 1: 0, 2: 180, 3: 270, 4: 90 } as const
+
+/**
+ * The runner's keyboard as protocol's `KeyboardState`, with the rect carried from the app's interface into the
+ * framebuffer a touch lands in — the space a recorded tap is in — by the turn `/tree` reports the same way. An
+ * orientation the runner could not read (0) leaves the rect as it is, which is right for the portrait app it almost
+ * always is.
+ */
+export function toKeyboardState(body: unknown): KeyboardState {
+  if (typeof body !== 'object' || body === null) return { shown: null }
+  const b = body as Record<string, unknown>
+  // The runner says `null` only when the app is not in front (`TreeServer.keyboard`): the home screen, or another app.
+  if (b['shown'] === null) return { shown: null, onHome: true }
+  if (b['shown'] === false) return { shown: false, onHome: false }
+  if (b['shown'] !== true) return { shown: null }
+  const r = b['rect'] as Record<string, unknown> | undefined
+  if (!r || !['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')) return { shown: true, onHome: false }
+  const turn = ORIENTATION_TURN[b['orientation'] as 1 | 2 | 3 | 4]
+  const [x, y, w, h] = [r['x'], r['y'], r['width'], r['height']] as [number, number, number, number]
+  const a = toFramePoint(turn, [x, y])
+  const c = toFramePoint(turn, [x + w, y + h])
+  return {
+    shown: true,
+    rect: { x: Math.min(a[0], c[0]), y: Math.min(a[1], c[1]), width: Math.abs(a[0] - c[0]), height: Math.abs(a[1] - c[1]) },
+    onHome: false,
+  }
+}
+
+/** The runner's `/field` answer as protocol's `FocusedField`. Anything it does not recognise is a failed read, never a
+ *  field: a value is what a recording will export, so a shape this cannot vouch for must not become one. */
+export function toFocusedField(body: unknown): { field: FocusedField | null; reason?: FieldReadReason } {
+  if (typeof body !== 'object' || body === null) return { field: null, reason: 'failed' }
+  const b = body as Record<string, unknown>
+  const f = b['frame'] as Record<string, unknown> | undefined
+  const frameOk = !!f && ['x', 'y', 'width', 'height'].every((k) => typeof f[k] === 'number')
+  if (typeof b['identifier'] !== 'string' || !frameOk) {
+    const reason = typeof b['reason'] === 'string' && READ_REASONS.has(b['reason']) ? b['reason'] as FieldReadReason : 'failed'
+    return { field: null, reason }
+  }
+  const secure = b['type'] === 'secure'
+  const field: FocusedField = {
+    identifier: b['identifier'],
+    placeholder: typeof b['placeholder'] === 'string' ? b['placeholder'] : '',
+    frame: { x: f!['x'] as number, y: f!['y'] as number, width: f!['width'] as number, height: f!['height'] as number },
+    secure,
+  }
+  // A secure field's value is dropped here too, whatever the runner sent.
+  if (!secure && typeof b['value'] === 'string') field.value = b['value']
+  return secure ? { field, reason: 'secure' } : { field }
 }

@@ -7,6 +7,8 @@ export interface AuthUser {
   displayName: string | null
   avatarUrl: string | null
   role: string
+  /** Flow Capture (#1125): the relay keeps this person's QA steps in memory. Absent from a relay that predates it. */
+  flowCapture?: boolean
 }
 
 interface AuthState {

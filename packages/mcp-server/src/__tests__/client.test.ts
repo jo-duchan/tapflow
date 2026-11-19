@@ -1,3 +1,4 @@
+import { DeviceLacksError } from '@tapflowio/flow-runner'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { IncomingMessage } from 'node:http'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -19,7 +20,7 @@ function createMockRelay(): {
   const received: Record<string, unknown>[] = []
   let conn: WebSocket | null = null
   let inputAck: 'done' | 'error' | 'error-with-reason' | 'none' = 'done'
-  const TERMINAL = new Set(['input:touch:end', 'input:key', 'input:button'])
+  const TERMINAL = new Set(['input:touch:end', 'input:key', 'input:button', 'input:pinch:end'])
 
   wss.on('connection', (ws) => {
     conn = ws
@@ -563,6 +564,135 @@ describe('TapflowClient', () => {
   })
 
   describe('swipe', () => {
+    // `scroll { until }` through `run_flow` drags: held still at the end, wobbling, then lifted (flow-runner's holdStill).
+    it('passes a hold from run_flow\'s driver to the swipe', async () => {
+      const spy = vi.spyOn(client, 'swipe').mockResolvedValue(undefined)
+      await makeFlowDriver(client, 'sess-1').swipe([0.5, 0.7], [0.5, 0.3], 300, 150)
+      expect(spy).toHaveBeenCalledWith('sess-1', expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number), 300, 150)
+      spy.mockRestore()
+    })
+
+    // CodeRabbit on #1190: a hold has no waiter for disconnectDevice to settle, so it must see the leave itself, and the
+    // finger it put down is lifted before the leave rather than left on the device.
+    it('a leave during the hold lifts the finger, sends nothing after the leave, and fails the swipe as left', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      client.disconnectDevice('sess-1')
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      // Flushed by a later request on the same socket rather than by sleeping.
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.indexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+      const after = types.slice(leave + 1)
+      expect(after.filter((t) => t === 'input:touch:move')).toEqual([])
+      expect(after.filter((t) => t === 'input:touch:end')).toHaveLength(1) // sess-2's tap
+    })
+
+    // The window between the last move and the lift: the swipe must not send an end of its own after the leave lifted it.
+    it('a leave after the last move sends no second end', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 1_600).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 1_500))
+      client.disconnectDevice('sess-1')
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const mine = relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])
+      expect(mine.filter((t) => t === 'input:touch:end')).toHaveLength(1)
+      expect(mine[mine.length - 1]).toBe('session:leave')
+    })
+
+    // CodeRabbit on #1190: a swipe stopped by a replaced socket clears only its own record, so a newer swipe's finger
+    // is still lifted by a leave.
+    it('a stale swipe does not clear a newer swipe\'s touch, so the leave still lifts it', async () => {
+      // Moves a second apart: the stale swipe sleeps through the drop and the reconnect, and wakes after the fresh one
+      // began — asserted, not assumed, so a slow reconnect fails here rather than passing for the wrong reason.
+      let staleSettled = false
+      const stale = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 8_000).catch((e: unknown) => e).finally(() => { staleSettled = true })
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      // The old socket's close lands first, so the reconnect below is not raced by it.
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const fresh = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.2, 40, 2_000).catch((e: unknown) => e)
+      expect(staleSettled).toBe(false)
+      expect(String(await stale)).toMatch(/could not confirm/i)
+      await new Promise((r) => setTimeout(r, 100))
+      client.disconnectDevice('sess-1')
+      expect(await fresh).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.lastIndexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+    })
+
+    // CodeRabbit on #1190: an old socket's close that lands after a reconnect must not drop the socket that replaced it.
+    it('an old socket closing after a reconnect leaves the new one in use', async () => {
+      const old = client['ws']!
+      await client.connect()
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      expect(client['ws']).not.toBeNull()
+      await expect(client.tap('sess-2', 0.1, 0.1)).resolves.toBeUndefined()
+    })
+
+    // CodeRabbit on #1190: the old socket's close settles only its own waiters; a tap waiting on the new one stays
+    // pending through it and settles on its own ack, delivered after the close.
+    it('an old socket closing after a reconnect leaves a request on the new one waiting for its ack', async () => {
+      relay.setInputAck('none')
+      const old = client['ws']!
+      await client.connect()
+      let settled = false
+      const tap = client.tap('sess-1', 0.1, 0.1).finally(() => { settled = true })
+      const end = await waitForMessage(relay, 'input:touch:end')
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      await new Promise((r) => setTimeout(r, 20))
+      expect(settled).toBe(false)
+      const started = Date.now()
+      relay.send({ type: 'input:done', sessionId: 'sess-1', requestId: end['requestId'] })
+      await expect(tap).resolves.toBeUndefined()
+      // Its ack settled it, not the deadline.
+      expect(Date.now() - started).toBeLessThan(500)
+    })
+
+    it('a leave with no swipe open sends the leave alone', async () => {
+      client.disconnectDevice('sess-1')
+      await client.tap('sess-2', 0.1, 0.1)
+      // Exactly the leave: an assertion on what precedes it would pass on a leave that was never sent.
+      expect(relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])).toEqual(['session:leave'])
+    })
+
+    // CodeRabbit on #1190: frames already sent may have reached the device, so a drop mid-swipe is unconfirmed.
+    it('a drop during the hold fails the swipe as unconfirmed, not as a product failure', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      relay.lastClient().close()
+      const err = await swipe as Error
+      expect(err.message).toMatch(/could not confirm/i)
+      expect(err.message).toMatch(/may have landed/i)
+      expect(err.message).toMatch(/do not repeat/i)
+    })
+
+    it('refuses a hold that is not a time, before sending anything', async () => {
+      const before = relay.sentMessages().length
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, Number.POSITIVE_INFINITY)).rejects.toThrow(/swipe hold/)
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, -1)).rejects.toThrow(/swipe hold/)
+      expect(relay.sentMessages().length).toBe(before)
+    })
+
+    it('holds still at the end point before the lift when asked to', async () => {
+      await client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 100)
+      await waitForMessage(relay, 'input:touch:end')
+      const msgs = relay.sentMessages()
+      const end = msgs.findIndex((m) => m['type'] === 'input:touch:end')
+      // Ends on the end point before the lift; the cadence and the wobble are holdStill's own test (flow-runner).
+      const last = msgs[end - 1]!
+      expect(last['type']).toBe('input:touch:move')
+      expect(Math.abs((last['payload'] as { y: number }).y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
+    })
+
     it('sends touch:start, multiple touch:move, and touch:end', async () => {
       await client.swipe('sess-1', 0, 0, 100, 100, 80)
       await waitForMessage(relay, 'input:touch:end')
@@ -570,7 +700,17 @@ describe('TapflowClient', () => {
       expect(msgs[0]).toMatchObject({ type: 'input:touch:start', payload: { x: 0, y: 0 } })
       expect(msgs[msgs.length - 1]).toMatchObject({ type: 'input:touch:end', payload: { x: 100, y: 100 } })
       const moves = msgs.filter((m) => m['type'] === 'input:touch:move')
-      expect(moves.length).toBe(7) // STEPS - 1
+      expect(moves.length).toBe(8)
+      // Every agent lifts where the last move was: it must be the end, or the swipe stops an eighth short.
+      expect(moves[moves.length - 1]).toMatchObject({ payload: { x: 100, y: 100 } })
+    })
+
+    // Exactly the end, not 1 × the path: 0.6 + (0.5 − 0.6) × 1 is 0.5000000000000001.
+    it('ends its moves on the end point exactly', async () => {
+      await client.swipe('sess-1', 0.6, 0.8, 0.5, 0.2, 80)
+      await waitForMessage(relay, 'input:touch:end')
+      const moves = relay.sentMessages().filter((m) => m['type'] === 'input:touch:move')
+      expect(moves[moves.length - 1]!['payload']).toEqual({ x: 0.5, y: 0.2 })
     })
   })
 
@@ -634,6 +774,119 @@ describe('TapflowClient', () => {
       await client.pressKey('sess-1', 'Backspace')
       const msg = await waitForMessage(relay, 'input:key')
       expect(msg).toMatchObject({ payload: { code: 'Backspace', modifiers: 0 } })
+    })
+
+    it('sends a flow\'s modifiers as the HID bitmap', async () => {
+      await client.pressKey('sess-1', 'KeyZ', ['ctrl', 'shift'])
+      const msg = await waitForMessage(relay, 'input:key')
+      expect(msg).toMatchObject({ payload: { code: 'KeyZ', modifiers: 0x03 } })
+    })
+  })
+
+  describe('longPress', () => {
+    it('holds one point for the duration with no moves, and refuses a hold past a minute', async () => {
+      const started = Date.now()
+      await client.longPress('sess-1', 0.3, 0.7, 100)
+      expect(Date.now() - started).toBeGreaterThanOrEqual(95)
+      const msgs = relay.sentMessages().filter((m) => String(m['type']).startsWith('input:'))
+      expect(msgs.map((m) => m['type'])).toEqual(['input:touch:start', 'input:touch:end'])
+      expect(msgs[1]).toMatchObject({ payload: { x: 0.3, y: 0.7 } })
+      await expect(client.longPress('sess-1', 0.3, 0.7, 60_001)).rejects.toThrow(/no greater than 60000ms/)
+    })
+
+    // Android's adb path replays the hold after the end arrives, so the ack comes that much later than a tap's.
+    it('waits for its ack a hold longer than a tap does', async () => {
+      const timeouts: number[] = []
+      const real = globalThis.setTimeout
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+        timeouts.push(ms ?? 0)
+        return real(fn, ms)
+      }) as typeof setTimeout)
+      try {
+        await client.longPress('sess-1', 0.5, 0.5, 40)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(timeouts).toContain(2_000 + 40)
+    })
+
+    // A swipe that stays put is replayed as a long press there too, as long as the swipe lasted.
+    it('a swipe waits for its ack its own duration longer than a tap does', async () => {
+      const timeouts: number[] = []
+      const real = globalThis.setTimeout
+      const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+        timeouts.push(ms ?? 0)
+        return real(fn, ms)
+      }) as typeof setTimeout)
+      try {
+        await client.swipe('sess-1', 0.5, 0.5, 0.5, 0.5, 80)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(timeouts).toContain(2_000 + 80)
+    })
+  })
+
+  describe('pinch', () => {
+    // `pinch:end` carries no position, so the last move must be the end; and the agents inject each move as it
+    // arrives, so the pace is set here.
+    it('paces eight moves over the duration, ending on the end position', async () => {
+      const started = Date.now()
+      await client.pinch('sess-1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 80)
+      expect(Date.now() - started).toBeGreaterThanOrEqual(75)
+      const msgs = relay.sentMessages().filter((m) => String(m['type']).startsWith('input:pinch'))
+      expect(msgs[0]).toMatchObject({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+      const moves = msgs.filter((m) => m['type'] === 'input:pinch:move')
+      expect(moves).toHaveLength(8)
+      expect(moves.at(-1)).toMatchObject({ payload: { f0: { x: 0.2 }, f1: { x: 0.8 } } })
+      expect(msgs.at(-1)!['type']).toBe('input:pinch:end')
+    })
+  })
+
+  describe('chrome', () => {
+    it('keeps the chrome the relay sent, and answers null when none comes', async () => {
+      expect(await client.chrome('sess-1', 20)).toBeNull()
+      relay.send({ type: 'session:chrome', sessionId: 'sess-1', payload: { buttons: [], streamType: 'h264' } })
+      await settle(relay, client)
+      expect(await client.chrome('sess-1', 1)).toEqual({ buttons: [], streamType: 'h264' })
+    })
+  })
+
+  describe('setOrientation / setPosture', () => {
+    const chrome = (bodyRotation: number) => ({ type: 'session:chrome', sessionId: 'sess-1', payload: { buttons: [], streamType: 'h264', bodyRotation } })
+
+    it('sends nothing when already there, and otherwise waits for the chrome that names the target', async () => {
+      relay.send(chrome(90))
+      await settle(relay, client)
+      await client.setOrientation('sess-1', 'landscape', 500)
+      expect(relay.sentMessages().some((m) => m['type'] === 'input:rotate')).toBe(false)
+      const turning = client.setOrientation('sess-1', 'portrait', 1000)
+      await waitForMessage(relay, 'input:rotate')
+      relay.send(chrome(90))
+      relay.send(chrome(0))
+      await turning
+    })
+
+    it('waits past an empty posture list, and refuses a device with none as one that lacks them', async () => {
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [], currentId: null } })
+      await settle(relay, client)
+      await expect(client.setPosture('sess-1', 'folded', 100)).rejects.toBeInstanceOf(DeviceLacksError)
+      const folding = client.setPosture('sess-1', 'folded', 1000)
+      // A second empty list while it waits must not end the wait either.
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [], currentId: null } })
+      await settle(relay, client)
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '2' } })
+      const sent = await waitForMessage(relay, 'input:posture')
+      expect(sent).toMatchObject({ payload: { postureId: '1' } })
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '1' } })
+      await folding
+    })
+
+    it('sends nothing when the device is already in that posture', async () => {
+      relay.send({ type: 'device:postures', sessionId: 'sess-1', payload: { postures: [{ id: '1', label: 'Folded' }, { id: '2', label: 'Unfolded' }], currentId: '1' } })
+      await settle(relay, client)
+      await client.setPosture('sess-1', 'folded', 500)
+      expect(relay.sentMessages().some((m) => m['type'] === 'input:posture')).toBe(false)
     })
   })
 
@@ -1030,10 +1283,57 @@ describe('TapflowClient', () => {
       }
     })
 
+    // #1125: an `unknown` reach is a tap nobody checked, so a blip must be retried as a tree read is, not answered so.
+    describe('reach', () => {
+      const TARGET = { role: 'button' as const, label: 'Go', frame: { x: 0, y: 0, width: 0.5, height: 0.1 } }
+      const reachWith = async (fetchImpl: typeof globalThis.fetch) => {
+        const origFetch = globalThis.fetch
+        globalThis.fetch = fetchImpl
+        try {
+          return await client.reach('sess-1', [TARGET])
+        } finally {
+          globalThis.fetch = origFetch
+        }
+      }
+
+      it.each([500, 502, 503, 504])('classifies %d as transient, for the engine to retry', async (status) => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'temporary' }), { status }))).rejects.toBeInstanceOf(TransientQueryError)
+      })
+
+      it('classifies a dropped connection as transient', async () => {
+        await expect(reachWith(async () => { throw new TypeError('fetch failed') })).rejects.toBeInstanceOf(TransientQueryError)
+      })
+
+      it.each([400, 401, 409])('fails %d as the environment', async (status) => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'refused' }), { status }))).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      it('fails an unknown session as the environment', async () => {
+        await expect(reachWith(async () => new Response(JSON.stringify({ error: 'Session not found' }), { status: 404 }))).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      // A session the relay ended will not come back, so neither a 502 nor a dropped socket is worth waiting on.
+      it.each([
+        ['a 502', async () => new Response(JSON.stringify({ error: 'temporary' }), { status: 502 })],
+        ['a dropped connection', async () => { throw new TypeError('fetch failed') }],
+      ])('fails %s on an ended session as the environment', async (_, fetchImpl) => {
+        relay.send({ type: 'session:terminated', sessionId: 'sess-1', reason: 'agent-disconnected' })
+        await settle(relay, client)
+        await expect(reachWith(fetchImpl as typeof globalThis.fetch)).rejects.toBeInstanceOf(EnvironmentStepError)
+      })
+
+      it('answers unknown from a relay without the route', async () => {
+        expect(await reachWith(async () => new Response(JSON.stringify({ error: 'Not found' }), { status: 404 })))
+          .toEqual([{ state: 'unknown', reason: 'this relay predates reach' }])
+      })
+    })
+
     it.each([
       {},
       { elements: [{}] },
       { elements: [{ role: 'button', label: 'x', frame: { x: 0, y: 0, width: 2, height: 1 }, enabled: true }] },
+      { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, secure: 'true' }] },
+      { elements: [{ role: 'input', label: 'x', frame: { x: 0, y: 0, width: 1, height: 1 }, enabled: true, focused: 1 }] },
     ])('rejects malformed successful ui-tree responses', async (body) => {
       const origFetch = globalThis.fetch
       globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 200 })

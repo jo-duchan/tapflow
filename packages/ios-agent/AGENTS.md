@@ -78,6 +78,59 @@ It also takes **one** simulator off the network and puts it back (#607), which o
     `this.ws != null`: `ws.send` on a closing socket buffers the payload and neither throws nor emits, so
     an answer sent there is indistinguishable from a delivered one at the call site.
 
+### Typing leaves the pasteboard as it found it (#1129)
+
+`input:type` types by writing the text to the simulator's pasteboard and pressing Cmd+V — the only path that takes any
+Unicode — so the text used to stay there, and with a flow's `inputText: { secret }` that is a password the next person to
+open the simulator can paste. `doType` now reads what the pasteboard held, pastes, waits `PASTE_SETTLE_MS` and puts it
+back, confirmed by reading it back as `clipboard:read`'s restore is (a queue released early would let the next clipboard
+operation read the typed text). Unreadable, it is emptied. A restore that cannot be confirmed — a read-back that fails
+counts as unconfirmed, not as done — empties the pasteboard instead, losing what the person had copied rather than leaving
+the text. Either way it is logged without the values, and the input still answers done: the text landed.
+
+**The wait is the part to measure before touching.** The chord is sent, not read: the app reads the pasteboard when it
+handles Cmd+V, and a restore that lands first pastes the old contents. Measured on iPhone 17 Pro iOS 26.4 with the UIKit
+sample (2026-11-08): restoring 0, 30 and 100 ms after the chord landed the typed text 20/20 each, idle and at a load
+average of 137 — the restore's own `simctl pbcopy` takes ~145 ms, and that is what protects it. 100 ms is a margin that
+does not lean on simctl staying slow. The host Mac's clipboard was not touched (Simulator.app's pasteboard sync did not
+carry the text). No test can hold the wait: a zero passes every one, which is why the numbers are here. **What was not
+measured**: an app whose main thread is stalled past the wait plus that pbcopy when the chord arrives (a tap that set off
+heavy layout) would paste the restored contents and the input would still answer done. The text is written inside the
+guard, so a write that fails after the device took it is put back too, and a sentinel a `clipboard:read` gave up
+restoring is not put back.
+
+### The keyboard language a device was left in (#1134)
+
+A device keeps the keyboard language a tester switched to — Caps Lock switches it on a device with two keyboards —
+and the next tester's keys type in it. **It is stored in `com.apple.keyboard.preferences`** (`KeyboardLastUsed`,
+`KeyboardsCurrentAndNext`), found by diffing the simulator's preferences across a Caps Lock press on iOS 26.4 — not
+in `AppleKeyboards`, whose order does not reset it, and not in `com.apple.Preferences`. `resetKeyboardLanguage` writes
+the first keyboard there and restarts the keyboard daemon; **a running app keeps its language until it is launched
+again** (measured both ways). The relay sends `device:keyboard-reset` when a different person takes the device; one
+that arrives before the device is up waits for the boot, and every reset waits for that boot's
+`syncKeyboardsFromLanguages`, which rewrites the list it reads.
+
+**A replay sets it to a named keyboard, and a run resets it** (#1135). A keyboard set waits behind a `device:run-reset` in
+flight on the same device (`replayPrep`), whose own keyboard reset would otherwise land after it — a dialog closed mid-reset and opened
+again, or a dialog that gave up waiting while the agent went on, leaves exactly that. `device:keyboard-set` (`keyboard-set`) writes
+the keyboard Flow Capture recorded, or the first when none is named, and answers once the daemon has restarted, so the
+replay launches the app after it; a keyboard not in `AppleKeyboards` is an error and nothing is written. A field read
+carries `KeyboardLastUsed` as the language it was typed in. A `flow run` boot resets the keyboard last in its run reset,
+each call bounded by what is left of the reset's budget, and does not report it as an item.
+
+**Where the soft keyboard is** (`ui:keyboard:request`, `keyboard-state`) is answered by the app observer (below). The
+runner's `GET /keyboard`, kept for an agent's own checks, rides on `/field` too and gives the same shape: the `Keyboard` element's frame as fractions of the app's window, run to the window's bottom edge
+because its globe and dictation row sit below the element (measured), and turned into the portrait framebuffer a touch
+is in by the app's interface orientation, as `/tree`'s turn is. No soft keyboard is shown with a hardware keyboard
+connected. `ImeAction`, a key code tapflow names, presses Return.
+
+The daemon is `user/foreground/com.apple.TextInput.kbd`. `system/com.apple.kbd`, which the boot's sync kickstarted until
+then, does not exist on iOS 26.4 and failed in silence.
+
+The host Mac's input source was measured **not** to reach the device with Simulator.app closed (tapflow's usual
+state): with the Mac on Korean and then on ABC, the same keys typed the same Hangul. With Simulator.app open,
+`EnableKeyboardSync` may add a Mac-wide way in; that is not measured.
+
 ### Input acks carry a reason
 
 `ackInput` answers `'delivered'` or an `InputErrorReason` from `@tapflowio/protocol` (the contract and
@@ -177,6 +230,7 @@ only to the process that received the frame that opened it, and never revives a 
 | 9 | key press | self-contained — modifier down/up completes inside the frame |
 | 10 | button down (a=usagePage, b=usage) | self-contained |
 | 11 | button up (a=usagePage, b=usage) | self-contained — the helper keeps no record of which buttons are down, so a paired down is not a precondition |
+| 13 | touch cancel (coords unused — `lastX/lastY`) | continues — lifts the touch with a digitizer event masked Range\|Touch\|Cancel, which the app receives as `touchesCancelled`, not a tap (#1115; measured on Xcode 26 and 27.1, UIKit and SwiftUI). The helper records whether the down went out on the digitizer path; a mouse-path touch, or a cancel event that cannot be built, is lifted with an up instead, so a touch is never left down. **With nothing down it is dropped**: a cancel sent with no touch in progress crashed backboardd in another tool, which is also why `TouchHelper` writes it only while its own `touchDown` is set — `ownsGesture()` stays true after a gesture ends. It releases ownership, so the client's end that follows writes nothing |
 
 When changing the Swift source, **always update both locations simultaneously**:
 1. `src/touch-helper.swift` — stdin protocol changes
@@ -204,9 +258,16 @@ Five things about it are easy to undo by accident:
   does not, and they answer different questions: writes are gated on the first, replacement
   decisions on the second. Gating replacement on readiness would spawn a second helper while the
   first was still starting.
-  This window is not only reached after a death. `sendChromeData` starts the helper and
-  `device:ready` follows a local socket connect later — tens of ms — so **an MCP caller that taps
-  as soon as `boot_device` returns lands inside it**, which is how it was found.
+  This window is not only reached after a death. `sendChromeData` starts a fresh helper on every
+  boot, so **a client that acted on `device:ready` at once landed inside it** — an MCP caller tapping
+  as soon as `boot_device` returned, and a flow whose first step was an input (#1114). So a boot now
+  holds `device:ready` until the helper is ready (`awaitTouchReady`, ~185ms measured, overlapping the
+  stream connect), up to `TOUCH_READY_WAIT_MS` (5s, the helper's own start-up deadline); past that it
+  announces the device anyway, and the input is refused as `channel-starting` as before. It does not
+  fail the boot, unlike a multi-panel device's helper: here the stream works without input, and a
+  device with a picture and no boot answer would be worse. Restarting the helper on every boot is kept
+  rather than reusing a ready one: a simulator shut down or erased between two boots leaves the old
+  helper's HID client pointing at a device that is gone, ready and injecting nothing.
   A helper that never announces itself is replaced after `READY_DEADLINE_MS`. Without that,
   running-but-never-ready has no exit at all: nothing asks for a replacement because it is running,
   and every input is refused because it is not ready, so a wedge in the CoreSimulator device lookup
@@ -307,13 +368,14 @@ The iOS UI tree comes from a resident **XCUITest runner** that runs *inside* the
 - Source: `xctest-runner/` — xcodegen `project.yml` → **committed `.xcodeproj`** (no xcodegen at runtime).
   - `TreeHost` — minimal host app the UI-test target attaches to.
   - `TreeRunner` — the UI-test target: `TreeServer.swift` opens an `NWListener` HTTP server; `TreeServerTest.swift` starts it and blocks so the process stays resident.
-- Protocol: `GET /health` → the token the host passed (readiness, and proof the runner is ours); `GET /tree?bundleId=<id>` → the app's `XCUIApplication.debugDescription` (text). The simulator shares `localhost` with the host (WDA pattern), so the host reaches the in-simulator server directly.
+- Protocol: `GET /health` → the token the host passed (readiness, and proof the runner is ours); `GET /tree?bundleId=<id>` → the app's `XCUIApplication.debugDescription` (text); `GET /field?bundleId=<id>` → the keyboard-focused text field as JSON (Flow Capture, #1135), or `{reason}` when there is none, more than one, or no app. **The tree's `value:` is not a field's value**: debugDescription prints it unquoted and cuts it at 18 characters (measured), so `/field` reads `XCUIElement.value` itself — whole, commas and Hangul still composing included, 40–90 ms against the tree's 0.2–0.5 s. A secure field's value never leaves the runner (it reads `•••`, and its length is a secret too), and an empty UIKit field, which echoes its placeholder as its value, comes back empty. `XCUITreeReader.readField` parses it and never logs the body. `GET /reach?bundleId=<id>&targets=<base64 JSON>` (#1125) answers where a touch meant for each element lands: the element is found again by identifier or label and the nearest clipped frame, `isHittable` decides covered, and the private `hitPointCoordinate` gives the point — **in the device's portrait coordinates even for a landscape app** (measured: (0.4805, 0.5) tapped there hit the row), so it is sent to the touch path as it is. Apple's hit test does not see an overlay with no accessibility node (a plain UIView scrim reads hittable, by design); a Capture flow's `expect` is what catches the tap it takes. ~130 ms per element, measured on Xcode 26.6 and 27.1. The simulator shares `localhost` with the host (WDA pattern), so the host reaches the in-simulator server directly.
 - **One runner per simulator, on a port the runner picks.** The host passes `TEST_RUNNER_TAPFLOW_TREE_PORT=0` and `TEST_RUNNER_TAPFLOW_TREE_TOKEN` (xcodebuild strips the prefix; without it nothing arrives). The runner prints `TAPFLOW_TREE_READY port=<n>` once it is listening, and the host reads that line from xcodebuild's stdout (so no `-quiet`, and the pipe is drained for the runner's life), then requires `/health` to answer with its token. A fixed port let a runner that lost its port still look ready, while another simulator's runner answered every request: measured, not theoretical.
 - `XCUITreeReader.ts` builds the runner (`build-for-testing`, cached under `xctest-runner/build/`, gitignored) and rebuilds when `build/tapflow-runner.stamp` no longer matches the runner sources, the checked-in project and `xcodebuild -version`. It launches one runner per device (`test-without-building`, resident), then fetches `/tree` from that device's port. Faults on one device (a refused read, a start that never answered) drop only that device's runner. `xcuiTree.ts` parses the debugDescription text into the unified schema — kept a **pure function** so it stays unit-testable against the `xcuiTree.test.ts` fixture (Open Q9: a future Xcode format change fails there).
-- Queries by bundleId: the reader needs the foreground app's bundleId, tracked in `IOSAgent.lastBundleIds` on `app:launch` — deliberately outside `DeviceState`, so it survives a relay reconnect that rebuilds that map. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
+- Queries by bundleId: the reader needs the foreground app's bundleId, tracked in `IOSAgent.lastBundleIds` on `app:launch` and on a successful `app:install` (a person may open the app from its home-screen icon rather than with Launch) — deliberately outside `DeviceState`, so it survives a relay reconnect that rebuilds that map. `readUITree` throws an actionable `PlatformError` if no app has been launched — never a silent empty tree.
 - Frames: debugDescription frames are points; the parser normalizes them 0-1 against the `Window` frame (same coordinate space as the touch path).
-- Lifecycle: started when an automation client (flow runner, MCP) boots the device, otherwise on the first UI-tree query, so the manual QA / streaming path never pays for it (about 650 MB per device). Killed on that device's shutdown, before an erase boot, and for every device on disconnect.
+- Lifecycle: started when an automation client (flow runner, MCP) boots the device, and kept until a person boots it (`unkeep`); otherwise on the first UI-tree or reach query, and **released once no request has been in flight for 30 s** (`RUNNER_IDLE_MS`, counted from the last request in flight, so a Match or Verify replay is not cut off). A recorded person's boot does not warm it: their keyboard and field reads come from the app observer below. **An attached runner costs the app, not only memory**: measured on Food Truck (iOS 26.5), the app lagged visibly with the runner attached and no query running, and was smooth with it gone; each `/keyboard` query also held the app 70–155 ms. Before anything new keeps it attached during a person's session, read [capture-lag-attached-runner.md](../../contributing/capture-lag-attached-runner.md). The memory was written here as about 650 MB per device; measured 2026-11-08 on iOS 26.4–26.5 it was 66–269 MB for the runner plus 46–92 MB for its xcodebuild (RSS). Killed on that device's shutdown, before an erase boot, and for every device on disconnect. `/keyboard` and `/field` stay in the runner for an agent's own checks; the agent no longer asks them.
 - `enabled`: debugDescription does not expose it, so elements default to `enabled: true`. If fidelity needs it, switch to the private snapshot API (plan Open Q9).
+- `secure` / `focused` (Flow Capture, #1125): `secure` is `type === 'SecureTextField'`, stated `true` or `false` on **every** input so that an input without it means "unknown" to a consumer deciding whether typed text may be written down. `focused` comes from `Keyboard Focused` in the line's **trailing flags only** — the whole line would match a quoted label containing those words — and only on an input: a tab prints `Selected, Focused` and is not where typing goes. Measured on iOS 26.5 / Xcode 26.6 and iOS 27.0 / Xcode 27.1, UIKit and SwiftUI alike: `SecureTextField, …, placeholderValue: 'Password', value: •••, Keyboard Focused`.
 
 When changing the tree output shape, **update both locations simultaneously**:
 1. `xctest-runner/TreeRunner/TreeServer.swift` — server / debugDescription source
@@ -323,6 +385,119 @@ After editing runner sources, regenerate the committed project (the runner binar
 ```bash
 cd packages/ios-agent/xctest-runner && xcodegen generate
 ```
+
+---
+
+### App observer (Flow Capture's keyboard and field reads)
+
+`src/app-observer.m`, linked into `bin/libtapflow-nethook.dylib`, answers the relay's `ui:keyboard:request` and
+`ui:field:request` from **inside the app under test**, with no accessibility client: UIKit's keyboard notifications
+for the soft keyboard's frame, the responder chain for the focused field. `src/AppObserver.ts` is the host side. The
+XCUITest runner answered these before, and an attached runner made the app lag (see the runner's lifecycle above). The
+observer answers in the runner's own shapes, so `toKeyboardState` and `toFocusedField` read both.
+
+- **It rides on the network layer's injection, not its target.** `DYLD_INSERT_LIBRARIES` is set at every boot by
+  `SimulatorNetwork.arm()` (with or without the host system extension), so the code is in every process; it activates
+  only in the app `TAPFLOW_OBSERVE_BUNDLE` names, which the agent sets **at install** as well as before Launch, so an
+  app opened from its home-screen icon is observed. Its own variable: naming the network target also opens that
+  control's verdict window (`SimulatorNetwork.target`) and would unsettle an app already running.
+- **No UIKit or CoreGraphics at link time.** Every process in the simulator loads the dylib, daemons included, and the
+  gate runs after load. UIKit is reached at run time, after the gate: class names, selectors, the string values of its
+  constants, rects as four doubles. The gate has network-hook.m's refusals (an embedded NUL in the bundle id, a udid
+  that does not fit).
+- **No Objective-C in either gate** (`tf_main_bundle_id`, `src/main-bundle.c`). The constructors run before `main`,
+  with no autorelease pool, and `+[NSBundle mainBundle]` autoreleases: `fileproviderd` and `GSSCred` abort on it
+  (`autoreleaseNoPage` → `_objc_fatal`, inside the pool push itself, so `@autoreleasepool` does not help), measured
+  on iOS 26.5. Both gates read the bundle id whenever a target was named, so with Capture on (`TAPFLOW_OBSERVE_BUNDLE`)
+  both daemons crashed in a loop — 95 reports in one day — and WebKit's navigations, which wait on them, never
+  finished: Safari and every web view stayed white, the app's own WebView included. It surfaced with app
+  accessibility on at boot (more processes start), which first read as accessibility being the cause; turning it
+  on in a running device changed nothing, and the crash reports named the library. So a process that is not
+  directly inside an `.app` (`tf_exe_in_app_bundle_decision`, the executable's path) stops before any bundle is
+  read — no daemon is, and no target ever is anything else — and an app's identifier is read through
+  CoreFoundation, which autoreleases nothing. Verified with Capture on: no daemon report after the boot, Safari and
+  the sample app's WebView load, the observer names taps, the network hook installs in the app.
+- **Asked by file, answered by file, in `/tmp/tapflow-observe-<udid>` (0700).** The host's /tmp is the simulator's
+  (measured), so the agent writes a nonce and the bundle it asks about to `request` by rename and that app, watching
+  the directory, answers `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is
+  not the one asked is dropped. Only the app named answers: every app observed since the boot watches the same
+  directory, and one sent behind another kept answering for a few seconds (iOS 27.0), first or over the right answer. 3–4 ms a request, measured; a Darwin notification needed a `simctl spawn` per request, 441 ms. The agent
+  asks one request at a time per device (a keyboard probe and a field read are often asked together), each answer
+  carries both, and a read that waited in that line longer than the relay waits (4 s) is answered unknown without
+  asking. `prepare()` makes the directory 0700 (`chmod` too: `mkdir` leaves one that exists as it was) and empties it of
+  answers and requests at every boot; the background marker stays, since a device picked up again may hold the app
+  suspended, and a new process clears it itself. The request is taken back once answered or given up on, since a process started within 2 s answers one
+  left behind; an answer that lands after its asker gave up is removed 3 s later, and any answer (or `.tmp`) older than
+  5 s is swept at each request. So a non-secure value outlives its read by a few seconds at most.
+- **No answer is not the home screen.** A suspended app cannot answer, so the observer leaves a `background` marker on
+  `DidEnterBackground` and clears it on `WillEnterForeground`. Marker present, or no process for the app
+  (`launchctl list`): `away`, the runner's "not in front" (`shown: null`, `onHome: true`; field `no-app`). Running and
+  silent: unknown (`shown: null`; field `failed`). `DidEnterBackground`, never resign-active, which a permission alert,
+  Control Center and the app switcher also send (measured on iOS 26.5 and 27.0). On iOS 27 another app's cold launch
+  delays the background by 7–9 s, but the other app shows nothing until then (screenshots once a second, measured), so
+  nothing can be typed there in the window.
+- **Each answer carries the app's state, because answering does not mean being in front.** An app keeps running for a
+  while after it leaves the foreground: measured on iOS 27, it answered 3 s after Home, past its own
+  `DidEnterBackground`. So `keyboardOf` reads `applicationState`: background is "not in front"; inactive with the
+  keyboard up is unknown (Home was pressed and the app has not reached the background — 0.5–2 s, measured — and a touch
+  on the home screen there must not be judged against that keyboard); inactive with the keyboard down is down, so a
+  permission alert's Allow stays an app tap. Shown only when the end frame overlaps the window by more than a point each
+  way (EarlGrey's rule), so a hardware keyboard's accessory alone reads as not shown. An app still coming up (launched,
+  or opened from its icon) gets up to 1 s to become active before it answers, and a request written before it was
+  watching is answered at start if it is under 2 s old; on iOS 27 a cold launch can outlast the agent's 1.5 s, which
+  reads as unknown.
+- **A field read is trusted as not secure only from UIKit's text classes** (`UITextField`, `UITextView` and their
+  subclasses: SwiftUI's `UIKitTextField`, React Native's `RCTUITextField`). Any other first responder — a WKWebView, whose
+  field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
+  answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
+  active: typing then goes elsewhere, a system sign-in alert's password field among them.
+- **Touch reports, while a person is recorded** (record-time observation). The observer wraps `-[UIApplication
+  sendEvent:]` (the original IMP kept, so other SDKs' wrappers chain) and, while a `touches` file is in the directory,
+  writes `touch-<seq>.json` per touch-down: whether a list under it was still moving (`isDecelerating`, or the private
+  `_isBouncing` at the end of a list, read **before** the event is delivered, since the touch stops the scroll), and the
+  accessibility element and nearest button it hit (identifier, label — never a text input's — traits, frame), or only
+  the surface for the keyboard, a web view or Flutter. The agent pairs each with the gesture it delivered (point and
+  time, both on this Mac) and sends `capture:touched`, only to a relay that asked (`touchObservations` on the boot).
+  **Cost, measured on Food Truck (iOS 26.5):** the hit test is the cost — 10–30 ms the first time on a screen, 3–5 ms
+  after — so one is run 0.7 s after a touch lifts and after the app becomes active, when nothing moves (a touch cancels
+  it), and the touch-down's own costs under 5.5 ms; the file is written off the main queue. Frame-count comparisons over
+  a run were too noisy to resolve this (one "on" run drew more frames than "off"); time the hook itself instead.
+- **Each touch's report is followed by the app's verdict** (`touch-<seq>-end.json`, P2a): whether the app *acted* on
+  it — a control event it listens for (`allControlEvents`), an action sent, a list row selected, or a recogniser of its
+  own reaching Ended — from the down until 1 s after the lift. Measured on iOS 26.5: every such signal lands within
+  4 ms of the lift except a single tap waiting on a double tap (352 ms); a touch iOS counts as a repeat (`tapCount`, now
+  in the down report) holds the one before it open. The agent matches the verdict by **seq and the down's `at`** (a
+  seq restarts with each app process), never by point and time, and repeats the `capture:touched` with `acted`; the
+  relay and flow-runner keep the later. **Absent `acted` is unknown, never "no"**, and that is what keeps it safe to
+  propose leaving a tap out: a surface, a drag, a cancel, React Native's every-touch handler, a responder whose touch
+  methods are defined in the app's bundle (measured both ways), a close more than 150 ms late, the app resigning
+  active, or any of the five hooked methods missing on this iOS (three are private) all leave it out. The hooks are
+  installed on the first recorded touch, never in an app nobody records, and each returns after the original when no
+  report is open; `sendEvent:` measured the same with and without them (median 0.5–0.7 ms). A recogniser on the
+  window, or UIKit's every-touch ones, is not the app acting (`_UIFlexInteraction` reaches Ended on a nav-bar tap).
+  **A touch inside a web view lands on a plain `UIView`** under `WKContentView` (iOS 26.5), so the surface check walks
+  the superviews; looking at the touched view alone missed every web touch.
+- **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
+  Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
+  `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
+  app — nothing off, every element named on; scroll smoothness the same either way). **It costs the app 13–21 MB**
+  (footprint 10 s after a cold launch, iOS 26.5, 3 runs each, identical within 1 MB: Food Truck 38 → 58, Sample
+  SwiftUI 27 → 44, Sample UIKit 23 → 36, a React Native app 32 → 53), and the simulator's other processes nothing
+  more, against 110–360 MB for the runner the memory line was drawn for. It was left off in #1162 because
+  it persists on the device and a dead agent could not restore it, so turning it on writes a host marker with the value
+  it replaces (`/private/var/tmp/tapflow-app-accessibility/<udid>.json`), and the marker puts it back: at a boot that is
+  not recorded, before a shutdown, and for a running device when the agent starts. A value already on is someone
+  else's and is never touched. **A running app keeps what it launched with** (measured), so it is set at the boot, before
+  any app runs; a recorded person who picked up a device with the app already running gets names from its next launch.
+  **This and touch reports follow the relay's `observed` on `device:boot`**, which no memory gate touches: an earlier
+  flag carried one, drawn for the runner, and turned observation off for the whole boot on a busy Mac — every `touched`
+  gone, with nothing saying so. A relay that sends no `observed` observes nobody. Decided at the boot: turning
+  capturing on mid-session, or a boot during a replay's pause, is observed from the next boot. Without it a field is told apart by placeholder and
+  frame, failures that show as unread or a divergence, never a wrong flow. The home screen is outside the app too,
+  hence the marker.
+- **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
+  `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
+  keyboard, and the lifecycle above. The probe is not committed; the measurements are here.
 
 ---
 
@@ -628,7 +803,8 @@ is the app's business. Every read and write source measured, including the ones 
   it did only the Duo's input.
 - **What it stands up, and why.** Only a device with nothing to report — no reading and nothing remembered
   (`PhysicalOrientation.note`, for a host where neither source answers: the helper is arm64-only); **every
-  run's boot** (`runReset`), so a flow replays from the same orientation whatever a person left; and a
+  run's boot** (`runReset`), so a flow replays from the same orientation whatever a person left, and a held
+  device's `device:run-reset` (Flow Capture's Match and Verify, #1139); and a
   session with no frame, which cannot be told the turn and whose viewer draws the device upright. A
   per-device memory, not a per-session one: per session is #910's shape, which the design review found. A
   device is read every time rather than marked unreadable after a failure — one failure right after a boot

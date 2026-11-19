@@ -560,6 +560,372 @@ describe('SimctlWrapper', () => {
       const wrapper = new SimctlWrapper(runner)
       await expect(wrapper.syncKeyboardsFromLanguages('device-1')).resolves.toBeUndefined()
     })
+
+    it('restarts the keyboard daemon by the name iOS 26 gives it', async () => {
+      // `system/com.apple.kbd` does not exist on iOS 26.4: the kickstart failed in silence (#1134).
+      const runner: SimctlRunner = {
+        exec: vi.fn().mockResolvedValueOnce('(\n    "en-US"\n)').mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      }
+      await new SimctlWrapper(runner).syncKeyboardsFromLanguages('device-1')
+      expect(runner.exec).toHaveBeenLastCalledWith('spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd')
+    })
+  })
+
+  // #1135: a replay starts from the keyboard the recording saw.
+  describe('setKeyboardLanguage', () => {
+    const LIST = '(\n    "en_US@sw=QWERTY;hw=Automatic",\n    "ko_KR@sw=Korean;hw=Automatic",\n    "emoji@sw=Emoji"\n)'
+    const runnerReading = (keyboards: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(keyboards).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    it('makes a named keyboard the one in use, the next one after it', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', 'ko_KR@sw=Korean;hw=Automatic')).toBe(true)
+      expect(runner.exec.mock.calls.slice(2)).toEqual([
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
+          'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
+        ['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'],
+      ])
+    })
+
+    // Review of #1145: the budget is for the whole reset, so each call gets what the ones before it left. With the same
+    // timeout for each, five calls could take five budgets while `device:ready` waited on them.
+    it('bounds the calls together when given a timeout, each by what is left', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(0)
+      // Each call takes a second.
+      const after = (out: string) => async () => { vi.setSystemTime(Date.now() + 1_000); return out }
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockImplementationOnce(after(LIST)).mockImplementation(after('')),
+      } satisfies SimctlRunner
+      try {
+        expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', undefined, 5_000)).toBe(true)
+      } finally { vi.useRealTimers() }
+      expect(runner.exec).not.toHaveBeenCalled()
+      expect(runner.execWithOpts.mock.calls.map(([opts]) => opts)).toEqual([{ timeoutMs: 5_000 }, { timeoutMs: 4_000 }, { timeoutMs: 3_000 }, { timeoutMs: 2_000 }, { timeoutMs: 1_000 }])
+    })
+
+    // `defaults read com.apple.keyboard.preferences` as an iOS 26.5 simulator prints it (trimmed).
+    const prefs = (lastUsed: string, first: string) => `{
+    HWKeyboardCapsLockRomanSwitch = 1;
+    KeyboardLastUsed = "${lastUsed}";
+    KeyboardsCurrentAndNext =     (
+        "${first}",
+        "${first}",
+        "en_US@sw=QWERTY;hw=Automatic"
+    );
+}`
+    const KO = 'ko_KR@sw=Korean;hw=Automatic'
+    const EN = 'en_US@sw=QWERTY;hw=Automatic'
+    const runnerWith = (current: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(LIST).mockResolvedValueOnce(current).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    // A replay's keyboard-set right after a run reset restarted the daemon a second time, which took 10.3 s (measured).
+    it('restarts nothing when the device is already in that keyboard', async () => {
+      const runner = runnerWith(prefs(KO, KO))
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', KO)).toBe(true)
+      expect(runner.exec).toHaveBeenCalledTimes(2)
+    })
+
+    // CodeRabbit on #1165: prefs written and the restart failed left the daemon behind them, and the next set with the
+    // same language skipped. It restarts until a restart succeeds.
+    it('restarts again after a failed restart, though the prefs already say so, and skips once one succeeded', async () => {
+      let kickstarts = 0
+      let failing = true
+      const runner = {
+        exec: vi.fn(async (...args: string[]) => {
+          if (args.includes('AppleKeyboards')) return LIST
+          if (args[3] === 'read') return prefs(KO, KO)
+          if (args.includes('kickstart')) { kickstarts++; if (failing) throw new Error('timed out') }
+          return ''
+        }),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      const simctl = new SimctlWrapper(runner)
+      // Prefs that do not match yet: written, and both daemon names fail.
+      runner.exec.mockImplementationOnce(async () => LIST).mockImplementationOnce(async () => '')
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(2)
+      failing = false
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(3)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(3)
+    })
+
+    // CodeRabbit on #1165, second round: the list already matched, the first write made the last-used match too, and
+    // the second write failed before any restart. A retry must still restart.
+    it('restarts on a retry after a write failed between the two, though the prefs now match', async () => {
+      let kickstarts = 0
+      let writes = 0
+      let current = prefs(EN, KO)
+      const runner = {
+        exec: vi.fn(async (...args: string[]) => {
+          if (args.includes('AppleKeyboards')) return LIST
+          if (args[3] === 'read') return current
+          if (args[3] === 'write') {
+            writes++
+            if (writes === 1) { current = prefs(KO, KO); return '' }
+            if (writes === 2) throw new Error('timed out')
+          }
+          if (args.includes('kickstart')) kickstarts++
+          return ''
+        }),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      const simctl = new SimctlWrapper(runner)
+      await expect(simctl.setKeyboardLanguage('device-1', KO)).rejects.toThrow('timed out')
+      expect(kickstarts).toBe(0)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(1)
+      await simctl.setKeyboardLanguage('device-1', KO)
+      expect(kickstarts).toBe(1)
+    })
+
+    // Measured: a device left with these disagreeing typed in the one last used, not the list's first.
+    it('still sets and restarts when the last used and the list disagree, either way', async () => {
+      const otherNext = prefs(KO, KO).replace('"en_US@sw=QWERTY;hw=Automatic"\n', '"ko_KR@sw=Korean;hw=Automatic"\n')
+      const suffixKey = `{\n    XKeyboardLastUsed = "${KO}";\n    KeyboardLastUsed = "${EN}";\n${prefs(KO, KO).split('\n').slice(3).join('\n')}`
+      const shorter = prefs(KO, KO).replace(',\n        "en_US@sw=QWERTY;hw=Automatic"\n', '\n')
+      for (const current of [prefs(KO, EN), prefs(EN, KO), prefs(EN, EN), '', otherNext, suffixKey, shorter]) {
+        const runner = runnerWith(current)
+        expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', KO)).toBe(true)
+        expect(runner.exec.mock.calls.at(-1)).toEqual(['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'])
+      }
+    })
+
+    it('writes nothing for a keyboard the device does not have', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1', 'fr_FR@sw=AZERTY;hw=Automatic')).toBe(false)
+      expect(runner.exec).toHaveBeenCalledTimes(1)
+    })
+
+    it('makes the first keyboard the one in use with none named', async () => {
+      const runner = runnerReading(LIST)
+      expect(await new SimctlWrapper(runner).setKeyboardLanguage('device-1')).toBe(true)
+      expect(runner.exec.mock.calls[2]).toEqual(['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'en_US@sw=QWERTY;hw=Automatic'])
+    })
+  })
+
+  // #1139: what a run's fresh install leaves, without the build — clearing files keeps notification permission and
+  // App Group containers.
+  describe('reinstallAppInPlace', () => {
+    it('copies the installed bundle aside, uninstalls, installs the copy, and removes it', async () => {
+      const { mkdtemp, mkdir, writeFile, readdir, access } = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+      const { tmpdir } = await import('os')
+      const { join } = await import('path')
+      const root = await mkdtemp(join(tmpdir(), 'tapflow-test-bundle-'))
+      const bundle = join(root, 'App.app')
+      await mkdir(bundle)
+      await writeFile(join(bundle, 'Info.plist'), 'plist')
+      let installedFrom = ''
+      let copyHeld: string[] = []
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => {
+        if (args[0] === 'get_app_container') return `${bundle}\n`
+        if (args[0] === 'install') { installedFrom = args[2]!; copyHeld = await readdir(installedFrom) }
+        return ''
+      })
+      await new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')
+      const order = vi.mocked(runner.execWithOpts).mock.calls.map(([, ...args]) => args[0])
+      expect(order).toEqual(['get_app_container', 'uninstall', 'install'])
+      expect(installedFrom).not.toBe(bundle)
+      expect(installedFrom.endsWith('/App.app')).toBe(true)
+      expect(copyHeld).toEqual(['Info.plist'])
+      await expect(access(installedFrom)).rejects.toThrow()
+    })
+
+    // After the uninstall the copy is the only one, and the finally deletes it (pre-PR review of #1139).
+    it('installs once more from the copy before giving up, and says the app is gone when that fails too', async () => {
+      const { mkdtemp, mkdir } = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+      const { tmpdir } = await import('os')
+      const { join } = await import('path')
+      const bundle = join(await mkdtemp(join(tmpdir(), 'tapflow-test-bundle-')), 'App.app')
+      await mkdir(bundle)
+      const run = (installs: Array<'ok' | 'fail'>) => {
+        const runner = mockRunner()
+        vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => {
+          if (args[0] === 'get_app_container') return bundle
+          if (args[0] === 'install' && installs.shift() === 'fail') throw new Error('install timed out\nCommand failed: xcrun simctl install')
+          return ''
+        })
+        return { runner, wrapper: new SimctlWrapper(runner) }
+      }
+      const once = run(['fail', 'ok'])
+      await once.wrapper.reinstallAppInPlace('device-1', 'com.app')
+      expect(vi.mocked(once.runner.execWithOpts).mock.calls.filter(([, a]) => a === 'install')).toHaveLength(2)
+      await expect(run(['fail', 'fail']).wrapper.reinstallAppInPlace('device-1', 'com.app'))
+        .rejects.toThrow('com.app was uninstalled and could not be installed again: install timed out')
+    })
+
+    it('leaves an app that is not installed alone', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockRejectedValue(Object.assign(new Error('failed'), { stderr: 'No such file or directory' }))
+      await new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')
+      expect(runner.execWithOpts).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not uninstall when the bundle cannot be copied', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockImplementation(async (_o, ...args: string[]) => (args[0] === 'get_app_container' ? '/nonexistent/App.app\n' : ''))
+      await expect(new SimctlWrapper(runner).reinstallAppInPlace('device-1', 'com.app')).rejects.toThrow()
+      expect(vi.mocked(runner.execWithOpts).mock.calls.map(([, ...args]) => args[0])).toEqual(['get_app_container'])
+    })
+  })
+
+  // The app observer asks this when no answer came, and every later read on the device queues behind it: unbounded, a
+  // `launchctl` that never returned held them all (review finding).
+  describe('appRunning', () => {
+    it('reads the app\'s job from launchctl, within a bound', async () => {
+      const runner = mockRunner({ spawn: '123\t0\tUIKitApplication:com.app[1a2b][rb-legacy]\n-\t0\tUIKitApplication:com.gone[3c][rb-legacy]\n' })
+      const simctl = new SimctlWrapper(runner)
+      expect(await simctl.appRunning('device-1', 'com.app')).toBe(true)
+      expect(await simctl.appRunning('device-1', 'com.gone')).toBe(false)
+      const [opts, ...args] = vi.mocked(runner.execWithOpts).mock.calls[0]!
+      expect(args).toEqual(['spawn', 'device-1', 'launchctl', 'list'])
+      expect(opts.timeoutMs).toBeGreaterThan(0)
+      expect(runner.exec).not.toHaveBeenCalled()
+    })
+  })
+
+  // P1: app accessibility for a recorded person, read and written inside the device.
+  describe('app accessibility', () => {
+    it('reads on, off, and never set', async () => {
+      const runner = mockRunner()
+      const simctl = new SimctlWrapper(runner)
+      vi.mocked(runner.execWithOpts).mockResolvedValueOnce('1\n').mockResolvedValueOnce('0\n')
+        .mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      expect(await simctl.readAppAccessibility('device-1')).toBe(true)
+      expect(await simctl.readAppAccessibility('device-1')).toBe(false)
+      expect(await simctl.readAppAccessibility('device-1')).toBeNull()
+      const [opts, ...args] = vi.mocked(runner.execWithOpts).mock.calls[0]!
+      expect(args).toEqual(['spawn', 'device-1', 'defaults', 'read', 'com.apple.Accessibility', 'ApplicationAccessibilityEnabled'])
+      expect(opts.timeoutMs).toBeGreaterThan(0)
+    })
+
+    it('fails a read that failed for any other reason, rather than calling it never set', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('simctl spawn timed out'))
+      await expect(new SimctlWrapper(runner).readAppAccessibility('device-1')).rejects.toThrow('timed out')
+    })
+
+    it('writes a value, and removes the key for a device nothing had set, already gone or not; other failures fail', async () => {
+      const runner = mockRunner()
+      const simctl = new SimctlWrapper(runner)
+      await simctl.writeAppAccessibility('device-1', true)
+      await simctl.writeAppAccessibility('device-1', false)
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('Domain (com.apple.Accessibility) not found.\nDefaults have not been changed.')).mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      await simctl.writeAppAccessibility('device-1', null)
+      await simctl.writeAppAccessibility('device-1', null)
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('simctl spawn timed out'))
+      await expect(simctl.writeAppAccessibility('device-1', null)).rejects.toThrow('timed out')
+      vi.mocked(runner.execWithOpts).mockRejectedValueOnce(new Error('The domain/default pair of (com.apple.Accessibility, ApplicationAccessibilityEnabled) does not exist'))
+      await expect(simctl.writeAppAccessibility('device-1', false)).rejects.toThrow('does not exist')
+      expect(vi.mocked(runner.execWithOpts).mock.calls.map(([, ...a]) => a.slice(3).join(' '))).toEqual([
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool true',
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool false',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'delete com.apple.Accessibility ApplicationAccessibilityEnabled',
+        'write com.apple.Accessibility ApplicationAccessibilityEnabled -bool false',
+      ])
+    })
+  })
+
+  describe('keyboardLanguage', () => {
+    it('reads the keyboard in use', async () => {
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue('ko_KR@sw=Korean;hw=Automatic\n'),
+      } satisfies SimctlRunner
+      expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBe('ko_KR@sw=Korean;hw=Automatic')
+      expect(runner.execWithOpts).toHaveBeenCalledWith(
+        { timeoutMs: 800 }, 'spawn', 'device-1', 'defaults', 'read', 'com.apple.keyboard.preferences', 'KeyboardLastUsed',
+      )
+    })
+
+    it('is undefined before any keyboard was used', async () => {
+      const runner = {
+        exec: vi.fn().mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockRejectedValue(new Error('The domain/default pair does not exist')),
+      } satisfies SimctlRunner
+      expect(await new SimctlWrapper(runner).keyboardLanguage('device-1')).toBeUndefined()
+    })
+
+    // The runner retries after restarting CoreSimulatorService, past its own timeout: the read must not wait for it.
+    it('is undefined after 800 ms whatever the runner does', async () => {
+      vi.useFakeTimers()
+      try {
+        const runner = {
+          exec: vi.fn().mockResolvedValue(''),
+          execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+          execWithOpts: vi.fn().mockReturnValue(new Promise<string>(() => {})),
+        } satisfies SimctlRunner
+        const read = new SimctlWrapper(runner).keyboardLanguage('device-1')
+        let settled = false
+        void read.then(() => { settled = true })
+        await vi.advanceTimersByTimeAsync(799)
+        expect(settled).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(await read).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe('resetKeyboardLanguage', () => {
+    const runnerReading = (keyboards: string) => ({
+      exec: vi.fn().mockResolvedValueOnce(keyboards).mockResolvedValue(''),
+      execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+      execWithOpts: vi.fn().mockResolvedValue(''),
+    }) satisfies SimctlRunner
+
+    it('makes the first keyboard the one in use, then restarts the keyboard daemon', async () => {
+      // Where a Caps Lock press stores the language (measured, iOS 26.4), not AppleKeyboards' order.
+      const runner = runnerReading('(\n    "ko_KR@sw=Korean;hw=Automatic",\n    "en_US@sw=QWERTY;hw=Automatic",\n    "emoji@sw=Emoji"\n)')
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec.mock.calls.slice(2)).toEqual([
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardLastUsed', 'ko_KR@sw=Korean;hw=Automatic'],
+        ['spawn', 'device-1', 'defaults', 'write', 'com.apple.keyboard.preferences', 'KeyboardsCurrentAndNext', '-array',
+          'ko_KR@sw=Korean;hw=Automatic', 'ko_KR@sw=Korean;hw=Automatic', 'en_US@sw=QWERTY;hw=Automatic'],
+        ['spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'user/foreground/com.apple.TextInput.kbd'],
+      ])
+    })
+
+    it('tries the daemon\'s old name when the new one fails, for a runtime nobody has measured', async () => {
+      const runner = {
+        exec: vi.fn()
+          .mockResolvedValueOnce('(\n    "en_US@sw=QWERTY;hw=Automatic"\n)')
+          .mockResolvedValueOnce('').mockResolvedValueOnce('').mockResolvedValueOnce('')
+          .mockRejectedValueOnce(new Error('Could not find service'))
+          .mockResolvedValue(''),
+        execBinary: vi.fn().mockResolvedValue(Buffer.alloc(0)),
+        execWithOpts: vi.fn().mockResolvedValue(''),
+      } satisfies SimctlRunner
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec).toHaveBeenLastCalledWith('spawn', 'device-1', 'launchctl', 'kickstart', '-k', 'system/com.apple.kbd')
+    })
+
+    it('writes nothing when the device has no keyboards listed', async () => {
+      const runner = runnerReading('(\n)')
+      await new SimctlWrapper(runner).resetKeyboardLanguage('device-1')
+      expect(runner.exec).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('screenshot', () => {

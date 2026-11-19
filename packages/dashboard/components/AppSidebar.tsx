@@ -159,7 +159,7 @@ export function AppSidebar() {
                 </div>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-56">
+            <DropdownMenuContent side="top" align="start" className="w-72">
               <DropdownMenuItem asChild>
                 <Link to="/settings/default" onClick={closeSheet}>
                   <Settings className="mr-2 h-4 w-4" />

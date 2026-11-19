@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/protocol",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Wire protocol contract for tapflow — the WebSocket message types exchanged between browser, relay, and device agents",
   "keywords": [
     "tapflow",
@@ -42,6 +42,27 @@
       "tsx": "./src/launch/index.ts",
       "import": "./dist/launch/index.js",
       "default": "./dist/launch/index.js"
+    },
+    "./buttons": {
+      "types": "./dist/buttons/index.d.ts",
+      "source": "./src/buttons/index.ts",
+      "tsx": "./src/buttons/index.ts",
+      "import": "./dist/buttons/index.js",
+      "default": "./dist/buttons/index.js"
+    },
+    "./screen": {
+      "types": "./dist/screen/index.d.ts",
+      "source": "./src/screen/index.ts",
+      "tsx": "./src/screen/index.ts",
+      "import": "./dist/screen/index.js",
+      "default": "./dist/screen/index.js"
+    },
+    "./capture": {
+      "types": "./dist/capture/index.d.ts",
+      "source": "./src/capture/index.ts",
+      "tsx": "./src/capture/index.ts",
+      "import": "./dist/capture/index.js",
+      "default": "./dist/capture/index.js"
     }
   },
   "files": [

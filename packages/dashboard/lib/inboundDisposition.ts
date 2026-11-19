@@ -111,22 +111,38 @@ export const INBOUND_DISPOSITION = {
       + 'dashboard/AGENTS.md has the three reasons in full.',
   },
   'input:type-done': {
-    ignored: 'Nothing here sends `input:type` — it is an MCP and flow-runner path. If a reply arrives '
-      + 'anyway (the relay routes to whoever holds the session), there is no pending typed text to '
-      + 'settle, so there is nothing to do with a success.',
+    ignored: 'The viewer sends no `input:type`. Flow Capture\'s dialog does, through flow-runner\'s session '
+      + 'channel (`lib/flowCapture/channel.ts`), which reads the reply by its requestId; the viewer has no '
+      + 'typed text pending, so there is nothing for it to settle.',
   },
   'input:type-error': {
-    ignored: 'Same path as `input:type-done`: no `input:type` is sent from here, so a failure belongs to '
-      + 'a caller that is not this tab. Reporting it would attribute someone else\'s failed keystrokes '
-      + 'to the tester looking at the screen.',
+    ignored: 'Same path as `input:type-done`: the dialog\'s channel turns the failure into the step\'s, '
+      + 'where it is shown. Reported here too, it would be said twice, once outside the dialog where a '
+      + 'screen reader does not hear it.',
   },
   'app:clear-state-done': {
-    ignored: 'The dashboard offers no clear-state action — resets go through `device:boot` with '
-      + '`resetMode`. Nothing is waiting on this.',
+    ignored: 'The viewer offers no clear-state action; resets go through `device:boot` with `resetMode`. '
+      + 'Flow Capture\'s dialog clears the app before it replays, through its channel, which reads this.',
   },
   'app:clear-state-error': {
-    ignored: 'Same as `app:clear-state-done`. A failure for a request this tab did not make has no place '
-      + 'to be shown.',
+    ignored: 'Same as `app:clear-state-done`: the dialog\'s channel reports it as the replay\'s failure, '
+      + 'in the dialog.',
+  },
+  'device:keyboard-set-done': {
+    ignored: 'Asked for only by Flow Capture\'s dialog, through flow-runner\'s `SessionChannel` '
+      + '(`lib/flowCapture/channel.ts`), which settles its own waiter on it. No handler of this package\'s reads it.',
+  },
+  'device:keyboard-set-error': {
+    ignored: 'Same as `device:keyboard-set-done`: the dialog\'s channel reads it, and a replay goes on without the '
+      + 'language rather than stopping.',
+  },
+  'device:run-reset-done': {
+    ignored: 'Asked for only by Flow Capture\'s dialog (#1139), whose own channel (`lib/flowCapture/channel.ts`) settles '
+      + 'its waiter on it. No handler of the viewer reads it.',
+  },
+  'device:run-reset-error': {
+    ignored: 'Same as `device:run-reset-done`: the dialog\'s channel reads it, and an agent that cannot reset makes the '
+      + 'replay go on from the app\'s data alone, saying so.',
   },
   'session:deviceInfo': {
     ignored: 'No consumer here: the viewer takes device name and OS from `agents:listed` instead. The only '

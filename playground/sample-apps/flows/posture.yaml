@@ -1,0 +1,13 @@
+# setPosture on a foldable, with a tap after each fold: the screen changes size and panel, and a tap placed from a
+# tree read after the fold has to land. Android's Pixel Fold emulator; a device that does not fold fails the first
+# step as one that lacks it.
+name: Posture
+steps:
+  - launchApp
+  - tapOn: "Gestures"
+  - setPosture: folded
+  - tapOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.short"
+  - setPosture: unfolded
+  - longPressOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.long"

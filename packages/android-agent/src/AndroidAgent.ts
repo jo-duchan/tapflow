@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DevicePosture, FormFactor, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -56,7 +56,8 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
-import { parseUiAutomatorDump } from './uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump } from './uiTree.js'
+import { fieldResponseOf, keyboardStateOf } from './keyboard.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
 import { EmulatorGrpcClient, type AudioStream } from './emulator/EmulatorGrpcClient.js'
@@ -67,6 +68,7 @@ import { bootPostureId, parseCurrentPosture, parsePostures } from './postures.js
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 import { LEAN_MARKER_PATH, reconcileLean, type LeanDevice } from './LeanPackages.js'
 import { BootSupersededError, installReclaimingStorage, type ReclaimDevice } from './StorageReclaim.js'
+import { TouchWatch } from './TouchWatch.js'
 
 const logger = createLogger('android-agent')
 
@@ -77,7 +79,10 @@ const logger = createLogger('android-agent')
 // actually works on a given image is per device, and `network:state.available` carries that — the
 // split the protocol documents. Added last, after the handler and the boot-time reset, because the
 // string on its own is what puts a control on screen.
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options']
+const AGENT_CAPABILITIES: AgentCapability[] = [
+  'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach',
+]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
 // scrcpy sends a new SPS (inside an IDR keyframe) whenever the capture size changes —
@@ -127,6 +132,8 @@ const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'netwo
  *  toolbar's rotate button, an app asking for a different orientation — and nothing here was
  *  watching for that either. */
 const SCREEN_WATCH_INTERVAL_MS = 2_000
+/** How long a keyboard read waits for the device's home package (`onHome`): the first read's PackageManager query, ~50 ms. */
+const HOME_WAIT_MS = 300
 
 /** How `stableDisplayMetrics` decides the display has settled.
  *
@@ -149,10 +156,29 @@ const METRICS_SAMPLE_GAP_MS = 300
 // never commits should still end with an honest report rather than a spinner.
 const POSTURE_COMMIT_POLL_MS = 50
 const POSTURE_COMMIT_TIMEOUT_MS = 3_000
+// Folding puts up a keyguard (`dismissFoldKeyguard`). Measured on a Pixel 9 Pro Fold, it is already up at the read that
+// sees the commit (~0.3 s after the write), and the read itself is ~55ms. The wait is a second rather than a hair over
+// that one measurement: a keyguard that comes up after it is missed, and the flow's next step then fails behind it, on
+// a Mac slower than the one measured. Only a fold pays it in full, and only where no keyguard comes at all (a real
+// device, Android 14 and older); where one comes, the wait ends when it does.
+const KEYGUARD_POLL_MS = 50
+const KEYGUARD_APPEAR_MS = 1_000
+const KEYGUARD_DISMISS_MS = 1_000
 // `emu rotate` lands at once (the next gRPC frame came 53 ms later, measured); the console read that confirms it
 // is tens of ms. The stop is for an emulator that took the command and did not turn.
 const BODY_TURN_POLL_MS = 50
 const BODY_TURN_SETTLE_MS = 2_000
+
+// Android key codes held together by `input keycombination`.
+const KEY_SHIFT_LEFT = '59'
+const KEY_SPACE = '62'
+const KEY_CTRL_LEFT = '113'
+const KEY_A = '29'
+// A keyboard set up with more languages than this is not turned all the way round; the read comes back to where it
+// started well before then on the two- and three-language keyboards QA devices carry.
+const KEYBOARD_LANGUAGES_MAX = 8
+// Gboard redraws its title after a switch within a frame or two; the read that follows takes ~1 s anyway.
+const KEYBOARD_SWITCH_SETTLE_MS = 300
 
 const SKIN_DEGREES: Record<SkinRotation, 0 | 90 | 180 | 270> = {
   PORTRAIT: 0,
@@ -354,6 +380,8 @@ interface PointerControl {
   touchDown(pointerId: number, x: number, y: number): void | Promise<void>
   touchMove(pointerId: number, x: number, y: number): void | Promise<void>
   touchUp(pointerId: number, x?: number, y?: number): void | Promise<void>
+  /** Lift the touch as cancelled, so the app does not take it for a tap — or with an up where the backend cannot. */
+  touchCancel(pointerId: number, x?: number, y?: number): void | Promise<void>
   pinchStart(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchMove(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchEnd(): void | Promise<void>
@@ -396,6 +424,8 @@ export interface AndroidAgentOptions {
 
 /** One `pm clear` or clipboard write of a run reset. */
 const RUN_RESET_CMD_TIMEOUT_MS = 10_000
+/** A launch slower than this is logged with where it waited (Flow Capture waits 30 s for one). */
+const LAUNCH_SLOW_MS = 10_000
 
 // Everything inside the per-device clipboard section must be bounded, or one stuck call wedges
 // every later copy/paste on that device. gRPC carries its own deadline; adb does not (and a
@@ -478,6 +508,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     ws.send(JSON.stringify(msg))
   }
   private deviceStates = new Map<string, DeviceState>()
+  /** A recorded person's touches, per device (Flow Capture P4): only for a boot the relay marked `observed` and that
+   *  keeps observations (`touchObservations`), as iOS. */
+  private readonly touchWatches = new Map<string, TouchWatch>()
+  /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
+   *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
+  private readonly appPackages = new Map<string, string>()
+  /** The latest launch begun per device: an older one finishing after it does not name the app under test. */
+  private readonly launchSeq = new Map<string, number>()
   /**
    * One queue of rotation commands per device (#910). Each `setRotation` is its own `adb` process, so
    * two sent back to back can land in either order, and a held ⌘⇧O or a boot reset racing the first
@@ -764,6 +802,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
     this.deviceWatcher.stop()
+    void this.adb.stopFocusedServers()
     for (const state of this.deviceStates.values()) {
       this.bumpBootSeq(state, 'relay-lost')
       this.cleanupDeviceState(state)
@@ -850,6 +889,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.touchWatches.get(state.deviceId)?.stop()
+    this.touchWatches.delete(state.deviceId)
     if (state.screenWatch) clearInterval(state.screenWatch)
     state.screenWatch = null
     const serial = this.adb.getSerial(state.deviceId)
@@ -998,6 +1039,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * written before it is overwritten by whatever the incoming panel had.
    */
   async setPosture(deviceId: string, postureId: string): Promise<void> {
+    // Not behind `posturing`, which only the wire handler takes: every caller in production arrives as `input:posture`,
+    // and a caller of this entry point orders its own changes. The keyguard step made a change ~1.5 s longer.
     const { serial, before } = await this.beginPosture(deviceId, postureId)
     // `deviceStates` is keyed by session and this entry point takes a device, so the device's live state is looked
     // up: `finishPosture` needs it to tell a body-drawn (gRPC) emulator, which must never get a lock, from one on
@@ -1031,6 +1074,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       throw new PlatformError(`Unknown posture "${postureId}" for ${deviceId}`)
     }
     const before = (await this.adb.getDisplayMetrics(serial).catch(() => null))?.rotation ?? null
+    const lockedBefore = (await this.adb.keyguardState(serial).catch(() => null))?.showing
     await this.adb.setPosture(serial, postureId)
     const started = Date.now()
     // Measured against the clock, not by adding up the sleeps: each pass also costs a read, so
@@ -1039,12 +1083,57 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       const current = await this.adb.deviceState(serial).then(parseCurrentPosture).catch(() => null)
       if (current === postureId) {
         logger.info(`posture ${postureId}: guest committed in ${Date.now() - started}ms`)
+        // Before the report goes out, because the report is what a flow's `setPosture` waits for: its next step must
+        // find the app, not the keyguard.
+        await this.dismissFoldKeyguard(serial, postures[0]!.id === postureId, lockedBefore)
         return { serial, before }
       }
       await new Promise((resolve) => setTimeout(resolve, POSTURE_COMMIT_POLL_MS))
     }
     logger.warn(`posture ${postureId}: guest did not commit within ${POSTURE_COMMIT_TIMEOUT_MS}ms`)
     return { serial, before }
+  }
+
+  /**
+   * Take down the keyguard a fold put up, and only that one.
+   *
+   * Folding asks the device to sleep, and Android 15 and later answer with a keyguard that a swipe dismisses
+   * ("Swipe up to continue") instead of sleeping: `FoldGracePeriodProvider` in `PowerManagerService`. The setting
+   * that would turn it off, `fold_lock_behavior_setting`, is read only where `config_fold_lock_behavior` is on, and
+   * the emulator images leave it off — measured, setting it changed nothing, and neither did
+   * `locksettings set-disabled` (a secure lock's switch) or `svc power stayon`. So every fold left a flow's next
+   * step facing the keyguard instead of the app, and a tester swiping it away by hand.
+   *
+   * `wm dismiss-keyguard` is what Appium's `dismissKeyguard` sends. It passes only the keyguard that needs no
+   * credential, so a **secure** one is left as it is: dismissing it would raise the PIN entry, which is not ours to
+   * open. A keyguard that was **already up** before the change is left too — a person locked that device, and a
+   * fold is not a reason to unlock it. Read back, because a write that did nothing reads the same as one that worked.
+   */
+  private async dismissFoldKeyguard(serial: string, closing: boolean, lockedBefore: boolean | undefined): Promise<void> {
+    if (lockedBefore !== false) return
+    const read = () => this.adb.keyguardState(serial).catch(() => null)
+    const sleep = () => new Promise((resolve) => setTimeout(resolve, KEYGUARD_POLL_MS))
+    const appearBy = Date.now() + (closing ? KEYGUARD_APPEAR_MS : 0)
+    let keyguard = await read()
+    while (!keyguard?.showing && Date.now() < appearBy) {
+      await sleep()
+      keyguard = await read()
+    }
+    if (!keyguard?.showing) return
+    if (keyguard.secure) {
+      logger.info('posture: the change put up a secure keyguard, which is left for the credential')
+      return
+    }
+    await this.adb.dismissKeyguard(serial).catch((e: unknown) => logger.warn(`could not dismiss the keyguard: ${(e as Error).message}`))
+    const goneBy = Date.now() + KEYGUARD_DISMISS_MS
+    while (Date.now() < goneBy) {
+      if ((await read())?.showing === false) {
+        logger.info('posture: dismissed the keyguard the change put up')
+        return
+      }
+      await sleep()
+    }
+    logger.warn(`posture: the keyguard the change put up was still showing ${KEYGUARD_DISMISS_MS}ms after dismissing it`)
   }
 
   /**
@@ -2000,8 +2089,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * What `flow run` asks reset before a run. `pm clear` takes the app's files, its runtime permissions and its process
    * together, and an install after it keeps the now-empty data — so both lists get it. The keychain, privacy and
    * location items have no Android counterpart here and are never reported.
+   *
+   * `held`: the same reset on a device a session already holds (`device:run-reset`, #1139). It also takes the device off
+   * airplane mode and turns an emulator's body upright, which every boot and a run's boot do outside this.
    */
-  private async resetForRun(state: DeviceState, request: RunResetRequest, isStale: () => boolean): Promise<RunResetReport> {
+  private async resetForRun(
+    state: DeviceState, request: RunResetRequest, isStale: () => boolean, held?: { sessionId: string },
+  ): Promise<RunResetReport> {
     const deadline = Date.now() + RUN_RESET_BUDGET_MS
     const stop = () => isStale() || Date.now() >= deadline
     const serial = this.adb.getSerial(state.deviceId)
@@ -2037,7 +2131,42 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       })
       steps.push({ item: 'pasteboard', run: () => bounded(queued(), ms, 'clipboard clear').catch((e: unknown) => { abandoned = true; throw e }) })
     }
+    if (held && serial) {
+      steps.push({
+        item: 'network',
+        run: async () => {
+          // Read first, as a boot does: an online device is left alone and no setting is written.
+          let offline = await bounded(this.adb.airplaneMode(serial), ms, 'airplane mode read')
+          if (offline) offline = (await bounded(this.adb.setAirplaneMode(serial, false), ms, 'airplane mode off')).offline
+          await this.reportNetworkState(held.sessionId, 'device-ready', offline)
+          if (offline) throw new PlatformError('the device stayed in airplane mode')
+        },
+      })
+      // An emulator's body, as a run's boot stands it up (`prepareBody`); a device with no body to turn has no item.
+      if (client) steps.push({ item: 'orientation', run: () => this.standUpHeld(state, serial, stop) })
+    }
     return runResetSteps(steps, isStale, (item, e) => logger.warn(`run reset: ${item} failed: ${(e as Error).message}`), deadline)
+  }
+
+  /**
+   * `device:run-reset` (#1139): `resetForRun` on the device the session holds, its apps `pm clear`ed as a run's are. Stale
+   * is the boot's own test, and a stale reset is an error rather than a `-done` with what ran before it. A `pm clear`
+   * that outran its step is waited for before the answer, as a boot waits before its ready: the replay launches the app
+   * next, and a clear landing after the launch would wipe what the replay does.
+   */
+  private async runResetHeld(sessionId: string, apps: string[]): Promise<DeviceRunResetReplyBody> {
+    const state = this.deviceStates.get(sessionId)
+    if (!state || !this.adb.getSerial(state.deviceId)) return { type: 'device:run-reset-error', message: 'No booted device' }
+    const seq = state.bootSeq
+    const isStale = () => seq !== state.bootSeq || this.deviceStates.get(sessionId) !== state
+    try {
+      const report = await this.resetForRun(state, { uninstall: [], clear: apps }, isStale, { sessionId })
+      await this.awaitPendingClears(state.deviceId)
+      if (isStale()) return { type: 'device:run-reset-error', message: 'The device was shut down or restarted during the reset' }
+      return { type: 'device:run-reset-done', report }
+    } catch (e) {
+      return { type: 'device:run-reset-error', message: (e as Error).message }
+    }
   }
 
   /**
@@ -2071,7 +2200,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     }
   }
 
-  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest, observeTouches = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -2209,6 +2338,20 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.sendChrome(state)
       void this.sendPostures(state)
       state.booted = true
+      // What each touch hits, while this person is recorded — decided at the boot, as iOS: turning capturing on
+      // mid-session is observed from the next boot. The stream's teardown (`cleanupDeviceState`) ends it.
+      this.touchWatches.get(avdId)?.stop()
+      this.touchWatches.delete(avdId)
+      const serial = this.adb.getSerial(avdId)
+      if (observeTouches && serial) {
+        this.touchWatches.set(avdId, new TouchWatch({
+          hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
+          framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
+          ping: (sr) => this.adb.pingFocusedServer(sr),
+          hold: (sr, on) => this.adb.holdConnection(sr, on),
+          send: (m) => this.sendMsg(m),
+        }, serial, () => this.appPackages.get(avdId)))
+      }
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
       // Clear a network condition the last session left behind, then report (#607).
       //
@@ -2679,7 +2822,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * `channel-down` would toast "not reaching this device" and tell MCP to reconnect for nothing. Only
    * with no gesture at all and no backend either is the channel what there is to report.
    */
-  private closeGesture(state: DeviceState, kind: 'touch' | 'pinch'): GestureBackend | { via: 'none'; outcome: InputOutcome } {
+  private closeGesture(
+    state: DeviceState,
+    kind: 'touch' | 'pinch',
+    // How a pointer left down on a replaced channel is let go: an up for an end, a cancel for a cancel (#1115) —
+    // an up there would complete the gesture the cancel exists to stop.
+    release: (pc: PointerControl) => void | Promise<void> = (pc) => (kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd()),
+  ): GestureBackend | { via: 'none'; outcome: InputOutcome } {
     // An end of the other kind closes nothing: a stray touch end must not take an open pinch's record
     // with it, or the pinch's own end would find nothing and leave its second pointer down.
     if (state.gesture && state.gesture.kind !== kind) return { via: 'none', outcome: 'no-gesture' }
@@ -2695,7 +2844,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // after a press still in flight on the replaced one — a restart in mid-tap is the window.
     const pc = this.pointerControl(state)
     if (opened?.via === 'channel' && pc) {
-      this.fire(kind === 'touch' ? pc.touchUp(0, state.lastTouchPx.x, state.lastTouchPx.y) : pc.pinchEnd())
+      this.fire(release(pc))
     }
     if (!opened && !pc && !state.touchHelper) return { via: 'none', outcome: 'channel-down' }
     return { via: 'none', outcome: 'no-gesture' }
@@ -2742,6 +2891,30 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
    * auto-rotating AVD would take auto-rotate away from it outside tapflow too (see `normaliseOnBoot`).
    * Replacing one lock with another takes nothing away. An unreadable lock is left alone.
    */
+  /**
+   * An emulator's body turned upright for `device:run-reset`, as a run's boot leaves it, and the viewer told as a turn
+   * from `input:rotate` is. Queued with the rotations, and failing the step when the turn fails or the body cannot be
+   * read, which the queue alone would only log.
+   */
+  private async standUpHeld(state: DeviceState, serial: string, stop: () => boolean): Promise<void> {
+    let failure: unknown
+    await this.enqueueRotation(state.deviceId, async () => {
+      if (stop()) return
+      try {
+        if ((await this.turnBodyTo(state, serial, 0)) !== 0) throw new PlatformError('the body could not be read or did not turn upright')
+      } catch (e) {
+        failure = e
+        return
+      }
+      const client = state.grpcClient
+      if (!client) return
+      void this.reconcileSerial(state, serial, state.videoWidth, state.videoHeight, state.skin, () => state.grpcClient === client)
+        .then((changed) => { if (changed && state.booted) this.sendChrome(state) })
+        .catch((e: unknown) => { logger.warn(`run reset: could not re-read the screen: ${(e as Error).message}`) })
+    })
+    if (failure !== undefined) throw failure
+  }
+
   /**
    * An emulator's boot: free the rotation lock the first time tapflow sees the AVD (earlier versions wrote one;
    * a person's later lock is theirs — `RotationLockMemory`), stand the body up when `upright`, and read where it
@@ -2810,8 +2983,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, secureContext, external, runReset } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest }
-        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset)
+        const { deviceId, resetMode, secureContext, external, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
+        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset, observed === true && touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -2882,7 +3055,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }
         }
         doInstall()
-          .then(() => respond({ type: 'app:install-done' }))
+          .then(() => {
+            if (bundleId) this.appPackages.set(state.deviceId, bundleId)
+            respond({ type: 'app:install-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
@@ -2913,16 +3089,34 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const launchNo = (this.launchSeq.get(state!.deviceId) ?? 0) + 1
+        this.launchSeq.set(state!.deviceId, launchNo)
+        // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
+        // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
+        const started = Date.now()
+        let phase = 'waiting for a late pm clear'
+        const slow = setTimeout(() => logger.warn(`app:launch on ${serial} still running after ${LAUNCH_SLOW_MS / 1000}s: ${phase}`), LAUNCH_SLOW_MS)
+        slow.unref?.()
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
-          .then(() => this.adb.launchApp(serial, bundleId, options, defaultsOnly === true))
+          .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
+          .then((applied) => {
+            // The app under test once it launched: a launch that failed leaves the one before, and one overtaken by a
+            // later launch does not take it back (CodeRabbit on #1187).
+            if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.
             console.warn('[tapflow] app:launch failed:', e instanceof Error && e.cause !== undefined ? e.cause : e)
             respond({ type: 'app:launch-error', message })
+          })
+          .finally(() => {
+            clearTimeout(slow)
+            const took = Date.now() - started
+            if (took >= LAUNCH_SLOW_MS) logger.warn(`app:launch on ${serial} answered after ${took}ms (${phase})`)
           })
         break
       }
@@ -2939,6 +3133,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           state.lastTouchPx = { x: px, y: py }
           this.fire(g.owner.touchDown(0, px, py))
         }
+        // After the down is sent: what it hit is asked off the touch's path. Not on the adb fallback (`helper`), which
+        // plays the whole gesture once its end arrives, so the down's time is not when the app saw it.
+        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
         break
       }
       case 'input:touch:move': {
@@ -2949,6 +3146,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // A move with no gesture behind it — or one whose backend has since been replaced — is not the
         // gesture the tester made. Dropped, as iOS drops it.
         const g = this.gestureOwner(state, 'touch')
+        if (g) this.touchWatches.get(state.deviceId)?.move(x, y)
         if (g?.via === 'helper') {
           g.owner.touchMove(x, y)
         } else if (g?.via === 'channel') {
@@ -2964,6 +3162,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const closed = this.closeGesture(state, 'touch')
+        const watch = this.touchWatches.get(state.deviceId)
+        if (closed.via === 'none') watch?.cancel()
+        else watch?.up(msg.sessionId, requestId)
         const seq = state.bootSeq
         const { x: upX, y: upY } = state.lastTouchPx
         // terminal of a tap/swipe → ack the gesture, on what the dispatch actually reported
@@ -2973,6 +3174,22 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             : await this.dispatchTo(closed.owner, () => closed.owner.touchUp(0, upX, upY)),
           seq, requestId,
         ))().catch((e) => logger.error('input:touch:end ack failed:', e))
+        break
+      }
+      // A client leaving mid-gesture (#1115). Closed through `closeGesture` like an end — the record goes now, before
+      // anything awaits, so the end the client sends next finds nothing to complete — but cancelled rather than
+      // completed. No ack: the client is leaving, and that end is answered.
+      case 'input:touch:cancel': {
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state) break
+        const { x, y } = state.lastTouchPx
+        this.touchWatches.get(state.deviceId)?.cancel()
+        const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
+        if (closed.via === 'helper') closed.owner.touchCancel()
+        else if (closed.via === 'channel') {
+          const owner = closed.owner
+          void this.dispatchTo(owner, () => owner.touchCancel(0, x, y))
+        }
         break
       }
       case 'input:pinch:start': {
@@ -3211,7 +3428,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // "dispatched nothing while claiming otherwise" — not "dispatched nothing".)
         // Ack on completion so a following input step (e.g. pressKey Enter) is
         // only sent after the text has actually landed.
-        Promise.resolve(text ? this.adb.inputText(serial, text) : undefined)
+        Promise.resolve(text ? this.typeText(serial, text) : undefined)
           .then(() => this.sendMsg({ type: 'input:type-done', sessionId, requestId }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -3477,6 +3694,87 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }
         break
       }
+      case 'ui:field:request': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!state || !serial) {
+          this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' })
+          break
+        }
+        // What a person typed can be in the answer: it goes to the relay only, and is never logged here.
+        void Promise.all([this.adb.readFocused(serial).catch(() => null), this.screenSize(serial)])
+          .then(([read, screen]) => this.sendMsg({
+            type: 'ui:field:response', sessionId, requestId, ...fieldResponseOf(read, screen, this.frameTurn(state)),
+          }))
+        break
+      }
+      case 'ui:keyboard:request': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!state || !serial) {
+          this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } })
+          break
+        }
+        // The home package is read once per device and is ready from the second read on; the keyboard does not wait
+        // for it past a moment, so a slow PackageManager costs `onHome` for those reads, never the keyboard's place.
+        const home = Promise.race([this.adb.homePackage(serial), new Promise<null>((r) => setTimeout(() => r(null), HOME_WAIT_MS))])
+        void Promise.all([this.adb.imeWindow(serial), this.screenSize(serial), home])
+          .then(([ime, screen, home]) => this.sendMsg({
+            type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state), home),
+          }))
+          .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
+        break
+      }
+      case 'device:run-reset': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
+        void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
+          .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
+        break
+      }
+      case 'ui:reach:request': {
+        const { requestId, sessionId } = msg
+        if (!requestId) break
+        // Checked here too, not only by the relay: a throw below is swallowed, and the caller waits out its deadline.
+        const raw = (msg as unknown as { targets?: unknown }).targets
+        const targets = Array.isArray(raw) ? raw as ReachTarget[] : []
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        const answer = (results: ReachResult[]) => this.sendMsg({ type: 'ui:reach:response', sessionId, requestId, results })
+        const unknown = (reason: string) => answer(targets.map(() => ({ state: 'unknown', reason })))
+        if (!serial) { unknown('no booted device'); break }
+        // A device whose jar cannot run (it fell back to `uiautomator dump`) cannot judge either: said, not guessed.
+        void this.adb.reach(serial, targets)
+          .then((results) => (results && results.length === targets.length ? answer(results) : unknown('this device cannot read where a touch lands')))
+          .catch((e: unknown) => unknown((e as Error).message))
+        break
+      }
+      case 'device:keyboard-set': {
+        const requestId = this.correlatorOf(msg)
+        if (requestId === null) break
+        const { sessionId } = msg
+        const respond = (body: DeviceKeyboardSetReplyBody) => this.sendMsg({ ...body, sessionId, requestId })
+        const state = this.deviceStates.get(sessionId)
+        const serial = state ? this.adb.getSerial(state.deviceId) : undefined
+        if (!serial) {
+          respond({ type: 'device:keyboard-set-error', reason: 'failed', message: 'No booted device' })
+          break
+        }
+        this.setKeyboardLanguage(serial, (msg.payload as { keyboard?: unknown } | undefined)?.keyboard as string | undefined)
+          .then(respond)
+          .catch((e: unknown) => respond({
+            type: 'device:keyboard-set-error', reason: 'failed', message: e instanceof Error ? e.message : String(e),
+          }))
+        break
+      }
       case 'ui:tree:request': {
         const raw = msg as unknown as { requestId: string; sessionId?: string }
         const { requestId } = raw
@@ -3488,12 +3786,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.dumpUiHierarchy(serial)
-          .then((xml) => this.sendMsg({
-            type: 'ui:tree:response',
-            sessionId,
-            requestId,
-            elements: parseUiAutomatorDump(xml),
-          }))
+          .then((xml) => this.parseTree(serial, xml))
+          .then((elements) => this.sendMsg({ type: 'ui:tree:response', sessionId, requestId, elements }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
@@ -3504,6 +3798,18 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private async handleKeyInput(serial: string, code: string, modifiers: number): Promise<InputOutcome> {
+    // The field's own action (Done, Next, Search), which an Enter key event does not reach in an app that checks the
+    // action it was given (#1135).
+    if (code === 'ImeAction') {
+      const result = await this.adb.imeAction(serial).catch(() => 'failed' as const)
+      return result === 'ok' ? 'delivered' : result === 'unsupported' ? 'unsupported' : 'failed'
+    }
+    // Caps Lock switches the keyboard's language, as it does on a Mac and on iOS: Gboard takes Shift+Space for that,
+    // and ignores the language-switch key code and Ctrl/Meta+Space (measured, API 34). Android 13+ (`keycombination`).
+    if (code === 'CapsLock' && modifiers === 0) {
+      const pressed = await this.keyCombination(serial, [KEY_SHIFT_LEFT, KEY_SPACE])
+      return pressed === null ? 'failed' : pressed ? 'delivered' : 'unsupported'
+    }
     const SPECIAL: Record<string, string> = {
       Backspace: '67', Enter: '66', Tab: '61', Space: '62', Escape: '111',
       ArrowLeft: '21', ArrowRight: '22', ArrowUp: '19', ArrowDown: '20',
@@ -3543,6 +3849,11 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // clipboard shortcuts to dedicated keycodes (a Mac viewer sends Cmd = meta 0x08; treat
     // meta and ctrl alike). Any other chord+letter (e.g. Cmd+A) must NOT type the raw letter.
     if (modifiers & (0x01 | 0x08)) {
+      // Select-all, which `inputText` with `replace` presses before the text: Ctrl+A, Android 13+.
+      if (code === 'KeyA') {
+        const pressed = await this.keyCombination(serial, [KEY_CTRL_LEFT, KEY_A])
+        return pressed === null ? 'failed' : pressed ? 'delivered' : 'unsupported'
+      }
       const CLIP: Record<string, string> = { KeyC: 'KEYCODE_COPY', KeyV: 'KEYCODE_PASTE', KeyX: 'KEYCODE_CUT' }
       // Anything else — Cmd+A, Ctrl+S — is intentionally not sent. The channel is fine; we do not
       // implement it.
@@ -3577,6 +3888,96 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     return this.dispatchKey(() => this.adb.sendInput(serial, 'text', text))
   }
 
+  /** `true` pressed, `false` the device cannot hold keys together (below Android 13), `null` the press errored. */
+  private async keyCombination(serial: string, keys: string[]): Promise<boolean | null> {
+    try {
+      return await this.adb.sendKeyCombination(serial, keys)
+    } catch (e) {
+      logger.error('input keycombination failed:', e)
+      return null
+    }
+  }
+
+  /**
+   * `input:type`: the text set at the focused field's caret (#1135), so it lands as written whatever the keyboard's
+   * language — `input text` went through Gboard, which composed `dkssud` into `안녕` on a Korean keyboard. A field that
+   * changed the text as it took it (a mask, maxLength) passed: a person's typing would have met it too. One that kept
+   * what it had refused it. Only where the jar cannot set anything — no field it can see has focus (an input that
+   * exposes no accessibility node), or the jar cannot run — ASCII still goes through `input text`, which the keyboard
+   * composes in its language. Never for a password the jar declined to append to: `input text` would put it in argv.
+   * Never names the text: it can be a secret.
+   */
+  private async typeText(serial: string, text: string): Promise<void> {
+    const result = await this.adb.setFocusedText(serial, text)
+    if (result === 'ok') return
+    if (result === 'transformed') {
+      logger.info('input:type: the field changed the text as it took it (a mask, a filter or a length limit)')
+      return
+    }
+    if (result === 'refused' || result === 'rejected') throw new PlatformError('The focused text field did not take the text')
+    if (result === 'cannot-append-secure') throw new PlatformError('Text cannot be added to a password field that already holds some: clear it, or replace what it holds')
+    if (result === 'failed') throw new PlatformError('The focused text field could not be read or set')
+    if (/^[\x20-\x7e]*$/.test(text)) {
+      logger.info(`input:type: typed with adb input text (${result})`)
+      return this.adb.inputText(serial, text)
+    }
+    throw new PlatformError(result === 'no-focus'
+      ? 'No text field has focus, and text other than ASCII cannot be typed without one'
+      : 'Text other than ASCII could not be set on this device')
+  }
+
+  /** A dump as elements, normalised by the screen when a dialog's window is its root (`dumpRootFloats`): the screen's
+   *  size is asked only then, so a dump of the app's own window costs nothing more. */
+  private async parseTree(serial: string, xml: string): Promise<UIElement[]> {
+    return parseUiAutomatorDump(xml, dumpRootFloats(xml) ? await this.screenSize(serial) : null)
+  }
+
+  /** The screen Android draws, in device pixels: what a tree's and a keyboard's bounds are fractions of. */
+  private async screenSize(serial: string): Promise<{ width: number; height: number } | null> {
+    return (await this.adb.getDisplayMetrics(serial).catch(() => null))?.current ?? null
+  }
+
+  /** The turn `fromFrame` applies to a frame point, for the keyboard's rect in the frame's space. */
+  private frameTurn(state: DeviceState): 0 | 90 | 180 | 270 {
+    const skin = state.latestFrame?.skin ?? null
+    const skinDegrees = skin === null ? null : SKIN_DEGREES[skin] ?? null
+    if (skinDegrees === null) return 0
+    return ((((skinDegrees - (state.rotation ?? 0)) % 360) + 360) % 360) as 0 | 90 | 180 | 270
+  }
+
+  /**
+   * Put Gboard in the language `target` names (its window title, as a recording read it) for a replay (#1135). Gboard's
+   * language is its own setting, out of reach of `settings` and `ime` (measured), so it is read off the keyboard's
+   * window and turned with Shift+Space until it matches — which needs the keyboard up. With no `target` there is
+   * nothing to aim for: which language Gboard lists first cannot be read.
+   */
+  private async setKeyboardLanguage(serial: string, target: string | undefined): Promise<DeviceKeyboardSetReplyBody> {
+    if (target === undefined) {
+      return { type: 'device:keyboard-set-error', reason: 'unsupported', message: 'Android sets the keyboard language only to a named one' }
+    }
+    const ime = await this.adb.imeWindow(serial)
+    if (!ime?.shown) {
+      return { type: 'device:keyboard-set-error', reason: 'keyboard-hidden', message: 'The keyboard is not up, so its language cannot be read' }
+    }
+    const languageNow = async () => (await this.adb.readFocused(serial).catch(() => null))?.language
+    const start = await languageNow()
+    let now = start
+    for (let turn = 0; now !== undefined && turn < KEYBOARD_LANGUAGES_MAX; turn++) {
+      if (now === target) return { type: 'device:keyboard-set-done' }
+      const pressed = await this.adb.sendKeyCombination(serial, [KEY_SHIFT_LEFT, KEY_SPACE])
+      if (!pressed) return { type: 'device:keyboard-set-error', reason: 'unsupported', message: 'Switching the keyboard language needs Android 13 or later' }
+      await new Promise((resolve) => setTimeout(resolve, KEYBOARD_SWITCH_SETTLE_MS))
+      now = await languageNow()
+      if (now === start) break
+    }
+    if (now === target) return { type: 'device:keyboard-set-done' }
+    return {
+      type: 'device:keyboard-set-error',
+      reason: 'failed',
+      message: now === undefined ? 'The keyboard\'s language could not be read' : `The keyboard does not offer ${target}`,
+    }
+  }
+
   private async dispatchKey(send: () => Promise<void>): Promise<InputOutcome> {
     try {
       await send()
@@ -3601,6 +4002,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   async shutdown(avdId: string): Promise<void> {
     const serial = this.adb.getSerial(avdId)
     if (serial) {
+      await this.adb.stopFocusedServer(serial)
       await this.adb.shutdown(serial)
       this.adb.clearSerial(avdId)
       this.ownedDevices.delete(avdId)
@@ -3713,7 +4115,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   async queryUITree(): Promise<UIElement[]> {
-    return parseUiAutomatorDump(await this.adb.dumpUiHierarchy(this.soleLive().serial))
+    const serial = this.soleLive().serial
+    return this.parseTree(serial, await this.adb.dumpUiHierarchy(serial))
   }
 
   stream(): ReadableStream<Buffer> {

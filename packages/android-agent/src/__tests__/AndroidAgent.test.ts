@@ -10,6 +10,7 @@ vi.mock('../AndroidTouchHelper', () => ({
     touchStart: vi.fn(),
     touchMove: vi.fn(),
     touchEnd: vi.fn(async () => 'delivered'),
+    touchCancel: vi.fn(),
     pinchStart: vi.fn(() => 'unsupported'),
     pinchMove: vi.fn(() => 'unsupported'),
     pinchEnd: vi.fn(() => 'unsupported'),
@@ -48,6 +49,7 @@ vi.mock('../scrcpy/ScrcpySession', () => ({
       touchDown: vi.fn(),
       touchMove: vi.fn(),
       touchUp: vi.fn(),
+      touchCancel: vi.fn(),
       pinchStart: vi.fn(),
       pinchMove: vi.fn(),
       pinchEnd: vi.fn(),
@@ -99,7 +101,7 @@ vi.mock('../emulator/EmulatorGrpcClient', () => ({
     // The divisor for injected touch pixels. `grpcDisplaySize` lets a test say the emulator and
     // the guest disagree, which is the whole foldable case.
     getDisplaySize: vi.fn(async () => grpcDisplaySize),
-    touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(),
+    touchDown: vi.fn(), touchMove: vi.fn(), touchUp: vi.fn(), touchCancel: vi.fn(),
     pinchStart: vi.fn(), pinchMove: vi.fn(), pinchEnd: vi.fn(),
     streamAudio: vi.fn(() => ({ frames: () => new ReadableStream({ start() {} }), cancel: vi.fn() })), // AudioStream shape: { frames, cancel }
     getClipboard: vi.fn(() => grpcClipboardError
@@ -169,6 +171,7 @@ interface TestState {
     pressButton: ReturnType<typeof vi.fn>
     touchMove: ReturnType<typeof vi.fn>
     touchEnd: ReturnType<typeof vi.fn>
+    touchCancel: ReturnType<typeof vi.fn>
     pinchEnd: ReturnType<typeof vi.fn>
   } | null
   videoWidth: number
@@ -2799,6 +2802,85 @@ describe('AndroidAgent', () => {
       scrcpyStreamController = null
     })
 
+    // Flow Capture P4: what a recorded person's touches hit, asked off the touch's path, only for a boot the relay
+    // marked as theirs and that keeps observations.
+    describe('record-time observation', () => {
+      const bootWith = async (payload: Record<string, unknown>) => {
+        const ready = waitForType(browser, 'device:ready')
+        inject({ type: 'device:boot', requestId: `rq-${Object.keys(payload).join('-')}`, payload: { deviceId: 'avd:Pixel_8_API_34', ...payload } })
+        await ready
+        await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+      }
+
+      it('is off for a boot that is not a recorded person\'s, or a relay that keeps no observations', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off' })
+        await bootWith({ observed: true })
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off-2' })
+        expect(hold).not.toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+
+      it('asks what each touch hit on a recorded boot, and lets go of the connection when the device goes', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        agent.disconnect()
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
+      // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
+      it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
+        const failed = waitForType(browser, 'app:launch-error')
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await failed
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a')
+      })
+
+      // CodeRabbit on #1187: two launches at once, the earlier one answering last.
+      it('does not let a launch overtaken by a later one name the app under test', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        let finishA: () => void = () => {}
+        vi.spyOn(adb, 'launchApp')
+          .mockImplementationOnce(() => new Promise((r) => { finishA = () => r(undefined) }))
+          .mockResolvedValueOnce(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await done
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b'))
+        const second = waitForType(browser, 'app:launch-done')
+        finishA()
+        await second
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b')
+      })
+
+      // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.
+      it('does not observe a touch that goes through the adb fallback', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        const state = getState()
+        state.videoWidth = 0
+        state.touchHelper = { touchStart: vi.fn(), touchMove: vi.fn(), touchEnd: vi.fn(async () => 'delivered'), touchCancel: vi.fn(), pinchEnd: vi.fn(), pressButton: vi.fn(), stop: vi.fn() } as unknown as TestState['touchHelper']
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect((state.touchHelper as unknown as { touchStart: ReturnType<typeof vi.fn> }).touchStart).toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+    })
+
     describe('input — touch', () => {
       it('maps normalized touch:start to device px via scrcpy control', () => {
         const control = getState().scrcpySession!.control
@@ -2821,6 +2903,40 @@ describe('AndroidAgent', () => {
         inject({ type: 'input:touch:end', requestId: 'rq-lift' })
         // last px from start: 0.1*1080 = 108, 0.2*2400 = 480
         expect(control.touchUp).toHaveBeenCalledWith(0, 108, 480)
+      })
+
+      // A client leaving mid-gesture sends a cancel, then an end (#1115). The cancel closes the gesture's record before
+      // anything awaits, so the end finds nothing to complete and lifts nothing.
+      it('touch:cancel cancels at the last touched px, and the end after it lifts nothing', async () => {
+        const control = getState().scrcpySession!.control
+        const errored = waitForType(browser, 'input:error')
+        inject({ type: 'input:touch:start', payload: { x: 0.1, y: 0.2 } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:touch:end', requestId: 'rq-after-cancel' })
+        expect(control.touchCancel).toHaveBeenCalledWith(0, 108, 480)
+        expect(control.touchUp).not.toHaveBeenCalled()
+        expect((await errored)['reason']).toBe('no-gesture')
+      })
+
+      it('touch:cancel on the adb path drops the gesture instead of replaying it', () => {
+        const state = getState()
+        state.scrcpySession = null
+        state.grpcClient = null
+        inject({ type: 'input:touch:start', payload: { x: 0.5, y: 0.5 } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:touch:end', requestId: 'rq-adb-cancel' })
+        expect(state.touchHelper!.touchCancel).toHaveBeenCalledTimes(1)
+        expect(state.touchHelper!.touchEnd).not.toHaveBeenCalled()
+      })
+
+      // A touch cancel closes a touch only: taking an open pinch's record would leave its second pointer down.
+      it('touch:cancel leaves an open pinch to its own end', () => {
+        const control = getState().scrcpySession!.control
+        inject({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+        inject({ type: 'input:touch:cancel' })
+        inject({ type: 'input:pinch:end', requestId: 'rq-pinch-after' })
+        expect(control.touchCancel).not.toHaveBeenCalled()
+        expect(control.pinchEnd).toHaveBeenCalledTimes(1)
       })
 
       // followups H-F: touch:end acks input:done when dispatched to a booted device (pointer channel present + adb reports booted).
@@ -3061,12 +3177,348 @@ describe('AndroidAgent', () => {
       })
 
       it('acks input:type-error when the text is rejected', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('no-focus')
         vi.spyOn(adb, 'inputText').mockRejectedValue(new Error('ASCII only'))
         const ack = waitForType(browser, 'input:type-error')
-        inject({ type: 'input:type', requestId: 'rq-in4', payload: { text: '안녕' } })
+        inject({ type: 'input:type', requestId: 'rq-in4', payload: { text: 'hi' } })
         const err = await ack
         expect(err.message).toBe('ASCII only')
         expect(err.requestId).toBe('rq-in4')
+      })
+    })
+
+    // #1135: the text is set at the focused field's caret, so it lands as written whatever Gboard's language is.
+    describe('input — type, set into the focused field', () => {
+      it('sets the text and does not type it through the keyboard', async () => {
+        const set = vi.spyOn(adb, 'setFocusedText').mockResolvedValue('ok')
+        const inputText = vi.spyOn(adb, 'inputText')
+        const ack = waitForType(browser, 'input:type-done')
+        inject({ type: 'input:type', requestId: 'rq-st1', payload: { text: '안녕a' } })
+        expect((await ack).requestId).toBe('rq-st1')
+        expect(set).toHaveBeenCalledWith('emulator-5554', '안녕a')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it('passes a field that changed the text as it took it', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('transformed')
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st2', payload: { text: '12345' } })
+        expect((await waitForType(browser, 'input:type-done')).requestId).toBe('rq-st2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it.each(['refused', 'rejected'] as const)('fails a field that %s the text, without naming it', async (result) => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st3', payload: { text: 'hunter2' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).toMatch(/did not take the text/)
+        expect(err.message).not.toContain('hunter2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it.each(['no-focus', 'unavailable'] as const)(
+        'types ASCII with adb input text when the set gave %s',
+        async (result) => {
+          vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+          const inputText = vi.spyOn(adb, 'inputText').mockResolvedValue(undefined)
+          inject({ type: 'input:type', requestId: 'rq-st4', payload: { text: 'abc' } })
+          expect((await waitForType(browser, 'input:type-done')).requestId).toBe('rq-st4')
+          expect(inputText).toHaveBeenCalledWith('emulator-5554', 'abc')
+        },
+      )
+
+      // A password the jar would not append to never reaches argv, and a jar that errored is not guessed around.
+      it.each(['cannot-append-secure', 'failed'] as const)('fails on %s rather than typing it with adb input text', async (result) => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue(result)
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st6', payload: { text: 'hunter2' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).not.toContain('hunter2')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+
+      it('fails text other than ASCII with no field to set it in, without naming it', async () => {
+        vi.spyOn(adb, 'setFocusedText').mockResolvedValue('no-focus')
+        const inputText = vi.spyOn(adb, 'inputText')
+        inject({ type: 'input:type', requestId: 'rq-st5', payload: { text: '비밀' } })
+        const err = await waitForType(browser, 'input:type-error')
+        expect(err.message).toMatch(/No text field has focus/)
+        expect(err.message).not.toContain('비밀')
+        expect(inputText).not.toHaveBeenCalled()
+      })
+    })
+
+    // #1135: Flow Capture's reads. Answered to the relay, which keeps them; never forwarded to a browser.
+    describe('field and keyboard reads', () => {
+      // The calls as they arrive: a `find` over this sees a reply sent after it was made.
+      function sent(): { find(p: (m: Record<string, unknown>) => boolean): Record<string, unknown> | undefined } {
+        const spy = vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg')
+        return { find: (p) => spy.mock.calls.map(([m]) => m as Record<string, unknown>).find(p) }
+      }
+      const screen = { natural: { width: 1080, height: 2400 }, current: { width: 1080, height: 2400 }, rotation: 0 as const }
+
+      it('answers ui:field:request with the focused field, its keyboard and language, normalised', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue({
+          identifier: 'form.email', frame: { x: 108, y: 240, width: 540, height: 120 }, secure: false, value: '안녕',
+          keyboard: { x: 0, y: 1500, width: 1080, height: 900 }, language: '한국어 (두벌식)',
+        })
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:field:response')).toEqual({
+          type: 'ui:field:response', sessionId: agent.sessionId, requestId: 'rq-f1',
+          field: { identifier: 'form.email', placeholder: '', frame: { x: 0.1, y: 0.1, width: 0.5, height: 0.05 }, secure: false, value: '안녕' },
+          keyboard: {
+            shown: true,
+            rect: { x: 0, y: 0.625, width: 1, height: 0.375 },
+            frameRect: { x: 0, y: 0.625, width: 1, height: 0.375 },
+          },
+          language: '한국어 (두벌식)',
+        })
+      })
+
+      it('answers ui:field:request with no value for a password', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue({
+          identifier: 'form.password', frame: { x: 0, y: 0, width: 10, height: 10 }, secure: true, value: 'leaked', reason: 'secure',
+        })
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f2' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        const reply = out.find((m) => m['type'] === 'ui:field:response')!
+        expect(reply['reason']).toBe('secure')
+        expect(JSON.stringify(reply)).not.toContain('leaked')
+      })
+
+      it('answers ui:field:request as failed when the jar cannot run', async () => {
+        vi.spyOn(adb, 'readFocused').mockResolvedValue(null)
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:field:request', requestId: 'rq-f3' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:field:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:field:response')).toMatchObject({ field: null, reason: 'failed', requestId: 'rq-f3' })
+      })
+
+      it.each([
+        [{ shown: false }, { shown: false }],
+        [{ shown: true, rect: { x: 0, y: 1200, width: 1080, height: 1200 } }, { shown: true, rect: { x: 0, y: 0.5, width: 1, height: 0.5 } }],
+        [null, { shown: null }],
+      ])('answers ui:keyboard:request from the input method window (%j)', async (ime, keyboard) => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue(ime)
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:keyboard:request', requestId: 'rq-k1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k1', keyboard })
+      })
+
+      it('answers ui:keyboard:request with whether the home screen was in front', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: false, target: 'com.google.android.apps.nexuslauncher' })
+        vi.spyOn(adb, 'homePackage').mockResolvedValue('com.google.android.apps.nexuslauncher')
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:keyboard:request', requestId: 'rq-k2' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k2', keyboard: { shown: false, onHome: true } })
+      })
+
+      it('answers the keyboard without onHome rather than wait for a home package that does not come', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: false, target: 'com.google.android.apps.nexuslauncher' })
+        vi.spyOn(adb, 'homePackage').mockReturnValue(new Promise(() => {}))
+        vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(screen)
+        const out = sent()
+        inject({ type: 'ui:keyboard:request', requestId: 'rq-k3' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toBeDefined(), { timeout: 2000 })
+        expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k3', keyboard: { shown: false } })
+        expect((out.find((m) => m['type'] === 'ui:keyboard:response')!['keyboard'] as { onHome?: boolean }).onHome).toBeUndefined()
+      })
+    })
+
+    // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.
+    describe('ui:reach:request', () => {
+      const target = { role: 'button', label: 'Row 10', identifier: 'list.row.10', frame: { x: 0, y: 0.78, width: 1, height: 0.06 } }
+      function replies() {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        return out
+      }
+
+      it('answers with the jar\'s results', async () => {
+        const results = [{ state: 'occluded', by: 'View list.fab' }]
+        const reach = vi.spyOn(adb, 'reach').mockResolvedValue(results as never)
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r1', targets: [target] })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r1')).toBeDefined())
+        expect(reach).toHaveBeenCalledWith('emulator-5554', [target])
+        expect(out.find((m) => m['requestId'] === 'rq-r1')).toMatchObject({ type: 'ui:reach:response', results })
+      })
+
+      it.each([[null], [[]]])('answers unknown when the jar cannot run or answers for other elements (%j)', async (got) => {
+        vi.spyOn(adb, 'reach').mockResolvedValue(got as never)
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r2', targets: [target] })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r2')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-r2')).toMatchObject({ results: [{ state: 'unknown' }] })
+      })
+
+      it('answers a request that carries no list of targets, rather than throwing it away', async () => {
+        const reach = vi.spyOn(adb, 'reach').mockResolvedValue([])
+        const out = replies()
+        inject({ type: 'ui:reach:request', requestId: 'rq-r3', targets: 'nope' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-r3')).toMatchObject({ type: 'ui:reach:response', results: [] }))
+        expect(reach).toHaveBeenCalledWith('emulator-5554', [])
+      })
+    })
+
+    // #1135: a replay starts from the keyboard language the recording did.
+    describe('device:keyboard-set', () => {
+      function languages(...titles: string[]) {
+        let at = 0
+        vi.spyOn(adb, 'readFocused').mockImplementation(async () => ({ reason: 'no-focus', keyboard: { x: 0, y: 0, width: 1, height: 1 }, language: titles[at] }))
+        return vi.spyOn(adb, 'sendKeyCombination').mockImplementation(async () => { at = (at + 1) % titles.length; return true })
+      }
+
+      it('is done at once when the keyboard is already in that language', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks1', payload: { keyboard: 'English (US) (QWERTY)' } })
+        expect((await waitForType(browser, 'device:keyboard-set-done')).requestId).toBe('rq-ks1')
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('turns the language with Shift+Space until it matches', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', 'Español', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks2', payload: { keyboard: '한국어 (두벌식)' } })
+        expect((await waitForType(browser, 'device:keyboard-set-done')).requestId).toBe('rq-ks2')
+        expect(combo).toHaveBeenCalledTimes(2)
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['59', '62'])
+      })
+
+      it('fails once the languages come round without the one asked for', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        const combo = languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks3', payload: { keyboard: 'Français' } })
+        const err = await waitForType(browser, 'device:keyboard-set-error')
+        expect(err).toMatchObject({ requestId: 'rq-ks3', reason: 'failed' })
+        expect(err.message).toContain('Français')
+        expect(combo).toHaveBeenCalledTimes(2)
+      })
+
+      it('answers keyboard-hidden while the keyboard is down, and presses nothing', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: false })
+        const combo = vi.spyOn(adb, 'sendKeyCombination')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks4', payload: { keyboard: '한국어 (두벌식)' } })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks4', reason: 'keyboard-hidden' })
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('answers unsupported for no named language: which one Gboard lists first cannot be read', async () => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination')
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks5', payload: {} })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks5', reason: 'unsupported' })
+        expect(combo).not.toHaveBeenCalled()
+      })
+
+      it('answers unsupported below Android 13', async () => {
+        vi.spyOn(adb, 'imeWindow').mockResolvedValue({ shown: true })
+        languages('English (US) (QWERTY)', '한국어 (두벌식)')
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        inject({ type: 'device:keyboard-set', requestId: 'rq-ks6', payload: { keyboard: '한국어 (두벌식)' } })
+        expect(await waitForType(browser, 'device:keyboard-set-error')).toMatchObject({ requestId: 'rq-ks6', reason: 'unsupported' })
+      })
+    })
+
+    // #1139: Match and Verify start from a run's reset on the device the session holds.
+    describe('device:run-reset', () => {
+      function replies() {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        return out
+      }
+      function pm(installed: string[]) {
+        const calls: string[] = []
+        const runner = (adb as unknown as { runner: AdbRunner }).runner
+        vi.mocked(runner.exec).mockImplementation(async (...args: string[]) => {
+          const at = args.indexOf('pm')
+          if (at < 0) return ''
+          const [verb, pkg] = [args[at + 1]!, args[at + 2]!]
+          if (verb !== 'path' && verb !== 'clear') return ''
+          calls.push(`${verb} ${pkg}`)
+          if (verb === 'path' && !installed.includes(pkg)) throw Object.assign(new Error('Command failed'), { code: 1, stdout: '', stderr: '' })
+          return verb === 'path' ? `package:/data/app/${pkg}/base.apk` : 'Success'
+        })
+        return calls
+      }
+      /** The gRPC backend's two halves the reset reaches: the clipboard and the body. */
+      function grpc() {
+        let clip = 'copied'
+        getState().grpcClient = { setClipboard: vi.fn(async (t: string) => { clip = t }), getClipboard: vi.fn(async () => clip), close: vi.fn() } as never
+      }
+
+      it('clears the app, turns airplane mode off, stands the body up, and reports each item', async () => {
+        const calls = pm(['com.app'])
+        grpc()
+        let airplane = true
+        vi.spyOn(adb, 'airplaneMode').mockImplementation(async () => airplane)
+        vi.spyOn(adb, 'setAirplaneMode').mockImplementation((async (_s: string, on: boolean) => { airplane = on; return { offline: on } }) as never)
+        ;(adb as unknown as { body: { at: number } }).body.at = 90
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr')).toEqual({
+          type: 'device:run-reset-done', sessionId: agent.sessionId, requestId: 'rq-rr',
+          report: { done: ['app-data', 'pasteboard', 'network', 'orientation'], failed: [] },
+        })
+        expect(calls).toEqual(['path com.app', 'clear com.app'])
+        expect(airplane).toBe(false)
+        expect((adb as unknown as { body: { at: number } }).body.at).toBe(0)
+        // The viewer's toggle hears the device came back online.
+        expect(out.some((m) => m['type'] === 'network:state' && (m['payload'] as { offline?: boolean }).offline === false)).toBe(true)
+      })
+
+      // scrcpy has no gRPC client: no clipboard and no body, so neither is claimed — the dialog shows what was done.
+      it('claims neither the clipboard nor the body over scrcpy', async () => {
+        pm([])
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr2', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr2')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr2')).toMatchObject({ type: 'device:run-reset-done', report: { done: ['app-data', 'network'], failed: [] } })
+      })
+
+      it('fails network when the device stays in airplane mode', async () => {
+        pm([])
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+        vi.spyOn(adb, 'airplaneMode').mockResolvedValue(true)
+        vi.spyOn(adb, 'setAirplaneMode').mockResolvedValue({ offline: true } as never)
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr3', payload: { apps: [] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr3')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr3')).toMatchObject({ report: { failed: ['network'] } })
+      })
+
+      // A partial report behind a `-done` would read as a reset device (design review of #1139).
+      it('answers an error, not a partial report, when the device is restarted mid-reset', async () => {
+        const runner = (adb as unknown as { runner: AdbRunner }).runner
+        vi.mocked(runner.exec).mockImplementation(async (...args: string[]) => {
+          if (args.includes('pm')) getState().bootSeq++
+          return 'package:/data/app/x/base.apk'
+        })
+        const out = replies()
+        inject({ type: 'device:run-reset', requestId: 'rq-rr4', payload: { apps: ['com.app'] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr4')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr4')).toMatchObject({ type: 'device:run-reset-error' })
+      })
+
+      it('answers an error for a session with no device', async () => {
+        const out = replies()
+        internals(agent).handleRelayMessage({ type: 'device:run-reset', sessionId: 'no-such-session', requestId: 'rq-rr5', payload: { apps: [] } })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-rr5')).toBeDefined(), { timeout: 3000 })
+        expect(out.find((m) => m['requestId'] === 'rq-rr5')).toMatchObject({ type: 'device:run-reset-error', message: 'No booted device' })
       })
     })
 
@@ -3446,6 +3898,17 @@ describe('AndroidAgent', () => {
         expect(helper().touchEnd).not.toHaveBeenCalled()
       })
 
+      // A cancel lets go with a cancel there too: an up on the channel serving now would complete the gesture (#1115).
+      it('cancels on the channel serving now when the one that opened the touch was replaced', () => {
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        const old = control()
+        replaceSession()
+        inject({ type: 'input:touch:cancel' })
+        expect(old.touchCancel).not.toHaveBeenCalled()
+        expect(control().touchCancel).toHaveBeenCalledWith(0, 270, 1800)
+        expect(control().touchUp).not.toHaveBeenCalled()
+      })
+
       it('answers no-gesture, not channel-down, when a restart has emptied everything', async () => {
         // The touch-down did land, on the channel the restart just dropped; the stream heals by itself
         // a moment later. `channel-down` would toast "not reaching this device" and tell MCP to reconnect.
@@ -3546,7 +4009,7 @@ describe('AndroidAgent', () => {
       it('answers unsupported for a chord it deliberately does not send', async () => {
         const sendKeyEvent = vi.spyOn(adb, 'sendKeyEvent')
         const errored = waitForType(browser, 'input:error')
-        inject({ type: 'input:key', requestId: 'rq-in23', payload: { code: 'KeyA', modifiers: 0x08 } }) // Cmd+A
+        inject({ type: 'input:key', requestId: 'rq-in23', payload: { code: 'KeyS', modifiers: 0x08 } }) // Cmd+S
         expect((await errored)['message']).toContain('not supported')
         expect(sendKeyEvent).not.toHaveBeenCalled()
       })
@@ -3561,8 +4024,62 @@ describe('AndroidAgent', () => {
 
       it('answers unsupported for a code with no character mapping', async () => {
         const errored = waitForType(browser, 'input:error')
-        inject({ type: 'input:key', requestId: 'rq-in25', payload: { code: 'CapsLock', modifiers: 0 } })
+        inject({ type: 'input:key', requestId: 'rq-in25', payload: { code: 'IntlBackslash', modifiers: 0 } })
         expect((await errored)['message']).toContain('not supported')
+      })
+
+      // #1135: select-all, which `inputText` with `replace` presses first, is Ctrl+A on Android 13+.
+      it.each([0x01, 0x08])('holds Ctrl+A for a select-all chord (modifiers %i)', async (modifiers) => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(true)
+        inject({ type: 'input:key', requestId: 'rq-sa1', payload: { code: 'KeyA', modifiers } })
+        expect((await waitForType(browser, 'input:done')).requestId).toBe('rq-sa1')
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['113', '29'])
+      })
+
+      it('answers unsupported for select-all below Android 13, and types no "a"', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        const sendInput = vi.spyOn(adb, 'sendInput')
+        inject({ type: 'input:key', requestId: 'rq-sa2', payload: { code: 'KeyA', modifiers: 0x08 } })
+        expect((await waitForType(browser, 'input:error'))['message']).toContain('not supported')
+        expect(sendInput).not.toHaveBeenCalled()
+      })
+
+      // #1135: Caps Lock switches Gboard's language, as it does on a Mac and on iOS.
+      it('switches the keyboard language with Shift+Space for Caps Lock', async () => {
+        const combo = vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(true)
+        inject({ type: 'input:key', requestId: 'rq-cl1', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:done')).requestId).toBe('rq-cl1')
+        expect(combo).toHaveBeenCalledWith('emulator-5554', ['59', '62'])
+      })
+
+      it('answers unsupported for Caps Lock below Android 13', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockResolvedValue(false)
+        inject({ type: 'input:key', requestId: 'rq-cl2', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:error'))['message']).toContain('not supported')
+      })
+
+      it('answers failed when the Caps Lock combination errors', async () => {
+        vi.spyOn(adb, 'sendKeyCombination').mockRejectedValue(new Error('offline'))
+        inject({ type: 'input:key', requestId: 'rq-cl3', payload: { code: 'CapsLock', modifiers: 0 } })
+        expect((await waitForType(browser, 'input:error'))['reason']).toBe('dispatch-failed')
+      })
+
+      // #1135: a flow's `imeAction` step, the field's own action rather than an Enter key event.
+      it.each([
+        ['ok', 'input:done'],
+        ['unsupported', 'input:error'],
+        ['no-focus', 'input:error'],
+        ['rejected', 'input:error'],
+      ] as const)('presses the IME action (%s → %s)', async (result, answer) => {
+        const ime = vi.spyOn(adb, 'imeAction').mockResolvedValue(result)
+        const sendKeyEvent = vi.spyOn(adb, 'sendKeyEvent')
+        inject({ type: 'input:key', requestId: 'rq-ime', payload: { code: 'ImeAction', modifiers: 0 } })
+        const reply = await waitForType(browser, answer)
+        expect(reply.requestId).toBe('rq-ime')
+        if (result === 'unsupported') expect(reply['reason']).toBe('unsupported')
+        if (result === 'no-focus' || result === 'rejected') expect(reply['reason']).toBe('dispatch-failed')
+        expect(ime).toHaveBeenCalledWith('emulator-5554')
+        expect(sendKeyEvent).not.toHaveBeenCalled()
       })
 
       it('answers failed when the key dispatch rejects', async () => {
@@ -5142,6 +5659,82 @@ describe('a posture change reports as soon as the guest commits', () => {
     // control sitting on its long stop.
     const order = await (async () => { const o = fold({ commitsAfter: 0, postureFails: true }); await settle(); return o })()
     expect(order).toContain('device:postures')
+  })
+})
+
+describe('a fold takes down the keyguard it put up', () => {
+  const STATES = `DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=1, name='HALF_OPENED'}`
+
+  /**
+   * Drives `input:posture` to `target` ('1' folds, '2' unfolds) with the keyguard reads answering `reads` in turn
+   * (the last repeating), and records the order of what the agent did.
+   */
+  function change(target: '1' | '2', reads: Array<{ showing: boolean; secure: boolean } | null>) {
+    const adb = mockAdb(true)
+    const order: string[] = []
+    vi.spyOn(adb, 'printDeviceStates').mockResolvedValue(STATES)
+    vi.spyOn(adb, 'deviceState').mockResolvedValue(`Committed state: DeviceState{identifier=0, name='${target === '1' ? 'CLOSED' : 'HALF_OPENED'}'}`)
+    vi.spyOn(adb, 'setPosture').mockImplementation(async () => { order.push('setPosture') })
+    vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue(null)
+    let n = 0
+    vi.spyOn(adb, 'keyguardState').mockImplementation(async () => { order.push('keyguardState'); return reads[Math.min(n++, reads.length - 1)]! })
+    const dismiss = vi.spyOn(adb, 'dismissKeyguard').mockImplementation(async () => { order.push('dismissKeyguard') })
+    const agent = new AndroidAgent({}, adb)
+    ;(agent as unknown as { ws: { readyState: number; send(d: string): void } }).ws = {
+      readyState: 1,
+      send: (d: string) => { if ((JSON.parse(d) as { type: string }).type === 'device:postures') order.push('device:postures') },
+    }
+    const state = { deviceId: 'avd:Pixel_8_API_34', sessionId: 's1', booted: true } as unknown as TestState
+    internals(agent).deviceStates.set('s1', state)
+    internals(agent).handleRelayMessage({ type: 'input:posture', sessionId: 's1', payload: { postureId: target } })
+    return { order, dismiss }
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 400))
+  const up = { showing: true, secure: false }
+  const down = { showing: false, secure: false }
+
+  // Before the report, because the report is what a flow's `setPosture` waits for: its next step must find the app.
+  it('dismisses the keyguard a fold put up before reporting the posture, and reads it back', async () => {
+    const { order, dismiss } = change('1', [down, up, down])
+    await settle()
+    expect(dismiss).toHaveBeenCalledTimes(1)
+    const reported = order.indexOf('device:postures')
+    expect(order.indexOf('dismissKeyguard')).toBeLessThan(reported)
+    expect(order.slice(order.indexOf('dismissKeyguard'), reported)).toContain('keyguardState')
+  })
+
+  // Measured: the keyguard can still be on its way at the read that sees the commit.
+  it('waits a moment on a fold for the keyguard to come up', async () => {
+    const { dismiss } = change('1', [down, down, down, up, down])
+    await settle()
+    expect(dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a keyguard that was already up before the change', async () => {
+    const { dismiss } = change('1', [up])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  it('leaves a secure keyguard for its credential', async () => {
+    const { dismiss } = change('1', [down, { showing: true, secure: true }])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  it('leaves the keyguard alone when it cannot be read', async () => {
+    const { dismiss } = change('1', [null, up])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+  })
+
+  // Unfolding does not put one up, so it pays one read and no wait.
+  it('reads once after an unfold and does not wait', async () => {
+    const { order, dismiss } = change('2', [down])
+    await settle()
+    expect(dismiss).not.toHaveBeenCalled()
+    expect(order.filter((o) => o === 'keyguardState')).toHaveLength(2)
   })
 })
 

@@ -89,5 +89,5 @@ release row, or the failure screen's retry) (`AppCenter.tsx`). That changes noth
 
 ## Figma
 
-Component set **SearchInput** (`65:165`) in the `Design System` page — `state` × `content`, 6 variants. The value
-names were not checked against this spec.
+Component set **SearchInput** (`1:2131`) on the `Forms` page of tapflow-design-system — `state` × `content`, 6
+variants. The names match this spec.

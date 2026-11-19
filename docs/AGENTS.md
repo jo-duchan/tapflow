@@ -66,6 +66,8 @@ iOS/Android 양쪽을 지원하는 기능을 설명할 때 특정 플랫폼 도�
 | the person who sets up and runs tapflow (installs it, keeps the relay and agents running). Not a role: the first account is an Admin, but any Admin can invite, and an Admin need not be the operator | 운영자 | operator | "운영자(Admin)", "an operator (Admin)"처럼 역할과 같다고 쓰는 표기 |
 | the machine the relay runs on (Mac, Linux or Docker host) | 릴레이 호스트 | relay host | 릴레이가 Mac이 아닐 수 있는 문맥의 "릴레이 Mac", "the Mac the relay runs on" |
 | comment on a build | 댓글 | comment | 코멘트 |
+| pinch (two-finger zoom) | 핀치 | pinch | 꼬집기, 핀치 줌 |
+| long press | 길게 누르기 | long press, hold | 롱프레스, 롱 프레스, 롱탭 |
 | deep link | 딥 링크 | deep link | KO 산문의 "딥링크" (UI 라벨 **Open a deeplink**, **Deeplink URL**은 그대로) |
 | dashboard token Type **API** (`view, builds:write`) | API 유형 토큰(또는 API 유형 PAT), 스코프를 괄호로 한 번 병기 | API-type token (or API-type PAT), scopes in parentheses once | "view-scope PAT", "API 토큰", 스코프 없는 "PAT"만으로 종류 지시 |
 

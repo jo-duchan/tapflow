@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, act } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, act, screen, fireEvent } from '@testing-library/react'
 import type { InputErrorReason } from '@tapflowio/protocol'
 import type { BrowserInbound } from '@/lib/types'
 import { INPUT_ERROR_NOTICE } from '@/lib/inputErrorNotice'
@@ -36,7 +36,14 @@ vi.mock('sonner', () => ({
  *  implemented as a second toast. */
 const quiet = () => [toastDismiss, toastInfo, toastSuccess].forEach((f) => expect(f).not.toHaveBeenCalled())
 
+// The dialog itself is not what is tested here, only that the viewer knows it is open.
+vi.mock('@/components/flow-capture/FlowCaptureDialog', () => ({
+  default: ({ onClose }: { onClose: () => void }) => <div role="dialog" aria-label="Capture flow"><button onClick={onClose}>Cancel</button></div>,
+}))
+
 const { DeviceViewer } = await import('@/components/DeviceViewer')
+
+afterEach(() => vi.restoreAllMocks())
 
 function mounted() {
   render(<DeviceViewer sessionId="s1" deviceId="dev-1" />)
@@ -276,5 +283,72 @@ describe('INPUT_ERROR_NOTICE', () => {
       const values = shown.map(([, n]) => n[field])
       expect(new Set(values).size, field).toBe(values.length)
     }
+  })
+})
+
+// Flow Capture's dialog replays and verifies through the same socket, and a step that does not land answers with
+// `input:error`. The dialog says so itself; a toast behind it would be hidden from a screen reader and repeat the
+// dialog's own message to everyone else.
+describe('DeviceViewer — input:error while Flow Capture is open', () => {
+  beforeEach(() => { [toastError, toastDismiss, toastInfo, toastSuccess].forEach((f) => f.mockClear()); deliver = null })
+
+  const CHROME = {
+    framePng: 'iVBORw0KGgo=', bezelWidth: 10, bezelHeight: 10,
+    compositeWidth: 100, compositeHeight: 200,
+    padding: { left: 0, right: 0, top: 0, bottom: 0 },
+    screenRect: { x: 0, y: 0, width: 100, height: 200 },
+    screenCornerRadius: 0, logicalWidth: 50, logicalHeight: 100, buttons: [],
+  }
+
+  const drops = (fetch: { mock: { calls: unknown[][] } }) =>
+    fetch.mock.calls.filter(([u, i]) => String(u) === '/api/v1/sessions/s1/capture/snapshot' && (i as RequestInit | undefined)?.method === 'DELETE')
+
+  function capturing() {
+    render(<DeviceViewer sessionId="s1" deviceId="dev-1" buildId={7} capturingSteps />)
+    act(() => { deliver!({ type: 'session:joined', sessionId: 's1', capabilities: [] }) })
+    act(() => { deliver!({ type: 'device:ready', sessionId: 's1', payload: { deviceId: 'dev-1' } }) })
+    act(() => { deliver!({ type: 'session:chrome', sessionId: 's1', payload: CHROME } as unknown as BrowserInbound) })
+  }
+
+  it('toasts while the dialog is closed', () => {
+    capturing()
+    inputError('channel-unavailable')
+    expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  // The dialog goes when the device picture does. Left open in state, it came back by itself with the next frame.
+  it.each<[string, BrowserInbound]>([
+    ['the agent goes away', { type: 'session:agent-away', sessionId: 's1' }],
+    ['the agent restarts', { type: 'session:rebound', sessionId: 's1', capabilities: [] }],
+    ['the device boots again', { type: 'device:booting', sessionId: 's1' }],
+  ])('closes the dialog when %s, and it does not open again by itself', async (_, msg) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+    capturing()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture flow' }))
+    expect(await screen.findByRole('dialog', { name: 'Capture flow' })).toBeInTheDocument()
+    act(() => { deliver!(msg) })
+    expect(drops(fetch)).toHaveLength(1)
+    act(() => { deliver!({ type: 'device:ready', sessionId: 's1', payload: { deviceId: 'dev-1' } }) })
+    act(() => { deliver!({ type: 'session:chrome', sessionId: 's1', payload: CHROME } as unknown as BrowserInbound) })
+    expect(screen.queryByRole('dialog', { name: 'Capture flow' })).not.toBeInTheDocument()
+  })
+
+  // The copy of the steps is the opening's: dropped once when it closes, and not while it is open.
+  it('drops the copy of the steps once when the dialog closes', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+    capturing()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture flow' }))
+    await screen.findByRole('dialog', { name: 'Capture flow' })
+    expect(drops(fetch)).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Capture flow' })).not.toBeInTheDocument()
+    expect(drops(fetch)).toHaveLength(1)
+  })
+
+  it('does not toast while the dialog is open', () => {
+    capturing()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture flow' }))
+    inputError('channel-unavailable')
+    expect(toastError).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/agent-core",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "DeviceAgent interface, AgentRegistry, and shared utilities for tapflow agents",
   "keywords": [
     "tapflow",
@@ -30,6 +30,13 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "source": "./src/errors.ts",
+      "tsx": "./src/errors.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
       "source": "./src/utils/index.ts",
@@ -57,7 +64,7 @@
   },
   "dependencies": {
     "@tapflowio/protocol": "workspace:*",
-    "ws": "^8.22.0"
+    "ws": "^8.22.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

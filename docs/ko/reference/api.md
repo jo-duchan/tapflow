@@ -16,7 +16,7 @@ description: "tapflow REST API 전체 레퍼런스(/api/v1): 인증, 초대, 비
 | PAT scope | 엔드포인트 |
 |-----------|-----------|
 | `builds:write` | `POST /builds`, `GET /builds`, `GET /builds/:id`, `POST /comments`, 웹훅 엔드포인트 전체, 실행 기록 쓰기(`POST /runs` 아래) |
-| `view` | `GET /apps`, `GET /runs` 아래, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로), 원격에서 여는 기기 세션 WebSocket |
+| `view` | `GET /apps`, `GET /runs` 아래, `GET /sessions/:sessionId/screenshot`, `GET /sessions/:sessionId/ui-tree`, `POST /sessions/:sessionId/reach`, `/uploads/` 아래 파일(`/api/v1/`이 아닌 릴레이 루트 경로), 원격에서 여는 기기 세션 WebSocket |
 | `agent` | 원격 에이전트의 WebSocket 연결. 토큰을 발급한 팀원이 Admin인 동안에만 받습니다 |
 
 **역할.** PAT로 호출해도 토큰 주인의 현재 역할이 적용됩니다. Viewer는 읽기 전용이라 빌드 업로드·수정·삭제 예약, 앱 생성·수정·삭제, 웹훅 엔드포인트 전체, 실행 기록 쓰기에서 `403`을 받습니다. 빌드 조회와 댓글 작성은 Viewer도 할 수 있습니다. 역할을 확인하는 엔드포인트는 요청마다 역할을 다시 읽으므로 역할을 바꾸면 다시 로그인하거나 토큰을 새로 만들지 않아도 바로 적용됩니다.
@@ -117,11 +117,12 @@ Body (JSON):
   "email": "admin@example.com",
   "displayName": "Admin",
   "avatarUrl": "/uploads/avatars/user-1.png",
-  "role": "Admin"
+  "role": "Admin",
+  "flowCapture": true
 }
 ```
 
-`avatarUrl`은 프로필 이미지가 없으면 `null`입니다.
+`avatarUrl`은 프로필 이미지가 없으면 `null`입니다. `flowCapture`는 이 사용자의 QA 단계를 릴레이가 기억하는지 여부입니다([`PATCH /api/v1/me/preferences`](#patch-api-v1-me-preferences)).
 
 
 ### `POST /api/v1/auth/change-password`
@@ -752,6 +753,26 @@ File:
 ```
 
 
+### `PATCH /api/v1/me/preferences`
+
+현재 로그인한 사용자의 개인 설정을 바꿉니다. 세션 쿠키로만 호출할 수 있으며 Viewer를 포함한 모든 역할이 쓸 수 있습니다.
+
+```
+Body (JSON):
+  flowCapture  boolean  필수
+```
+
+`flowCapture`가 `true`이면 사용자가 대시보드에서 한 탭, 스와이프, 입력을 릴레이가 세션 동안 메모리에 기억합니다. 입력 중인 텍스트 칸의 내용 전체도 읽어서 무엇을 입력했는지 기록합니다. 화면 키보드의 위치도 읽어서 키를 누른 탭을 앱을 누른 탭으로 착각하지 않게 합니다. iOS에서는 둘 다 테스트 중인 앱 안에서 읽습니다. 앱이 비밀번호 칸으로 표시한 칸은 값을 읽지 않습니다. 다만 그 칸에 친 키와 붙여 넣은 텍스트는 다른 입력처럼 세션 동안 메모리에 남습니다. Capture flow는 이를 Match와 Verify에서 기기에 다시 입력할 때만 쓰고 플로우 파일에는 이름만 남깁니다. 비밀번호 보기 버튼 등으로 평문으로 보이는 비밀번호는 일반 칸이라 값을 읽고 텍스트로 내보냅니다. 기록하는 동안에는 비밀번호를 가려 두거나 Edit에서 그 단계를 빼세요. 비밀번호가 아닌 칸 중 읽지 못한 입력은 US 키보드 기준으로 누른 키로 기록하므로 기기에 실제로 입력된 글자와 다를 수 있습니다. 이런 단계는 Capture flow에서 **fragile**로 표시됩니다. 기본값은 `true`입니다. `false`로 바꾸면 이미 기억한 내용도 바로 버립니다.
+
+**응답 `200`**
+
+```json
+{ "flowCapture": false }
+```
+
+값이 boolean이 아니면 `400`을 반환합니다.
+
+
 ## 설정 (Settings) {#settings}
 
 <a id="설정-settings"></a>
@@ -1182,11 +1203,87 @@ Query:
       "frame": { "x": 0.1, "y": 0.8, "width": 0.8, "height": 0.06 },
       "enabled": true
     }
-  ]
+  ],
+  "interfaceTurn": 90
 }
 ```
 
-`frame`은 화면 크기에 대한 0–1 비율입니다. 오류 상태 코드는 스크린샷과 같으며 시간 초과는 15초입니다.
+`frame`은 화면 크기에 대한 0–1 비율이며 앱이 그려진 방향의 화면을 기준으로 합니다. 오류 상태 코드는 스크린샷과 같으며 시간 초과는 15초입니다.
+
+`interfaceTurn`은 기기의 세로 화면을 시계 방향으로 몇 도 돌려야 앱 화면이 똑바로 서는지 나타냅니다(`0`, `90`, `180`, `270`). 에이전트가 앱의 방향을 읽을 수 있을 때만 들어 있으며 현재는 iOS만 보냅니다. 값이 없으면 방향 정보가 없다는 뜻입니다.
+
+입력 칸(`role: "input"`)에는 `secure`가 함께 옵니다. 비밀번호처럼 입력한 글자를 가리는 칸이면 `true`, 아니면 `false`입니다. 입력 칸이 아니어도 글자를 가린다고 알려 온 요소에는 `secure: true`가 붙습니다. 입력 칸인데 `secure`가 없으면 에이전트가 판단하지 못했다는 뜻이므로 비밀번호 칸으로 다루세요. 지금 입력을 받는 칸에는 `focused: true`가 붙습니다.
+
+켜진 스위치나 체크박스에는 `checked: true`가, 선택된 탭·세그먼트·행에는 `selected: true`가 붙습니다. 그렇지 않으면 둘 다 없고 이 값을 읽지 않는 에이전트도 보내지 않습니다.
+
+### `POST /api/v1/sessions/:sessionId/reach`
+
+`ui-tree`에서 읽은 요소마다 그 요소를 누르려는 터치가 어디에 닿는지 묻습니다. 플로우는 요소의 중심 대신 여기서 받은 지점을 누릅니다. 중심은 탭 바나 떠 있는 버튼, 반투명 막에 덮일 수 있기 때문입니다.
+
+**요청**
+
+```json
+{ "targets": [{ "role": "cell", "label": "Row 13", "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.06 } }] }
+```
+
+각 대상은 `ui-tree`가 돌려준 요소 그대로입니다. `role`, `label`, `frame`과 있으면 `identifier`를 넣습니다. 대상은 64개, 본문은 64KB까지입니다.
+
+**응답 `200`**
+
+```json
+{ "results": [{ "state": "reachable", "point": [0.1, 0.9], "atCentre": false, "frame": { "x": 0, "y": 0.86, "width": 1, "height": 0.03 } }] }
+```
+
+대상마다 결과가 하나씩 같은 순서로 옵니다.
+
+| `state` | 의미 |
+|---|---|
+| `reachable` | `point`를 누르면 그 요소에 닿습니다. `point`는 터치를 보내는 공간 기준 0–1입니다. iOS는 앱이 돌아간 화면이 아니라 기기의 세로 화면이고 Android는 `ui-tree`의 frame처럼 Android가 그리는 화면입니다. `atCentre`는 그 지점이 요소의 중심인지 알려 줍니다. |
+| `occluded` | 터치를 받는 다른 요소가 전부 덮고 있습니다. 알 수 있으면 `by`에 그 요소를 적습니다. |
+| `offscreen` | 요소가 화면 밖에 있습니다. |
+| `missing` | 읽은 자리에 그 요소가 없습니다. `candidates`는 근처 요소 수입니다. 트리를 다시 읽으세요. |
+| `unknown` | 기기가 판정하지 못합니다. `reason`에 이유가 있습니다. 이 엔드포인트 이전의 에이전트는 모든 대상에 이렇게 답합니다. |
+
+본문이 잘못되면 `400`, 64KB를 넘으면 `413`, 세션이 없으면 `404`, 기기가 꺼져 있으면 `409`, 에이전트가 오프라인이면 `502`, 15초에 대상마다 0.3초를 더한 시간이 지나면 `504`를 반환합니다.
+
+
+## Flow Capture
+
+대시보드가 테스트한 내용을 플로우로 저장할 때 쓰는 엔드포인트입니다. 대시보드용이라 릴리스 사이에 바뀔 수 있습니다. 세션 쿠키로만 호출할 수 있고 PAT는 `401`을 받습니다. 기억한 단계에는 입력한 글자가 들어 있어서 그 단계의 주인인 사용자에게만 응답합니다. 다른 사용자에게는 `404`를 반환합니다.
+
+### `POST /api/v1/sessions/:sessionId/capture/snapshot`
+
+지금까지 기억한 단계를 고정한 사본을 만들어 반환합니다. 다시 호출하면 사본을 새로 만듭니다. 기억한 단계가 없으면 `404`를 반환합니다.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot`
+
+마지막으로 만든 사본을 반환합니다. 사본이 없으면 `404`를 반환합니다.
+
+### `DELETE /api/v1/sessions/:sessionId/capture/snapshot`
+
+사본을 버립니다. 사본이 없으면 `404`를 반환합니다.
+
+### `PUT /api/v1/sessions/:sessionId/capture/thumbnails/:requestId`
+
+입력이 시작될 때의 화면 그림을 남깁니다. 이미 기억된 입력에만 16KB 이하 JPEG를 한 번 보낼 수 있습니다. 대시보드가 입력을 보낸 뒤 보냅니다. 남기면 `201`, 남기지 않으면 `200`과 `{ "kept": false, "reason": … }`(`exists`, 키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치나 연속 입력 중간의 키면 `keyboard`, 글자를 친 뒤 2초 안에 시작했고 그 칸이 보안 칸이 아니라고 확인되지 않은 입력이면 `typed`, `full`)를 돌려줍니다. 이 세션에 내 기록이 없으면 `404`, 그 `requestId`의 입력이 아직 기억되지 않았거나 기다리는 키보드 읽기나 칸 읽기가 돌아오기 전이면 `409`(잠시 뒤 다시 보내면 됩니다), 본문이 더 크면 `413`, JPEG가 아니면 `415`를 돌려줍니다.
+
+### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
+
+복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다.
+
+### `PUT /api/v1/sessions/:sessionId/capture/pause`
+
+기억을 잠시 멈춥니다. 대시보드가 기억한 단계를 기기에서 재생하는 동안 그 입력이 사람의 입력으로 기억되지 않게 하려고 씁니다. 멈춤은 응답의 `ttlMs`(30초)가 지나면 저절로 풀리며 다시 호출하면 연장됩니다. 기억한 단계가 없으면 `404`를 반환합니다. 재생 중에 이 응답을 받으면 기억이 이미 끝난 것이므로 재생을 멈춰야 합니다.
+
+**응답 `200`**
+
+```json
+{ "ok": true, "ttlMs": 30000 }
+```
+
+### `DELETE /api/v1/sessions/:sessionId/capture/pause`
+
+멈춤을 바로 풉니다. 멈춰 있지 않으면 `404`를 반환합니다.
 
 
 ## 릴레이 (Relay)
@@ -1199,14 +1296,18 @@ Query:
 
 ```json
 {
-  "lanHost": "192.168.0.10",
+  "lanHost": null,
   "port": 4000,
-  "publicBaseUrl": "https://tap.example.com",
-  "agentRelayUrl": "wss://tap.example.com"
+  "publicBaseUrl": null,
+  "agentRelayUrl": null,
+  "publicUrlWarning": "container-without-public-url",
+  "agentUrlWarning": "container-without-relay-url"
 }
 ```
 
 값을 정할 수 없는 항목은 `null`입니다. 컨테이너 안에서 실행하면 `lanHost`는 항상 `null`입니다.
+
+`publicUrlWarning`은 릴레이가 컨테이너 안에서 실행되는데 팀원 링크에 쓸 공개 URL이 없을 때만 들어갑니다. `agentUrlWarning`은 컨테이너 안에서 실행되는데 에이전트용 `TAPFLOW_RELAY_URL`이 없을 때만 들어갑니다. 조건에 맞지 않는 필드는 응답에 들어가지 않습니다.
 
 
 ## 로그 (Logs)

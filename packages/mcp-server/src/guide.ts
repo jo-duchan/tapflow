@@ -13,7 +13,7 @@
 export const INSTRUCTIONS = `tapflow drives iOS simulators and Android emulators on your team's Macs, which people also use by hand.
 - Before testing a feature or screen, call get_testing_guide once: what to cover, what these tools cannot test, and how to report.
 - When you are done, call disconnect_device. A session you keep holds the device away from everyone else.
-- Read the screen with query_ui_tree, not screenshot. It is far cheaper and gives ids, labels, enabled state and frames. Take a screenshot only for something visual (keyboard covering a field, clipped text, a system dialog missing from the tree), as evidence, or once per device to learn the pixel size tap and swipe need: then tap the tree's frame centers times that size, or tap by selector with run_flow tapOn.
+- Read the screen with query_ui_tree, not screenshot. It is far cheaper and gives ids, labels, enabled state and frames. Take a screenshot only for something visual (keyboard covering a field, clipped text, a system dialog missing from the tree), as evidence, or once per device to learn the pixel size swipe and a point tap need. Tap a listed element with tap's element, not its frame centre, which a tab bar or sheet can cover.
 
 Session: list_devices, connect_device (give the person the watchUrl), boot_device unless already booted, install_app, launch_app. After launch_app or any navigation, read the tree again until the screen you expect is there; never tap a screen you have not just read.
 
@@ -43,7 +43,7 @@ Goal: find real defects in the requested feature, prove each with evidence, and 
 - Empty, spaces only, leading/trailing spaces.
 - Too long, too short, exactly at a visible limit.
 - Wrong format (bad email, letters in a number field), 0, negative, decimal.
-- Special characters (' " < > &). Accented, CJK and emoji on iOS only: Android type_text takes ASCII.
+- Special characters (' " < > &), accented, CJK and emoji.
 - A required field missing; fields that disagree (password and confirmation).
 - Expect: an error that names the problem, near the field, gone once fixed. Submit stays disabled (enabled: false) or is rejected, never accepted.
 

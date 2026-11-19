@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { XCUITreeReader, computeRunnerStamp, type RunnerNative } from '../XCUITreeReader'
+import { XCUITreeReader, computeRunnerStamp, toFocusedField, toKeyboardState, type RunnerNative } from '../XCUITreeReader'
 
 type FakeProc = EventEmitter & {
   pid?: number
@@ -100,6 +100,118 @@ describe('XCUITreeReader', () => {
     reader.stop()
   })
 
+  // An attached runner made a busy SwiftUI app lag with no query running (Food Truck, iOS 26.5): one started for a
+  // person's Capture dialog (a tree read, a reach) is let go once nothing has been asked of it for a while.
+  describe('a runner nobody kept', () => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+    it('is released once no request has been in flight for the idle period', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      await reader.read('udid-A', 'com.app')
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      // The next read starts it again.
+      await reader.read('udid-A', 'com.app')
+      expect(native.spawn).toHaveBeenCalledTimes(2)
+      reader.stop()
+    })
+
+    it('is held while a request is still in flight, and released after the last one', async () => {
+      const native = setup()
+      let release!: () => void
+      const slow = new Promise<void>((r) => { release = r })
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/tree') && url.includes('slow')) { await slow; return { ok: true, text: async () => TREE } as Response }
+        return healthy(url)
+      })
+      const reader = new XCUITreeReader(native, 30)
+      const held = reader.read('udid-A', 'com.slow')
+      await reader.read('udid-A', 'com.app')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      release()
+      await held
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    it('is let go once a person boots the device an automation client warmed', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await reader.read('udid-A', 'com.app')
+      reader.unkeep('udid-A')
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    it('is held through a request still in flight when the person\'s boot comes', async () => {
+      const native = setup()
+      let release!: () => void
+      const slow = new Promise<void>((r) => { release = r })
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/tree') && url.includes('slow')) { await slow; return { ok: true, text: async () => TREE } as Response }
+        return healthy(url)
+      })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      const held = reader.read('udid-A', 'com.slow')
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('slow'))).toBe(true))
+      reader.unkeep('udid-A')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      release()
+      await held
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    // `unkeep` while the warm-up was still building found no runner to time out; the runner it then started stayed
+    // attached, and the person's app lagged, until the next read (review finding).
+    it('is let go when the person\'s boot came while the warm-up was still building it', async () => {
+      let finishBuild!: () => void
+      const native = setup({ builtStamp: vi.fn(() => undefined), build: vi.fn(() => new Promise<void>((r) => { finishBuild = r })) })
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await vi.waitFor(() => expect(native.build).toHaveBeenCalled())
+      reader.unkeep('udid-A')
+      finishBuild()
+      await vi.waitFor(() => expect(native.spawn).toHaveBeenCalled())
+      await vi.waitFor(() => expect(native.terminateRunner).toHaveBeenCalledWith('udid-A'), { timeout: 1000 })
+      reader.stop()
+    })
+
+    // Read, then warm and unkeep: the read's countdown was left pending beside unkeep's, fired first, and the later one
+    // then stopped the runner the next read started (review finding).
+    it('counts down once per device, so an earlier countdown cannot stop a runner a later read is using', async () => {
+      const native = setup()
+      // 150 ms of slack on each side, against a loaded machine's event loop: the read's countdown would end at 400,
+      // unkeep's at 600, and the second read comes at 450.
+      const reader = new XCUITreeReader(native, 400)
+      await reader.read('udid-A', 'com.app')
+      await wait(200)
+      reader.warm('udid-A')
+      reader.unkeep('udid-A')
+      await wait(250)
+      await reader.read('udid-A', 'com.app')
+      await wait(250)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      expect(native.spawn).toHaveBeenCalledTimes(1)
+      reader.stop()
+    })
+
+    it('is not a runner an automation client\'s boot warmed, which stays for the device\'s life', async () => {
+      const native = setup()
+      const reader = new XCUITreeReader(native, 30)
+      reader.warm('udid-A')
+      await reader.read('udid-A', 'com.app')
+      await wait(90)
+      expect(native.terminateRunner).not.toHaveBeenCalled()
+      reader.stop()
+    })
+  })
+
   it('serializes concurrent reads into a single spawn (mutex)', async () => {
     const native = setup()
     const reader = new XCUITreeReader(native)
@@ -107,6 +219,23 @@ describe('XCUITreeReader', () => {
     expect(native.spawn).toHaveBeenCalledTimes(1)
     expect(a.length).toBe(b.length)
     reader.stop()
+  })
+
+  it('returns the app turn the runner reads beside the tree, and the same tree as before', async () => {
+    const reader = new XCUITreeReader(setup())
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes('/tree') ? ({ ok: true, text: async () => `TAPFLOW_INTERFACE_ORIENTATION 3\n${TREE}` } as Response) : healthy(url))
+    const read = await reader.readWithTurn('udid-A', 'com.app')
+    expect(read.interfaceTurn).toBe(270)
+    expect(read.elements.length).toBeGreaterThan(0)
+    expect(await reader.read('udid-A', 'com.app')).toEqual(read.elements)
+  })
+
+  it('rejects a body that is only the header, as it rejects garbage', async () => {
+    const reader = new XCUITreeReader(setup())
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes('/tree') ? ({ ok: true, text: async () => 'TAPFLOW_INTERFACE_ORIENTATION 0\nNo matches found for Application' } as Response) : healthy(url))
+    await expect(reader.readWithTurn('udid-A', 'com.app')).rejects.toThrow(/unexpected response/)
   })
 
   it('rejects a garbage body instead of returning an empty tree', async () => {
@@ -575,5 +704,61 @@ describe('computeRunnerStamp', () => {
     write('build/Build/Products/x.xctestrun', 'rebuilt')
     write('project.yml', 'spec 2')
     expect(computeRunnerStamp(dir, 'Xcode 26.5')).toBe(before)
+  })
+})
+
+describe('toFocusedField', () => {
+  const frame = { x: 20, y: 122, width: 362, height: 34 }
+
+  it('takes the runner\'s field whole, commas and Hangul still composing included', () => {
+    // Measured on iOS 26.4: the tree prints this value cut to 18 characters, unquoted; /field gives all of it.
+    expect(toFocusedField({ identifier: 'form.email', placeholder: 'Email', frame, type: 'text', value: 'Ab, cdefghijklmnopqrs안' }))
+      .toEqual({ field: { identifier: 'form.email', placeholder: 'Email', frame, secure: false, value: 'Ab, cdefghijklmnopqrs안' } })
+  })
+
+  it('keeps no value for a secure field, even one the runner sent', () => {
+    expect(toFocusedField({ identifier: 'form.password', placeholder: 'Password', frame, type: 'secure', value: '•••', reason: 'secure' }))
+      .toEqual({ field: { identifier: 'form.password', placeholder: 'Password', frame, secure: true }, reason: 'secure' })
+  })
+
+  it('says why there is no field, and calls anything it cannot vouch for a failed read', () => {
+    expect(toFocusedField({ reason: 'no-focus' })).toEqual({ field: null, reason: 'no-focus' })
+    expect(toFocusedField({ reason: 'ambiguous' })).toEqual({ field: null, reason: 'ambiguous' })
+    expect(toFocusedField({ reason: 'something-new' })).toEqual({ field: null, reason: 'failed' })
+    expect(toFocusedField({ identifier: 'x', frame: { x: 1 } })).toEqual({ field: null, reason: 'failed' })
+    expect(toFocusedField('not json')).toEqual({ field: null, reason: 'failed' })
+  })
+})
+
+describe('toKeyboardState', () => {
+  const rect = { x: 0, y: 0.6, width: 1, height: 0.4 }
+
+  it('keeps a portrait app\'s keyboard as it is', () => {
+    expect(toKeyboardState({ shown: true, rect, orientation: 1 })).toEqual({ shown: true, rect, onHome: false })
+    // 0: the runtime has no orientation getter, which only a portrait app has ever met.
+    expect(toKeyboardState({ shown: true, rect, orientation: 0 })).toEqual({ shown: true, rect, onHome: false })
+  })
+
+  it('carries a landscape app\'s keyboard into the portrait framebuffer a touch lands in', () => {
+    // UIInterfaceOrientation 4 is a turn of 90 (as `/tree` reads it), which `toFramePoint` carries as (u, v) → (v, 1 − u):
+    // the keyboard along the app's bottom edge lies along the framebuffer's right one.
+    const k = toKeyboardState({ shown: true, rect: { x: 0, y: 0.5, width: 1, height: 0.5 }, orientation: 4 })
+    expect(k).toEqual({ shown: true, rect: { x: 0.5, y: 0, width: 0.5, height: 1 }, onHome: false })
+  })
+
+  it('tells hidden from unknown', () => {
+    expect(toKeyboardState({ shown: false, orientation: 1 })).toEqual({ shown: false, onHome: false })
+    expect(toKeyboardState('nonsense')).toEqual({ shown: null })
+    expect(toKeyboardState({ orientation: 1 })).toEqual({ shown: null })
+  })
+
+  // The runner answers `shown: null` for one reason only, that the app is not in front: the home screen, for Flow
+  // Capture's default range. A read that failed never reaches the runner and carries no `onHome`.
+  it('reads the runner\'s null as the app not in front', () => {
+    expect(toKeyboardState({ shown: null, orientation: 0 })).toEqual({ shown: null, onHome: true })
+  })
+
+  it('is shown with no rect when the rect cannot be read', () => {
+    expect(toKeyboardState({ shown: true, rect: { x: 'a' }, orientation: 1 })).toEqual({ shown: true, onHome: false })
   })
 })

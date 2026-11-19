@@ -18,7 +18,7 @@ import { cmdTokenSet, cmdTokenStatus } from './commands/token.js'
 import { cmdReset } from './commands/reset.js'
 import { cmdStatus } from './commands/status.js'
 import { cmdLogs } from './commands/logs.js'
-import { cmdFlowRun, tagsArg, type FlowRunOptions, type TagsArg } from './commands/flow-run.js'
+import { cmdFlowRun, secretArg, tagsArg, type FlowRunOptions, type TagsArg } from './commands/flow-run.js'
 import { cmdMigrate, cmdMigrateDataDir, cmdMigrateNetFilter } from './commands/migrate.js'
 
 /**
@@ -142,9 +142,10 @@ export function createCli(): CAC {
     .option('--exclude-tags <tags>', 'Skip flows tagged with any of these (comma-separated); wins over --include-tags')
     .option('--parallel <n>', 'Share the flows across up to n devices the relay chooses and boots (1-16)')
     .option('--platform <platform>', 'ios or android: the platform of a --parallel run without --build')
-    .action((subcommand: string, files: string[], opts: Omit<FlowRunOptions, 'includeTags' | 'excludeTags'> & {
+    .option('--secret <name>', 'An environment variable an inputText { secret: NAME } step may type; repeat for each')
+    .action((subcommand: string, files: string[], opts: Omit<FlowRunOptions, 'includeTags' | 'excludeTags' | 'secret'> & {
       build?: string | number; timeout?: string | number; admissionTimeout?: string | number; includeTags?: TagsArg; excludeTags?: TagsArg
-      parallel?: string | number
+      parallel?: string | number; secret?: TagsArg
     }) => {
       if (subcommand !== 'run') {
         console.error(`unknown flow subcommand: ${subcommand} (expected: run)`)
@@ -158,6 +159,7 @@ export function createCli(): CAC {
         parallel: opts.parallel !== undefined ? Number(opts.parallel) : undefined,
         includeTags: tagsArg(opts.includeTags),
         excludeTags: tagsArg(opts.excludeTags),
+        secret: secretArg(opts.secret),
       })
     })
 

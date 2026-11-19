@@ -100,6 +100,6 @@ propose it as a code change first.
 
 ## Figma
 
-Component set **Button** (`29:422`) in the `Design System` page — one variant for every `variant` × `size` × `state`.
-It is one set on purpose: `destructive` is a value of the `variant` prop, not a separate component, so a
-separate "Button Danger" set would stop mapping 1:1 to code.
+Component set **Button** (`1:1307`) on the `Actions` page of tapflow-design-system — one variant for every `variant`
+× `size` × `state` (168). It is one set on purpose: `destructive` is a value of the `variant` prop, not a separate
+component, so a separate "Button Danger" set would stop mapping 1:1 to code.

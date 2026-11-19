@@ -25,8 +25,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
   // The real tap and token resolution: these tests feed it frames and tokens and check what reaches the relay.
-  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier }) => ({
-    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier,
+  ...(({ VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage, missingSecret, missingSecretMessage }) => ({
+    VideoTap, resolveToken, tokenRefusal, fetchWithToken, fixedToken, isEligible, lookupBuild, parseTagList, retryAdmission, admissionRefusalOf, AdmissionRefusedError, parseServiceTier, refusedFlow, unavailableButton, unavailableButtonMessage, missingSecret, missingSecretMessage,
   }))(
     await importOriginal<typeof import('@tapflowio/flow-runner')>(),
   ),
@@ -50,7 +50,7 @@ vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
   },
 }))
 
-import { cmdFlowRun, tagsArg } from '../../commands/flow-run.js'
+import { cmdFlowRun, secretArg, tagsArg } from '../../commands/flow-run.js'
 
 // A developer's own credentials file must never reach these runs: every test starts with none.
 beforeEach(() => { vi.stubEnv('TAPFLOW_TOKEN_FILE', path.join(os.tmpdir(), 'tapflow-no-such-credentials.json')) })
@@ -125,6 +125,59 @@ describe('cmdFlowRun exit codes (#543)', () => {
     })
     await run([flowFile('a.yaml')])
     expect(mocks.activity.mock.calls).toEqual([['s1', 'step 2: inputText (7 chars)']])
+  })
+
+  // Flow Capture: a flow types only the secrets the run names, and the run reads them before it touches a device.
+  describe('--secret', () => {
+    it('hands the engine exactly the named variables', async () => {
+      vi.stubEnv('PASSWORD', 'hunter2')
+      vi.stubEnv('OTHER', 'not-this')
+      mocks.runFlow.mockResolvedValue(resultOf('passed'))
+      await run([flowFile('a.yaml')], { secret: ['PASSWORD'] })
+      expect(mocks.runFlow.mock.calls[0]![2]).toMatchObject({ secrets: { PASSWORD: 'hunter2' } })
+      expect(JSON.stringify(mocks.runFlow.mock.calls[0]![2])).not.toContain('not-this')
+    })
+
+    it('hands it none without the flag, whatever the environment holds', async () => {
+      vi.stubEnv('PASSWORD', 'hunter2')
+      mocks.runFlow.mockResolvedValue(resultOf('passed'))
+      await run([flowFile('a.yaml')])
+      expect(mocks.runFlow.mock.calls[0]![2]).not.toHaveProperty('secrets')
+    })
+
+    it.each([
+      [['MISSING'], /--secret MISSING: MISSING is not set in the environment/],
+      [['NOT-A-NAME'], /--secret takes the name of an environment variable/],
+      // Inherited by process.env, never set: read as a variable, the run would type a function's source.
+      [['toString'], /--secret toString: toString is not set in the environment/],
+    ])('stops with exit 2 before the device for %j', async (names, message) => {
+      await run([flowFile('a.yaml')], { secret: names })
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(message))
+    })
+
+    // What CI expands a missing secret to: typing nothing would fail later, as the app's fault.
+    it('refuses an empty variable as it refuses a missing one', async () => {
+      vi.stubEnv('PASSWORD', '')
+      await run([flowFile('a.yaml')], { secret: ['PASSWORD'] })
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+    })
+
+    it('stops before choosing a device when a flow types a secret the run was not given', async () => {
+      mocks.parseFlow.mockImplementationOnce(() => ({ name: 'login', steps: [{ type: 'inputSecret', name: 'PASSWORD' }] as never[] }))
+      await run([flowFile('login.yaml')])
+      expect(process.exitCode).toBe(2)
+      expect(mocks.joinSession).not.toHaveBeenCalled()
+      expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/login: the secret PASSWORD was not given to this run/))
+    })
+
+    it('keeps a repeated or numeric-looking name as typed', () => {
+      expect(secretArg(undefined)).toBeUndefined()
+      expect(secretArg('PASSWORD')).toEqual(['PASSWORD'])
+      expect(secretArg(['A', 'B'])).toEqual(['A', 'B'])
+    })
   })
 
   // L2: a Mac busy booting another device is waited out, and the run lets go of the session while it waits so a
@@ -340,6 +393,22 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
   })
 
   const errLines = () => vi.mocked(console.error).mock.calls.map(([l]) => String(l))
+
+  // #1125: a touch the device could not judge went to the element's centre, so even a green flow says it has one.
+  it('says under a passed flow which touches were not checked, and records why with the step', async () => {
+    const relay = fakeRelay()
+    mocks.runFlow.mockResolvedValue({
+      ...resultOf('passed'),
+      steps: [
+        { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 5, reach: 'unchecked', reachNote: 'this relay predates reach' },
+        { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 5, reach: 'verified', effect: 'confirmed' },
+      ],
+    })
+    await cmdFlowRun([file], { token: 'tflw_pat_x' })
+    expect(errLines()).toContain('  ! 1 touch not checked to land on its element (this relay predates reach) — touched at the centre')
+    const report = relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body as { steps: { reach?: string; reachNote?: string; effect?: string }[] }
+    expect(report.steps.map((s) => [s.reach, s.reachNote, s.effect])).toEqual([['unchecked', 'this relay predates reach', undefined], ['verified', undefined, 'confirmed']])
+  })
 
   // B2: a tapOn's suggestions go to the console under the failure, and with the step to the record.
   it('prints a failed tapOn\'s suggestions and records them with the step', async () => {
@@ -629,6 +698,36 @@ describe('cmdFlowRun runs only the flows that apply to this build and these tags
     expect(relay.calls.find((c) => c.url.endsWith('/finish'))!.body).toEqual({
       status: 'failed', exitCode: 2, failureKind: 'environment', errorMessage: 'no flow ran: 1 skipped (app-mismatch 1)',
     })
+    expect(process.exitCode).toBe(2)
+  })
+
+  // D1: the build says the platform before a device is chosen, so a flow pressing a button that platform has none of
+  // fails there, like a compile error, and the rest run.
+  it('fails a flow pressing a button the build\'s platform lacks before choosing a device, records it, and runs the rest', async () => {
+    const relay = relayWith(() => Response.json({ id: 7, bundle_id: 'com.b', platform: 'ios' }))
+    const back = flowFile('back.yaml')
+    flowsByFile.set(back, { steps: [{ type: 'pressButton', name: 'back' }] } as never)
+    const fine = flowFile('fine.yaml')
+    await cmdFlowRun([back, fine], { token: 'tflw_pat_x', build: 7 })
+
+    expect(mocks.runFlow).toHaveBeenCalledTimes(1)
+    expect(mocks.runFlow.mock.calls[0]![0]).toMatchObject({ name: 'fine.yaml' })
+    // The engine is told the device's platform, for what only the device can answer.
+    expect(mocks.runFlow.mock.calls[0]![2]).toMatchObject({ platform: 'ios' })
+    expect(errLines().some((l) => l.includes('iOS has no "back" button'))).toBe(true)
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).toMatchObject({ status: 'failed', failureKind: 'environment' })
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).not.toHaveProperty('deviceId')
+    expect(logLines()).toContain('\n1/2 flows passed')
+    expect(process.exitCode).toBe(2)
+  })
+
+  it('exits 2 without touching a device when every flow presses a button the platform lacks', async () => {
+    relayWith(() => Response.json({ id: 7, bundle_id: 'com.b', platform: 'ios' }))
+    const back = flowFile('back.yaml')
+    flowsByFile.set(back, { steps: [{ type: 'pressButton', name: 'recent_apps' }] } as never)
+    await cmdFlowRun([back], { token: 'tflw_pat_x', build: 7 })
+    expect(mocks.listDevices).not.toHaveBeenCalled()
+    expect(errLines()).toContain('✗ no flow ran: 1 cannot run on ios')
     expect(process.exitCode).toBe(2)
   })
 

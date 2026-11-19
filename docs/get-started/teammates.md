@@ -72,6 +72,7 @@ When a Viewer clicks **Upload build** or **Add App**, a notice says QA or Develo
 Click your name at the bottom of the sidebar and choose **Settings**.
 
 - **Profile**: change **Nickname** and **Avatar**, then click **Save changes**.
+- **Flow Capture**: turn **Capture my steps** on or off. While it is on, you can [save what you did in a QA Session as a flow](/testing/flow-capture). The change applies at once.
 - **Password**: enter **Current password**, **New password** and **Confirm new password**.
 
 If you forget your password, ask an Admin. The Admin clicks **Reset pwd** in **Settings → Team** and sends you the reset link it shows. When tapflow can send email (SMTP is set up), the link also arrives by email. The link works once, for 2 hours. After the reset you are signed out everywhere, so sign in again with the new password. **Log out** is in the same menu.

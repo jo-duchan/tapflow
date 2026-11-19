@@ -1,6 +1,6 @@
 {
   "name": "tapflow",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Self-hosted iOS/Android simulator streaming for the whole team",
   "keywords": [
     "ios",
@@ -61,7 +61,7 @@
     "@tapflowio/ios-agent": "workspace:*",
     "@tapflowio/relay": "workspace:*",
     "cac": "^6.7.14",
-    "ws": "^8.22.0",
+    "ws": "^8.22.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

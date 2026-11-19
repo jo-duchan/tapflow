@@ -44,7 +44,8 @@ export function parseTagList(value: string | undefined): string[] {
 }
 
 export type BuildLookup =
-  | { kind: 'found'; bundleId: string | null }
+  /** `platform` lets a flow that presses a button the platform lacks be refused before a device is chosen. */
+  | { kind: 'found'; bundleId: string | null; platform: string | null }
   | { kind: 'not-found' }
   /** The relay could not be asked: no token, a token without the scope, a network error or a timeout. */
   | { kind: 'unknown'; reason: string }
@@ -75,8 +76,12 @@ export async function lookupBuild(
   if (res.status === 404) return { kind: 'not-found' }
   if (!res.ok) return { kind: 'unknown', reason: `the relay answered ${res.status}` }
   try {
-    const body = (await res.json()) as { bundle_id?: unknown }
-    return { kind: 'found', bundleId: typeof body.bundle_id === 'string' ? body.bundle_id : null }
+    const body = (await res.json()) as { bundle_id?: unknown; platform?: unknown }
+    return {
+      kind: 'found',
+      bundleId: typeof body.bundle_id === 'string' ? body.bundle_id : null,
+      platform: typeof body.platform === 'string' ? body.platform : null,
+    }
   } catch {
     // An older relay serving index.html with 200 for an unknown API path.
     return { kind: 'unknown', reason: 'the relay did not answer with a build' }

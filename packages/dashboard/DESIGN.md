@@ -50,8 +50,35 @@ All color values are defined as CSS variables in `src/index.css`. Tailwind refer
 |-------|-------|------|-----|
 | `--destructive` | `0 100% 47%` (~`#ee0000`) | `0 70% 62%` | Destructive actions, error states |
 | `--destructive-foreground` | `#ffffff` | `#fafafa` | Text on destructive backgrounds |
+| `--warning` | `48 100% 96%` (~`#fffbeb`) | `31 60% 14%` | Background of a notice that needs attention but blocks nothing |
+| `--warning-foreground` | `31 85% 25%` | `48 65% 78%` | The notice's title. Its body stays `--foreground` |
+| `--warning-border` | `48 97% 77%` (~`#fde68a`) | `31 50% 30%` | The notice's border |
+| `--warning-solid` | `40 91% 57%` (~`#f3b23b`) | `43 96% 60%` | A line or mark that needs attention: the outline on a picture that differs |
 
 > **Dark mode `--destructive`**: lightness is raised from `47%` to `62%`. Both the `/10` background opacity and the text color need L ≥ 60% to stay visible on dark surfaces.
+
+> **`--warning` is a surface, not a solid colour.** `--destructive` fills a button, so it is the saturated
+> red and its foreground is the text on it. `--warning` is only ever a notice box's pale fill, and
+> `--warning-foreground` its title — never a dot, badge or line of text, where its near-white fill would vanish.
+> Toasts keep sonner's own warning palette, and QASession's status dots and `Stale` label are still raw amber. It follows the avatar palette's rule: light
+> mode pairs a pale fill with a dark title, dark mode a desaturated dark fill with a light one, and the
+> title colours are slot 3's. The body is `--foreground` because it has to be read — `--muted-foreground`
+> on the light fill is 3.5:1. Red stays for errors and destructive actions, so a notice that blocks
+> nothing does not read as a failure next to a field's error. The border is `border-warning-border`:
+> `border-warning` also exists, because the key nests, and paints the near-white fill.
+>
+> **`--warning-solid` is the one that is a colour**: a line or a mark, never a fill text sits on. It came
+> with Flow Capture's comparison (1b-3b), whose outline on the replay's picture must stand out on both
+> themes; `--warning-foreground` there read as brown. Dark mode raises it to hold on dark surfaces.
+> QASession's raw amber dots and the network control's amber are the same colour by another route and
+> are not moved to it yet.
+>
+> ```tsx
+> <div className="rounded-lg border border-warning-border bg-warning px-4 py-3 text-sm">
+>   <p className="font-medium text-warning-foreground">Title</p>
+>   <p className="mt-1">Body</p>
+> </div>
+> ```
 
 ### Border / Input
 
@@ -226,8 +253,10 @@ and keep their code names** — `default`, not `primary`. To rename one, change 
 `scripts/__tests__/designSpecMatchesCva.test.mjs` checks each spec's property values against the `cva`
 it names, and that every spec below is linked and exists.
 
-Axes match the Figma `Design System` page. A component with a spec lists only the axis names — the values and
-their count live in the spec, which the check holds to code. A component without a spec yet is `pending`.
+Axes match the Figma library
+[tapflow-design-system](https://www.figma.com/design/9RPM7LAjqD4pJQNuEGY16b/tapflow-design-system), where each
+spec has its own `— spec` frame. A component with a spec lists only the axis names — the values and their count
+live in the spec, which the check holds to code. A component without a spec yet is `pending`.
 
 | Component | Source | Axes | Spec |
 |-----------|--------|------|------|
@@ -236,7 +265,7 @@ their count live in the spec, which the check holds to code. A component without
 | Card | `components/ui/card.tsx` | level | [card.md](./design/components/card.md) |
 | Input | `components/ui/input.tsx` | state 3 × content 3 | [input.md](./design/components/input.md) |
 | Select | `components/ui/select.tsx` | size 4 × state 3 × content 2 | [select.md](./design/components/select.md) |
-| Dialog | `components/ui/dialog.tsx` | footer 2 | [dialog.md](./design/components/dialog.md) |
+| Dialog | `components/ui/dialog.tsx` | size 4 × actions 4 | [dialog.md](./design/components/dialog.md) |
 | Separator | `components/ui/separator.tsx` | orientation 2 | [separator.md](./design/components/separator.md) |
 | Badge | `components/ui/badge.tsx` | variant 10 (variant 4 + tone 6) | [badge.md](./design/components/badge.md) |
 | AlertDialog | `components/ui/alert-dialog.tsx` | — | [alert-dialog.md](./design/components/alert-dialog.md) |
@@ -252,8 +281,13 @@ their count live in the spec, which the check holds to code. A component without
 | Breadcrumb | `components/ui/breadcrumb.tsx` | item 3; state 3 (link only) | [breadcrumb.md](./design/components/breadcrumb.md) |
 | Switch | `components/ui/switch.tsx` | checked 2 × state 3 | [switch.md](./design/components/switch.md) |
 | Toast (sonner) | `components/ui/sonner.tsx` (`toast.*()`) | type 5 (4 + loading) | [toast.md](./design/components/toast.md) |
-| Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 5 × hint 3 × message 3 | [field.md](./design/components/field.md) |
+| Field | assembly pattern — `Label` + control + `FieldHint` / `FieldError` | control 6 × hint 3 × message 3 | [field.md](./design/components/field.md) |
 | UserAvatar | `components/UserAvatar.tsx` | content 7 (image + 6 colors) | [user-avatar.md](./design/components/user-avatar.md) |
+| Stepper | `components/ui/stepper.tsx` | state 3 | [stepper.md](./design/components/stepper.md) |
+| CodeBlock | `components/ui/code-block.tsx` (shadcn `radix-nova`, on Tailwind 3; highlighting by `useHighlightedCode`) | variant 2 × size 2 | pending |
+| Accordion | `components/ui/accordion.tsx` (shadcn, Radix; height animated) | state 2 | pending |
+| Collapsible | `components/ui/collapsible.tsx` (shadcn, Radix; a disclosure with no heading, same motion) | state 2 | pending |
+| Checkbox | `components/ui/checkbox.tsx` (shadcn, Radix) | checked 2 × state 3 | pending |
 
 Not in this list on purpose: components with no call site, or reachable by no device today (`form.tsx`,
 `avatar.tsx`, `CardFooter`, `Sheet`, `DropdownMenuRadioItem`, and others). Code kept for later is not

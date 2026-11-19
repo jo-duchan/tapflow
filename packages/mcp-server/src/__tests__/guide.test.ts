@@ -43,7 +43,9 @@ describe('agent guide', () => {
   it('holds what every session carries to a budget', async () => {
     const { listBytes } = await connect()
     // Measured at 13.2 KB of tool list plus 1.7 KB of instructions when this was written; the margin is for a sentence, not a tool.
-    expect(listBytes + INSTRUCTIONS.length).toBeLessThanOrEqual(15_500)
+    // 15,491 bytes by the time the flow input steps came, 9 short. They added `tap`'s `holdMs` and three step names to
+    // `run_flow` (15,625) instead of a `long_press` and a `pinch` tool, which would have cost 2.6 KB.
+    expect(listBytes + INSTRUCTIONS.length).toBeLessThanOrEqual(15_750)
   })
 
   it('returns the testing guide only when asked, and keeps it bounded', async () => {

@@ -31,7 +31,7 @@ const DialogOverlay = React.forwardRef<
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 /**
- * A dialog's width, from three sizes rather than one per call site (design/components/dialog.md). `lg` is the default
+ * A dialog's width, from four sizes rather than one per call site (design/components/dialog.md). `lg` is the default
  * and what AlertDialog always is.
  */
 const dialogVariants = cva("", {
@@ -40,6 +40,7 @@ const dialogVariants = cva("", {
       sm: "max-w-sm",
       md: "max-w-md",
       lg: "max-w-lg",
+      xl: "max-w-5xl",
     },
   },
   defaultVariants: { size: "lg" },

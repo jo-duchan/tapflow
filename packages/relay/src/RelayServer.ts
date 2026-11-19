@@ -4,12 +4,14 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import type { Duplex } from 'stream'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
-import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
+import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
+import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
 import { gestureAction, keyForWatchers } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
 import { defaultCap, idleToFree, planCapacity, type CapacityDevice, type CapacityPlan } from './admission/capacity.js'
@@ -19,7 +21,8 @@ import { chooseLease, type LeaseCandidate, type LeaseHost } from './admission/le
 import { directionOf, parseInbound, readyFacts } from '@tapflowio/protocol/validate'
 import { compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 import type { ParsedInbound, ParseFailure, ParseResult } from '@tapflowio/protocol/validate'
-import { Router, json } from './router.js'
+import { Router, json, readBodyLimited } from './router.js'
+import { readReachTargets, REACH_BODY_MAX_BYTES, REACH_MS_PER_TARGET } from './lib/reach.js'
 import { requireViewAuth, requireAuth, getAuth, verifyPat, touchPat, findPat, findUser } from './middleware/auth.js'
 import { AGENT_SCOPE, VIEW_SCOPE, WS_ACCESS_CHANGED_REASON, WS_AGENT_OWNER_REASON, WS_SCOPE_REASON, classifyConnection, isAffectedBy, revalidatePrincipal, type AuthChange, type SocketPrincipal } from './lib/connectionAuth.js'
 import { isTunnelIngress, markTunnelIngress, proxiedWithoutForwardedFor, resolveClientAddress, resolveRequestClient } from './lib/clientAddress.js'
@@ -28,6 +31,7 @@ import { resolveBuildFile } from './lib/buildFiles.js'
 import { resolveCorsHeaders } from './lib/cors.js'
 import { isCsrfBlocked } from './lib/csrf.js'
 import { pickLanAddress, runningInContainer } from './lib/lanAddress.js'
+import { containerWithoutAgentUrlWarning, containerWithoutPublicUrlWarning } from './lib/proxyConfig.js'
 import { config, getJwtSecret, type LaunchDefaults } from './lib/config.js'
 import { mergeLaunch, unmatchedLaunchKeys } from './lib/launchDefaults.js'
 import { forTeammates, resolveAgentRelayUrl, resolvePublicBaseUrl, type TunnelRuntime } from './lib/publicUrl.js'
@@ -116,6 +120,9 @@ import { handleUploadRecording, handleListRecordings, handleDownloadRecording, p
 import { handleEndVideo, handleOpenVideo, handleVideoChunk, handleVideoData, handleVideoIndex, purgeRunVideos, releaseStaleVideoReservations, runVideosDirFor, videoSummaries } from './api/runVideos.js'
 import { abandonRunsOf, handleCreateRun, handleFinishRun, handleReportDevice, handleStartFlow, handleGetFlowScreenshot, handleGetRun, handleListRuns, handleReportFlow, handleUploadFlowScreenshot, purgeExpiredRuns, runScreenshotsDirFor, type RunHolders } from './api/runs.js'
 import { handleListAgents, handleGetAgentResources } from './api/agents.js'
+import { handleDropSnapshot, handleGetSnapshot, handleGetThumbnail, handlePause, handlePutThumbnail, handleTakeSnapshot, handleUpdatePreferences } from './api/captures.js'
+import { CaptureStore, FIELD_READ_TIMEOUT_MS, type FieldRead, type Holder } from './capture/CaptureStore.js'
+import { FlowCapturePreference } from './capture/preference.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -151,6 +158,28 @@ const BOOT_REFUSAL_MESSAGES: Record<BootRefusalReason, string> = {
 // Terminal input messages the MCP client awaits an ack for — if the agent is offline
 // the relay replies input:error so the client fails truthfully (non-terminal moves/starts
 // expect no ack and are dropped silently).
+/** How long a refused socket may stay open, unread, after its close frame and FIN, before it is destroyed. */
+const REFUSED_LINGER_MS = 1_000
+
+/**
+ * Refuses a socket at the handshake and reads it no further than one socket buffer. `close()` alone keeps reading
+ * until the peer answers or 30 s pass, buffering a message up to `maxPayload` (100 MiB) meanwhile — so a peer with
+ * no credential that never answered could make the relay hold that much per connection.
+ *
+ * Paused, the peer's close reply goes unread too, so the peer would wait for ws's 30 s timer to learn the
+ * connection is over. The FIN after the close frame tells it at once: MCP's startup waits only 1 s for the close
+ * code before calling a refusal a slow relay. The timer destroys a socket whose peer never closes its side.
+ *
+ * Only for a socket refused before it was served: one closed later (`closeForAuth`) could send messages of that
+ * size while it was open, and keeps the ordinary close.
+ */
+function refuseUnread(ws: WebSocket, socket: Duplex, reason: string): void {
+  ws.close(1008, reason)
+  ws.pause()
+  socket.end()
+  setTimeout(() => ws.terminate(), REFUSED_LINGER_MS).unref()
+}
+
 /** Why a session is not this socket's to command. One reason, two prose strings — the treatment `#492`
  *  settled for `agent offline` / `Session not found`: telling a caller the session is in use when it is
  *  idle steers it off a device it could have had. Shared so the two never drift. */
@@ -189,6 +218,11 @@ export function ownerKeyFor(
   // power the device off. Encoding a security-relevant fact in a caller-supplied string is the forgery
   // this whole key was introduced to avoid, reintroduced one layer down.
   return { key: `${user}:${claimed || randomUUID()}`, user, minted: !claimed }
+}
+
+/** Who drives a session, as Flow Capture judges it: the kind the client declared and the person behind it. */
+function captureHolder(session: Session): Holder {
+  return { kind: session.holderKind, user: session.ownerUser }
 }
 
 /** One line per rejecting socket per second, at most. See `RelayServer.logInboundRejection`. */
@@ -235,7 +269,7 @@ type HeldBoot = { ws: WebSocket; msg: Inbound<'device:boot'>; cost: 'cold' | 'wa
  *  compiling if one of them lost the field. */
 type Acked = Inbound<'input:touch:end' | 'input:pinch:end' | 'input:key' | 'input:button' | 'input:type'>
 type Unacked = Inbound<
-  'input:touch:start' | 'input:touch:move' | 'input:pinch:start' | 'input:pinch:move'
+  'input:touch:start' | 'input:touch:move' | 'input:touch:cancel' | 'input:pinch:start' | 'input:pinch:move'
   | 'input:rotate' | 'input:posture' | 'input:keyboard:toggle'
 >
 
@@ -249,6 +283,8 @@ const SHUTDOWN_REQUESTER_TTL_MS = 35_000
  * boot may take, which is #588's question, not this one's.
  */
 const PENDING_BOOT_TTL_MS = 180_000
+/** The requests a rebind strands and the relay answers (#885, #1139): each with the reply its waiter reads. */
+type PendingErrorType = 'device:boot-error' | 'device:keyboard-set-error' | 'device:run-reset-error'
 /** Said when a session ends with a shutdown unanswered — which is not the same as the shutdown failing. */
 const SHUTDOWN_OUTCOME_LOST =
   'The session ended before its agent confirmed the shutdown, so whether the device shut down is unknown.'
@@ -410,6 +446,17 @@ export class RelayServer {
   /** `<bundle id>:<what was left out>` already warned about. Bounded by the config's keys, two reasons each. */
   private readonly warnedDroppedDefaults = new Set<string>()
   private readonly buildTickets = new BuildTicketStore()
+  /** Flow Capture (#1125): each person's setting, and the steps kept for them in memory. */
+  private readonly flowCapturePref = new FlowCapturePreference()
+  private readonly captures = new CaptureStore({
+    isEnabled: (user) => this.flowCapturePref.isEnabled(user),
+    chromeOf: (sessionId) => this.sessions.get(sessionId)?.chromeData,
+    readField: (sessionId) => this.readField(sessionId),
+    readKeyboard: (sessionId) => this.readKeyboard(sessionId),
+  })
+  /** Flow Capture's reads of a focused field (#1135), by request id. Answered only by the session's own agent. */
+  private pendingFieldReads = new Map<string, { agentSocket: WebSocket; resolve: (read: FieldRead) => void }>()
+  private pendingKeyboardReads = new Map<string, { agentSocket: WebSocket; resolve: (keyboard: KeyboardState) => void }>()
   private pendingScreenshots = new Map<string, {
     sessionId: string
     resolve: (buf: Buffer, format: 'png' | 'jpeg') => void
@@ -419,7 +466,15 @@ export class RelayServer {
   private readonly uiTreeTimeoutMs: number
   private pendingUITrees = new Map<string, {
     sessionId: string
-    resolve: (elements: UIElement[]) => void
+    resolve: (tree: { elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }) => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
+  /** `ui:reach:request`s waiting on their agent (#1125): answered only from the socket they were sent to. */
+  private pendingReaches = new Map<string, {
+    sessionId: string
+    agentSocket: WebSocket
+    resolve: (results: ReachResult[]) => void
     reject: (err: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
@@ -466,6 +521,9 @@ export class RelayServer {
     requestId: string
     agentSocket: WebSocket
     timer: ReturnType<typeof setTimeout>
+    /** What answers it at a rebind. Not only boots (#1139): a replay's `device:keyboard-set` and `device:run-reset`
+     *  are stranded the same way, and the run reset's waiter is minutes long. */
+    errorType: PendingErrorType
   }>()
 
   constructor(private readonly options: { port: number; publicDir?: string; uploadsDir?: string; idleTimeoutMs?: number; wsBackpressureBytes?: number; screenshotTimeoutMs?: number; uiTreeTimeoutMs?: number; trustedProxies?: string[]; corsOrigins?: string[]; tls?: { cert: string; key: string }; agentGraceMs?: number; pendingBootTtlMs?: number; bootGate?: Partial<GateTiming>; evictionGraceMs?: number; tunnel?: TunnelRuntime; tunnelPort?: number; launchDefaults?: LaunchDefaults }) {
@@ -610,7 +668,11 @@ export class RelayServer {
     this.router.get('/api/v1/team/members', handleListMembers)
     this.router.post('/api/v1/team/invite', (req, res) => handleInvite(req, res, this.options.tunnel))
     this.router.patch('/api/v1/team/members/:id', (req, res, params) => handleUpdateMember(req, res, params, this.onAuthChanged))
-    this.router.delete('/api/v1/team/members/:id', (req, res, params) => handleDeleteMember(req, res, params, this.onAuthChanged))
+    this.router.delete('/api/v1/team/members/:id', (req, res, params) => handleDeleteMember(req, res, params, (change) => {
+      this.onAuthChanged(change)
+      // A removed member's typing goes with them, not when their device's countdown runs out.
+      if (change) { this.captures.sealUser(String(change.userId)); this.flowCapturePref.forget(String(change.userId)) }
+    }))
     this.router.post('/api/v1/team/members/:id/send-reset', (req, res, params) => handleSendMemberReset(req, res, params, this.options.tunnel))
 
     // tokens
@@ -622,6 +684,14 @@ export class RelayServer {
     this.router.get('/api/v1/settings', (req, res) => handleGetSettings(req, res, this.runVideosDir))
     this.router.patch('/api/v1/settings', (req, res) => handleUpdateSettings(req, res, u))
     this.router.patch('/api/v1/profile', (req, res) => handleUpdateProfile(req, res, u))
+    this.router.patch('/api/v1/me/preferences', (req, res) => handleUpdatePreferences(req, res, this.captures, this.flowCapturePref))
+    this.router.post('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleTakeSnapshot(req, res, params, this.captures))
+    this.router.get('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleGetSnapshot(req, res, params, this.captures))
+    this.router.delete('/api/v1/sessions/:sessionId/capture/snapshot', (req, res, params) => handleDropSnapshot(req, res, params, this.captures))
+    this.router.put('/api/v1/sessions/:sessionId/capture/thumbnails/:requestId', (req, res, params) => handlePutThumbnail(req, res, params, this.captures))
+    this.router.get('/api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId', (req, res, params) => handleGetThumbnail(req, res, params, this.captures))
+    this.router.put('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
+    this.router.delete('/api/v1/sessions/:sessionId/capture/pause', (req, res, params) => handlePause(req, res, params, this.captures))
 
     // recordings
     this.recordingsDir = path.join(u, '../recordings')
@@ -670,12 +740,17 @@ export class RelayServer {
       if (!requireAuth(req, res)) return
       const addr = this.httpServer.address()
       const port = typeof addr === 'object' && addr !== null ? addr.port : this.options.port
+      const inContainer = runningInContainer()
+      const warning = containerWithoutPublicUrlWarning(config, inContainer, this.options.tunnel)
+      const agentWarning = containerWithoutAgentUrlWarning(config, inContainer)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
-        lanHost: runningInContainer() ? null : pickLanAddress(os.networkInterfaces()),
+        lanHost: inContainer ? null : pickLanAddress(os.networkInterfaces()),
         port,
         publicBaseUrl: forTeammates(resolvePublicBaseUrl(config, this.options.tunnel)),
         agentRelayUrl: forTeammates(resolveAgentRelayUrl(config)),
+        ...(warning !== null ? { publicUrlWarning: 'container-without-public-url' } : {}),
+        ...(agentWarning !== null ? { agentUrlWarning: 'container-without-relay-url' } : {}),
       }))
     })
 
@@ -688,6 +763,8 @@ export class RelayServer {
       (req, res, params) => this.handleGetScreenshot(req, res, params))
     this.router.get('/api/v1/sessions/:sessionId/ui-tree',
       (req, res, params) => this.handleGetUITree(req, res, params))
+    this.router.post('/api/v1/sessions/:sessionId/reach',
+      (req, res, params) => this.handleReach(req, res, params))
   }
 
   pushLog(msg: string): void {
@@ -1083,6 +1160,9 @@ export class RelayServer {
    */
   /** A session is gone for good: from the manager, from the per-session state, and from the boot gate. */
   private removeSession(sessionId: string): void {
+    // Here and not in `forgetSessionState`, which `session:leave` also runs: an MCP client that borrowed the device and
+    // leaves must not take the person's capture with it (a borrow has sealed it already, at the join).
+    this.captures.seal(sessionId)
     this.sessions.remove(sessionId)
     this.forgetSessionState(sessionId)
     this.gateEvent({ kind: 'session-removed', sessionId })
@@ -1255,7 +1335,7 @@ export class RelayServer {
       })
       if (decision.action === 'reject') {
         this.logConnectionRejection(addr, decision.reason, pat?.patId)
-        ws.close(1008, decision.reason)
+        refuseUnread(ws, request.socket, decision.reason)
         return
       }
       // Only an accepted token was used; a refused one keeps its "last used".
@@ -1622,6 +1702,10 @@ export class RelayServer {
       case 'screenshot:error':   this.handleScreenshotError(msg); break
       case 'ui:tree:response':   this.handleUITreeResponse(msg); break
       case 'ui:tree:error':      this.handleUITreeError(msg); break
+      case 'ui:reach:response':  this.handleUIReachResponse(ws, msg); break
+      case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
+      case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
+      case 'capture:touched':    this.handleCaptureTouched(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -1710,6 +1794,8 @@ export class RelayServer {
       case 'session:chrome': {
         const session = this.sessions.get(msg.sessionId)
         if (!session) break
+        // A turn or a fold: the points before and after it are in different frames.
+        this.captures.recordChrome(session.id, captureHolder(session), raw['payload'])
         // **Off `raw`, and still a cast — deliberately both.**
         //
         // `session:chrome` is Envelope tier, so the parser proved `type` and `sessionId` and nothing
@@ -1840,6 +1926,8 @@ export class RelayServer {
         // `pendingInstall` is left: every client installs after a ready, so none is in flight across a cold boot, and one
         // that were would settle itself with its own done or error.
         if (facts.cold !== false) session.installed = undefined
+        // The steps were taken on a device that has since been off; replaying them would start somewhere else.
+        if (facts.cold !== false) this.captures.seal(session.id)
         if (facts.serviceTier !== undefined) this.sessions.setDeviceServiceTier(session.id, facts.serviceTier)
         this.settleLastBoot(session, msg.requestId, facts.cold)
         this.gateEvent({ kind: 'ready', hostKey: hostKeyOf(session), sessionId: session.id, cold: facts.cold })
@@ -1859,15 +1947,30 @@ export class RelayServer {
       case 'open-url:error':
       case 'app:clear-state-done':
       case 'app:clear-state-error':
+      case 'device:keyboard-set-done':
+      case 'device:keyboard-set-error':
+      case 'device:run-reset-done':
+      case 'device:run-reset-error':
       case 'input:type-done':
       case 'input:type-error':
       case 'input:done':
       case 'input:error':
       case 'keyboard:toggled': {
         const session = this.sessions.get(msg.sessionId)
+        if (session && (msg.type === 'input:done' || msg.type === 'input:error' || msg.type === 'input:type-done' || msg.type === 'input:type-error')) {
+          this.captures.recordAck(session.id, captureHolder(session), msg.requestId, msg.type.endsWith('-done') || msg.type === 'input:done')
+        }
+        // A failed install counts too: iOS removes the old app first, so the screen it leaves is the home screen.
+        if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error' || msg.type === 'app:launch-done' || msg.type === 'app:clear-state-done')) {
+          this.captures.noteAppDone(session.id, captureHolder(session), msg.requestId)
+        }
         if (session && (msg.type === 'app:install-done' || msg.type === 'app:install-error')) {
           const reason = typeof raw['message'] === 'string' ? raw['message'] : undefined
           this.settleInstall(session, msg.requestId, msg.type === 'app:install-done', reason)
+        }
+        // Answered, so a rebind has nothing left to answer for it.
+        if (msg.type === 'device:keyboard-set-done' || msg.type === 'device:keyboard-set-error' || msg.type === 'device:run-reset-done' || msg.type === 'device:run-reset-error') {
+          this.settleBoot(msg.sessionId, msg.requestId)
         }
         if (session?.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
@@ -1979,6 +2082,9 @@ export class RelayServer {
         this.rememberShutdownRequester(ws, target.session.id, msg.requestId)
         // Here and not at the top: a refused shutdown ends nobody's wait (#1087).
         this.sessions.noteShutdown(target.session.id, { user: this.userOf(ws), label: this.holderLabel(ws), name: this.personName(ws) })
+        // The dashboard shuts the device down on Back and when it unmounts, and that cancels the countdown the wait would
+        // have ended on — so the capture ends here, not only when the countdown runs out.
+        this.captures.seal(target.session.id)
         target.session.agentSocket.send(JSON.stringify(msg))
         break
       }
@@ -2009,6 +2115,7 @@ export class RelayServer {
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok) {
           target.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(target.session.id, captureHolder(target.session), msg)
           // No URL: a deep link can carry a token, and watchers are the whole team.
           this.tellWatchersAction(msg.sessionId, { kind: 'open-url' })
         } else {
@@ -2027,6 +2134,7 @@ export class RelayServer {
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok) {
           target.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(target.session.id, captureHolder(target.session), msg)
           this.tellWatchersAction(msg.sessionId, { kind: 'clear-state' })
         } else {
           this.sendTo(ws, {
@@ -2034,6 +2142,47 @@ export class RelayServer {
             sessionId: msg.sessionId,
             requestId: msg.requestId,
             message: target.message,
+          })
+        }
+        break
+      }
+      case 'device:keyboard-set': {
+        // Forwarded like `app:clear-state`. Not a person's input, so neither the capture nor a watcher hears of it: a
+        // replay sets it before it starts, and a watcher sees the app launch that follows.
+        const target = this.dispatchTarget(ws, msg.sessionId)
+        if (target.ok && hasCapability(target.session.agentCapabilities, 'keyboard-set')) {
+          this.rememberBoot(msg.sessionId, msg.requestId, target.session.agentSocket, 'device:keyboard-set-error')
+          target.session.agentSocket.send(JSON.stringify(msg))
+        } else {
+          this.sendTo(ws, {
+            type: 'device:keyboard-set-error',
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            message: target.ok ? 'This device\'s agent cannot set its keyboard language' : target.message,
+            ...(target.ok ? { reason: 'unsupported' as const } : {}),
+          })
+        }
+        break
+      }
+      case 'device:run-reset': {
+        // Forwarded like `device:keyboard-set` (#1139). Only the holder: it wipes device-wide state — the keychain and
+        // every app's privacy grants — which `dispatchTarget`'s ownership check already limits to them. Not recorded in
+        // the capture (a replay holds it paused), and shown to watchers as the app being cleared when it names one.
+        const target = this.dispatchTarget(ws, msg.sessionId)
+        if (target.ok && hasCapability(target.session.agentCapabilities, 'run-reset')) {
+          this.rememberBoot(msg.sessionId, msg.requestId, target.session.agentSocket, 'device:run-reset-error')
+          // iOS uninstalls the apps and installs them again, and an install that fails leaves none: the record must
+          // not answer the next install as already done, as a run reset's boot does not (pre-PR review of #1139).
+          if (msg.payload.apps.length > 0) this.forgetInstall(target.session, 'The device is being reset')
+          target.session.agentSocket.send(JSON.stringify(msg))
+          if (msg.payload.apps.length > 0) this.tellWatchersAction(msg.sessionId, { kind: 'clear-state' })
+        } else {
+          this.sendTo(ws, {
+            type: 'device:run-reset-error',
+            sessionId: msg.sessionId,
+            requestId: msg.requestId,
+            message: target.ok ? 'This device\'s agent cannot reset it the way a run does' : target.message,
+            ...(target.ok ? { reason: 'unsupported' as const } : {}),
           })
         }
         break
@@ -2048,6 +2197,8 @@ export class RelayServer {
       // sharing the next non-empty body, so it would have read one gate as covering all eleven.
       case 'input:touch:start':
       case 'input:touch:move':
+      // A terminal frame, but unanswered: the client sending it is leaving the session (#1115).
+      case 'input:touch:cancel':
       case 'input:pinch:start':
       case 'input:pinch:move':
       case 'input:rotate':
@@ -2059,7 +2210,7 @@ export class RelayServer {
         // These carry no correlator by declaration, so nothing was ever gated on one here — and the
         // address is now the schema's business rather than this clause's. What the split still buys is
         // unchanged and is the reason it exists: a correlator gate written into a shared body would have
-        // reached these six as well, dropping every opening and move frame with the answered five.
+        // reached these eight as well, dropping every opening and move frame with the answered five.
         this.forwardUnacked(ws, msg)
         break
       }
@@ -2093,6 +2244,7 @@ export class RelayServer {
         const clip = this.dispatchTarget(ws, msg.sessionId)
         if (clip.ok) {
           clip.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(clip.session.id, captureHolder(clip.session), msg)
         } else if (ws.readyState === WebSocket.OPEN) {
           this.sendTo(ws, {
             type: 'clipboard:error', sessionId: msg.sessionId, requestId: msg.requestId, message: clip.message,
@@ -2108,6 +2260,7 @@ export class RelayServer {
         const net = this.dispatchTarget(ws, msg.sessionId)
         if (net.ok) {
           net.session.agentSocket.send(JSON.stringify(msg))
+          this.captures.recordInput(net.session.id, captureHolder(net.session), msg)
         } else if (ws.readyState === WebSocket.OPEN) {
           this.sendTo(ws, {
             type: 'network:error', sessionId: msg.sessionId, requestId: msg.requestId, message: net.message,
@@ -2213,7 +2366,7 @@ export class RelayServer {
       const session = this.sessions.get(id)
       if (session) this.dropPendingInstall(session, reason)
     }
-    for (const pendings of [this.pendingScreenshots, this.pendingUITrees]) {
+    for (const pendings of [this.pendingScreenshots, this.pendingUITrees, this.pendingReaches]) {
       for (const [reqId, pending] of pendings.entries()) {
         if (!sessionIds.has(pending.sessionId)) continue
         clearTimeout(pending.timer)
@@ -2337,14 +2490,15 @@ export class RelayServer {
     return `${sessionId} ${requestId}`
   }
 
-  /** Record a boot against the agent socket it was dispatched to. The door guarantees both ids. */
-  private rememberBoot(sessionId: string, requestId: string, agentSocket: WebSocket): void {
+  /** Record a boot, or another request a rebind strands, against the agent socket it was dispatched to. The door
+   *  guarantees both ids. */
+  private rememberBoot(sessionId: string, requestId: string, agentSocket: WebSocket, errorType: PendingErrorType = 'device:boot-error'): void {
     const key = this.bootKey(sessionId, requestId)
     // Replacing, not doubling: a client never reuses a correlator, but forgetting the old timer
     // here is what keeps a replaced entry from firing after its successor was settled.
     this.forgetBoot(key)
     const timer = setTimeout(() => this.forgetBoot(key), this.pendingBootTtlMs)
-    this.pendingBoots.set(key, { sessionId, requestId, agentSocket, timer })
+    this.pendingBoots.set(key, { sessionId, requestId, agentSocket, timer, errorType })
   }
 
   /** The one way an entry leaves: every removal path funnels through here so no timer survives it. */
@@ -2377,17 +2531,18 @@ export class RelayServer {
       if (!oldSockets.has(pending.agentSocket)) continue
       this.forgetBoot(key)
       const session = this.sessions.get(pending.sessionId)
+      const boot = pending.errorType === 'device:boot-error'
       // The agent that would have answered is gone, so nothing else will settle the record this boot made.
-      if (session) this.undoLastBoot(session, pending.requestId)
+      if (session && boot) this.undoLastBoot(session, pending.requestId)
       // `sendTo` skips a socket that is not OPEN, and a session nobody has joined has no
       // `browserSocket` at all — either way the entry is still gone, so nothing later answers
       // a request nobody holds.
       if (!session?.browserSocket) continue
       this.sendTo(session.browserSocket, {
-        type: 'device:boot-error',
+        type: pending.errorType,
         sessionId: pending.sessionId,
         requestId: pending.requestId,
-        message: `session ${pending.sessionId} rebounded to a new agent while this boot was in flight, ` +
+        message: `session ${pending.sessionId} rebounded to a new agent while this ${boot ? 'boot' : 'request'} was in flight, ` +
           'and that agent never saw this request',
       })
     }
@@ -2716,8 +2871,21 @@ export class RelayServer {
     (msg.payload as Record<string, unknown>)['external'] = this.wsExternal.get(ws) ?? false
     // Whether an automation client (flow runner, MCP) is booting, so the iOS agent can start its UI-tree runner
     // now instead of inside the first selector step's timeout. Only the holder can boot (`dispatchTarget`), so the
-    // holder's kind is the booter's. A dashboard boot is never warmed: the runner costs about 520 MB per device.
+    // holder's kind is the booter's. A person's boot warms nothing: their keyboard and field reads come from inside the
+    // app (ios-agent AGENTS.md, "App observer"), and an attached runner made a busy app lag.
     ;(msg.payload as Record<string, unknown>)['automation'] = isAiClientKind(boot.session.holderKind)
+    // This relay keeps what an agent observes a recorded touch hit (`capture:touched`): an agent sends them only when
+    // told so, since an older relay logs every message type it does not know.
+    ;(msg.payload as Record<string, unknown>)['touchObservations'] = true
+    // Whether Flow Capture records the person: the iOS agent turns record-time observation and app accessibility on by
+    // it. Ungated by memory: neither starts anything on the Mac (app accessibility measured at 13–21 MB an app), and a
+    // gate here turned every touch observation off for a boot on a busy Mac.
+    ;(msg.payload as Record<string, unknown>)['observed'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
+    if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
+      // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
+      this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })
+      boot.session.keyboardResetOwed = false
+    }
     const cost = classifyBoot(boot.session.deviceStatus, msg.payload, boot.session.deviceServiceTier)
     const booterClass: BooterClass = isAiClientKind(boot.session.holderKind) ? 'automated' : 'interactive'
     // The automation cap is decided before the gate and acted on after it: an idle device is shut down to make
@@ -2942,6 +3110,10 @@ export class RelayServer {
         this.sendTo(ws, { type: 'error', sessionId: msg.sessionId, message, reason })
         return
       }
+      this.captures.noteJoin(msg.sessionId, captureHolder(session))
+      // Another person's keyboard language would type this person's keys (#1134). Owed until their boot reaches the
+      // agent: sent here, an agent away for the moment would never hear it, and the next join is the same person.
+      if (joined.personChanged) session.keyboardResetOwed = true
     } catch (e) {
       // Only a bug reaches here now — the two expected failures return above instead of throwing, which is
       // what stops this arm from having to guess. It still answers rather than dropping: both clients await
@@ -3107,6 +3279,12 @@ export class RelayServer {
       case 'input:touch:end': {
         const g = session.gesture
         session.gesture = null
+        // The end a leaving client sends after its cancel. An agent that announced `touch-cancel` lifted the touch
+        // on the cancel and injects nothing for this end, so there is nothing to show; one that did not completes
+        // the gesture with this end, and the watcher is told the tap it was. The capability is per agent, not per
+        // device: where that agent can only lift with an up (a Duo's guest helper, iOS's mouse path, an Android 10
+        // or older image), the cancel was a tap the watcher is not shown — the device does what it did before.
+        if (session.touchCancelled) { session.touchCancelled = false; break }
         action = gestureAction(g?.start ?? null, msg.payload ?? g?.last ?? null)
         break
       }
@@ -3172,6 +3350,8 @@ export class RelayServer {
   /** Shut the device down because nobody is watching it any more. The idle timer's payload, hoisted out
    *  of the close handler so the release loop there reads as one line per session. */
   private idleShutdown(sessionId: string): void {
+    // The person did not come back in time: before the early return, since a capture outlives an agent that is away.
+    this.captures.seal(sessionId)
     const session = this.sessions.get(sessionId)
     if (session?.agentSocket.readyState !== WebSocket.OPEN) return
     this.sessions.noteShutdownSent(session.id)
@@ -3420,10 +3600,19 @@ export class RelayServer {
     }
     if (session?.agentSocket.readyState === WebSocket.OPEN) {
       session.agentSocket.send(JSON.stringify(msg))
+      this.captures.recordInput(session.id, captureHolder(session), msg)
       // Where a touch began and last was, for its end to be told to watchers (A2). Moves are not sent on: one
       // action per gesture, at its end.
-      if (msg.type === 'input:touch:start') session.gesture = { start: msg.payload, last: msg.payload }
-      else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
+      if (msg.type === 'input:touch:start') {
+        session.gesture = { start: msg.payload, last: msg.payload }
+        session.touchCancelled = false
+      } else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
+      else if (msg.type === 'input:touch:cancel') {
+        // An agent without the capability ignores the cancel and completes the touch with the end that follows, so
+        // the gesture is kept for that end to describe.
+        session.touchCancelled = hasCapability(session.agentCapabilities, 'touch-cancel')
+        if (session.touchCancelled) session.gesture = null
+      }
     }
   }
 
@@ -3454,6 +3643,7 @@ export class RelayServer {
 
     if (session?.agentSocket.readyState === WebSocket.OPEN) {
       session.agentSocket.send(JSON.stringify(msg))
+      this.captures.recordInput(session.id, captureHolder(session), msg)
       this.tellWatchersInput(session, msg)
       return
     }
@@ -3498,6 +3688,8 @@ export class RelayServer {
       case 'app:install':     this.sendTo(ws, { type: 'app:install-error', sessionId, requestId, message }); break
       case 'app:launch':      this.sendTo(ws, { type: 'app:launch-error', sessionId, requestId, message }); break
       case 'app:clear-state': this.sendTo(ws, { type: 'app:clear-state-error', sessionId, requestId, message }); break
+      case 'device:keyboard-set': this.sendTo(ws, { type: 'device:keyboard-set-error', sessionId, requestId, message }); break
+      case 'device:run-reset': this.sendTo(ws, { type: 'device:run-reset-error', sessionId, requestId, message }); break
       case 'open-url':        this.sendTo(ws, { type: 'open-url:error', sessionId, requestId, message }); break
       // Its waiters key on the `input:type-*` pair and ignore an `input:error` entirely — the same
       // reason `refuseInput` below splits these two.
@@ -3632,6 +3824,8 @@ export class RelayServer {
         buildBytes: bytes,
       },
     })
+    // What the person asked for, not what the relay made of it: the build id is what a flow can name.
+    this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'install' })
   }
 
@@ -3752,6 +3946,7 @@ export class RelayServer {
       requestId,
       payload: { bundleId: build.bundle_id, ...options, ...(merged.defaultsOnly ? { defaultsOnly: true } : {}) },
     })
+    this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'launch' })
   }
 
@@ -3844,10 +4039,12 @@ export class RelayServer {
 
       this.pendingUITrees.set(requestId, {
         sessionId,
-        resolve: (elements) => {
+        resolve: ({ elements, interfaceTurn }) => {
           clearTimeout(timer)
           this.pendingUITrees.delete(requestId)
-          json(res, 200, { elements })
+          // The app's turn rides beside the tree only when the agent sent one: absent is "no information", and a
+          // client turns nothing then (`UiTreeResponse.interfaceTurn`).
+          json(res, 200, interfaceTurn === undefined ? { elements } : { elements, interfaceTurn })
           resolve()
         },
         reject: (err) => {
@@ -3863,10 +4060,134 @@ export class RelayServer {
     })
   }
 
+  /**
+   * Ask the session's agent for its keyboard-focused text field, for Flow Capture. `null` when the agent cannot answer
+   * (no `field-value`, not connected): the capture then holds no read, which reads as "not read", never as a value.
+   * The answer is the field's whole contents (an app's or AutoFill's text included), and goes into the capture only —
+   * never forwarded, never logged.
+   */
+  private readField(sessionId: string): Promise<FieldRead> | null {
+    const session = this.sessions.get(sessionId)
+    if (!session || !hasCapability(session.agentCapabilities, 'field-value') || session.agentSocket.readyState !== WebSocket.OPEN) return null
+    // Not gated by the Mac's memory: no agent that names `field-value` starts anything on the Mac to answer. iOS reads
+    // from inside the app (plus one short `simctl spawn` for the keyboard language), Android through a server on the
+    // device. The gate was drawn for a runner-backed iOS read that never shipped.
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.pendingFieldReads.delete(requestId); resolve({ field: null, reason: 'failed' }) }, FIELD_READ_TIMEOUT_MS)
+      this.pendingFieldReads.set(requestId, {
+        agentSocket,
+        resolve: (read) => { clearTimeout(timer); this.pendingFieldReads.delete(requestId); resolve(read) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:field:request', sessionId, requestId })
+    })
+  }
+
+  private handleUIFieldResponse(ws: WebSocket, msg: Inbound<'ui:field:response'>): void {
+    const pending = this.pendingFieldReads.get(msg.requestId)
+    // The session's own agent only: another agent naming this id must not write into a person's capture.
+    if (!pending || pending.agentSocket !== ws) return
+    // A secure field's value is dropped here too, whatever an agent sent: the protocol promises it is never kept.
+    const field = msg.field?.secure ? (({ value: _v, ...rest }) => rest)(msg.field) : msg.field
+    pending.resolve({
+      field,
+      ...(msg.reason !== undefined ? { reason: msg.reason } : {}),
+      ...(msg.keyboard !== undefined ? { keyboard: msg.keyboard } : {}),
+      ...(msg.language !== undefined ? { language: msg.language } : {}),
+    })
+  }
+
+  /**
+   * Ask the session's agent where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app.
+   * `null` when the agent cannot answer; `{ shown: null }` (unknown) when it does not in time.
+   */
+  private readKeyboard(sessionId: string): Promise<KeyboardState> | null {
+    const session = this.sessions.get(sessionId)
+    if (!session || !hasCapability(session.agentCapabilities, 'keyboard-state') || session.agentSocket.readyState !== WebSocket.OPEN) return null
+    // Not gated by the Mac's memory, for the reason `readField` gives.
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.pendingKeyboardReads.delete(requestId); resolve({ shown: null }) }, FIELD_READ_TIMEOUT_MS)
+      this.pendingKeyboardReads.set(requestId, {
+        agentSocket,
+        resolve: (keyboard) => { clearTimeout(timer); this.pendingKeyboardReads.delete(requestId); resolve(keyboard) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:keyboard:request', sessionId, requestId })
+    })
+  }
+
+  /** What a recorded touch hit, from inside the app (record-time observation). Only the session's own agent says so. */
+  private handleCaptureTouched(ws: WebSocket, msg: Inbound<'capture:touched'>): void {
+    const session = this.sessions.get(msg.sessionId)
+    if (!session || session.agentSocket !== ws) return
+    this.captures.recordTouched(session.id, captureHolder(session), msg.requestId, msg.observation)
+  }
+
+  private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {
+    const pending = this.pendingKeyboardReads.get(msg.requestId)
+    if (!pending || pending.agentSocket !== ws) return
+    pending.resolve(msg.keyboard)
+  }
+
   private handleUITreeResponse(msg: Inbound<'ui:tree:response'>): void {
     const pending = this.pendingUITrees.get(msg.requestId)
     if (!pending) return
-    pending.resolve(msg.elements)
+    pending.resolve(msg.interfaceTurn === undefined ? { elements: msg.elements } : { elements: msg.elements, interfaceTurn: msg.interfaceTurn })
+  }
+
+  private handleUIReachResponse(ws: WebSocket, msg: Inbound<'ui:reach:response'>): void {
+    const pending = this.pendingReaches.get(msg.requestId)
+    // The session's own agent only: another agent naming this id must not say where this device's touch lands.
+    if (!pending || pending.agentSocket !== ws) return
+    pending.resolve(msg.results)
+  }
+
+  /**
+   * Where touches meant for elements land on the session's device, as its agent judges them (#1125): the flow engine
+   * taps there rather than at a frame's centre, which a tab bar or a scrim can cover. One result per target, in order.
+   * An agent without `reach`, or one that answers the wrong number, gets every target `unknown`: the caller then taps
+   * knowing the tap is unchecked, rather than failing a flow over an older Mac.
+   */
+  private async handleReach(req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>): Promise<void> {
+    if (!requireViewAuth(req, res)) return
+    const { sessionId } = params
+    const session = this.sessions.get(sessionId)
+    if (!session) { json(res, 404, { error: 'Session not found' }); return }
+    if (session.deviceStatus === 'shutdown') { json(res, 409, { error: 'Device is not booted' }); return }
+    const buf = await readBodyLimited(req, REACH_BODY_MAX_BYTES)
+    if (buf === null) { json(res, 413, { error: 'Body too large' }); return }
+    let targets: ReachTarget[]
+    try {
+      targets = readReachTargets(JSON.parse(buf.toString('utf-8')))
+    } catch (e) {
+      json(res, 400, { error: (e as Error).message })
+      return
+    }
+    const unknown = (reason: string): ReachResult[] => targets.map(() => ({ state: 'unknown', reason }))
+    if (!hasCapability(session.agentCapabilities, 'reach')) {
+      json(res, 200, { results: unknown('This device\'s tapflow agent cannot judge where a touch lands') })
+      return
+    }
+    if (session.agentSocket.readyState !== WebSocket.OPEN) { json(res, 502, { error: 'Agent offline' }); return }
+    const agentSocket = session.agentSocket
+    const requestId = randomUUID()
+    return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); this.pendingReaches.delete(requestId); resolve() }
+      // Per target on top of the tree's deadline: the agent judges each element in turn (~130 ms each on iOS, whose own
+      // budget is 5 s + 0.3 s a target), so a flat 15 s gave up on a 64-element batch the agent was still answering.
+      const timer = setTimeout(() => { done(); json(res, 504, { error: 'Reach query timed out' }) }, this.uiTreeTimeoutMs + REACH_MS_PER_TARGET * targets.length)
+      this.pendingReaches.set(requestId, {
+        sessionId, agentSocket, timer,
+        resolve: (results) => {
+          done()
+          json(res, 200, { results: results.length === targets.length ? results : unknown('The agent answered for a different number of elements') })
+        },
+        reject: (err) => { done(); json(res, 502, { error: err.message }) },
+      })
+      this.sendTo(agentSocket, { type: 'ui:reach:request', sessionId, requestId, targets })
+    })
   }
 
   private handleUITreeError(msg: Inbound<'ui:tree:error'>): void {

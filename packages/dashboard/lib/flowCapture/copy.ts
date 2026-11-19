@@ -1,0 +1,235 @@
+import type { DropReason, FragileReason, RangeWarning, SkipReason } from '@tapflowio/flow-runner/browser'
+
+/**
+ * Every word Flow Capture's dialog says (#1125), in one place: the design is still moving, and a change of wording
+ * should be one file's diff. Tests find controls by these same strings.
+ */
+export const copy = {
+  title: 'Capture flow',
+  // The dialog's description for every step: Match's own help was read out on Range, Edit and Export too.
+  description: 'Turn the steps you took on this device into a flow file, replayed and checked on the device first.',
+  progressLabel: 'Progress',
+  steps: ['Range', 'Match', 'Edit', 'Verify', 'Export'],
+  cancel: 'Cancel',
+  close: 'Close',
+
+  loading: 'Reading the steps you took…',
+  nothingCaptured: 'No steps have been captured on this device yet. Turn on “Capture my steps” and test as usual.',
+
+  rangeHeading: 'Which part of the session is the flow?',
+  rangeHelp: 'Starts at your first step in the app, ends at your last step. Drag the handles to change it.',
+  /** A key pressed on the on-screen keyboard: no picture is kept of it, since that screen shows what was just typed. */
+  keyboardTile: 'On-screen keyboard',
+  rangeStrip: 'Steps',
+  rangeStart: 'Start of the flow',
+  rangeEnd: 'End of the flow',
+  rangeHandleText: (n: number, label: string) => `#${n}, ${label}`,
+  rangeCount: (n: number, from: number, to: number) => `${n} ${n === 1 ? 'step' : 'steps'} · #${from} – #${to}`,
+  trim: 'Trim:',
+  dropFirst: 'drop first',
+  dropLast: 'drop last',
+  nameLabel: 'Name',
+  tagsLabel: 'Tags',
+  tagsHint: 'Separate with commas.',
+  optional: '(optional)',
+  appPrefix: 'App:',
+  appSuffix: ', from this build',
+  noBundleId: 'This build’s bundle id could not be read, so the flow will not clear the app’s data before it starts.',
+  // What a run's reset does on each platform (#1139), so the person knows before it wipes their own QA device.
+  replayNoticeTitle: 'Continuing resets this device the way tapflow flow run does, then replays from there.',
+  replayNotice: {
+    ios: 'The app is reinstalled, and the keychain, privacy permissions, clipboard and location are reset for every app on the device, so other apps are signed out too. The device goes back online and upright.',
+    android: 'The app’s data is cleared and the device goes back online. On an emulator the clipboard is emptied and the device turned upright too.',
+  },
+  resetDone: (items: string) => `Reset before the replay: ${items}.`,
+  resetFailed: (items: string) => `Could not reset: ${items}. The replay went on, and these may still hold what was left on the device.`,
+  // At most the app's data: a build whose bundle id was not read has none to clear.
+  resetUnsupported: 'This device’s tapflow agent cannot reset it the way a run does. Update tapflow on that Mac.',
+  resetting: 'Resetting the device…',
+  resetItems: {
+    'app-reinstall': 'app reinstall', 'app-data': 'app data', 'app-files': 'app files', 'app-uninstall': 'app removal',
+    keychain: 'keychain', 'privacy-services': 'privacy permissions', pasteboard: 'clipboard', location: 'location',
+    network: 'network', orientation: 'orientation',
+  } as Record<string, string>,
+  rangeWarnings: {
+    'no-launch-at-start': 'The flow adds its own launch. Move the start past any tap on the home screen.',
+    'no-clean-start': 'The app wasn’t cleared before this launch, so these steps ran on leftover data.',
+  } satisfies Record<RangeWarning, string>,
+  askedLabel: (step: number) => `Password for step ${step}`,
+  askedHint: 'tapflow can’t read password fields. Used for this replay only, never saved.',
+  askedPrefilledHint: 'Filled in from what you typed on your computer’s keyboard. Change it if part of it was typed on the on-screen keyboard.',
+  typedBeforeRange: 'Nothing had focus to type into. The field was likely focused before this range starts — start the range at the tap on it.',
+  screenKeyboardAdvice: 'On-screen keyboard used: your computer’s keyboard replays more reliably.',
+  continue: 'Continue',
+
+  matching: (done: number, total: number) => `Step ${done} of ${total}`,
+  matchingHelp: 'tapflow is replaying your steps on the device and naming what each one touched.',
+  stop: 'Stop',
+  restart: 'Start again',
+  editWhatMatched: 'Edit what matched',
+  // P2c: Match's end, when some taps the app did not respond to when recorded wait for a review. One line; the list is
+  // opened by those who want it, and Continue alone leaves them out.
+  reviewDone: 'Done',
+  reviewSummary: (left: number, total: number) => left === total
+    ? `${total} ${total === 1 ? 'tap' : 'taps'} the app didn’t respond to will be left out.`
+    : left === 0
+      ? `${total === 1 ? 'The tap' : `All ${total} taps`} the app didn’t respond to will be kept.`
+      : `${left} of ${total} taps the app didn’t respond to will be left out.`,
+  reviewHint: 'Check the ones to keep.',
+  reviewAgain: 'again',
+  reviewPicture: (step: number) => `#${step} as you recorded it`,
+  reviewPictureReplayed: (step: number) => `#${step} on the replay`,
+  continueToEdit: 'Continue to Edit',
+  matchStopped: 'The replay stopped.',
+  // 1b-3b, (c): a step whose screen looked different from its recording. Where it differs is boxed on the pictures, and
+  // only facts are said: never a cause named as the cause.
+  divergedPlaces: (step: number, total: number, places: number) =>
+    `Step ${step} of ${total} looks different in ${places} ${places === 1 ? 'place' : 'places'}`,
+  divergedMostly: (step: number, total: number) => `Step ${step} of ${total} is mostly different`,
+  divergedMostlyWhy: 'Most of this screen changed since you recorded it, so it likely shows something that isn’t the same each time, like data the app makes or loads, or a different start.',
+  divergedGoOnAreas: 'If it’s the same screen, continue anyway. The marked areas won’t be compared again on this screen.',
+  divergedGoOnStep: 'If it’s the same screen, continue anyway. This step won’t be compared again.',
+  // `from` is the step they were accepted at, or null for this one.
+  divergedCarried: (count: number, from: number | null) =>
+    `${count} ${count === 1 ? 'area' : 'areas'} on this screen ${count === 1 ? 'isn’t' : 'aren’t'} compared${from !== null ? `, from step ${from}` : ''}.`,
+  // Back to Range moves only a start still at its default: a start the person chose is told the fact and nothing more.
+  divergedBefore: (span: string, n: number, moves: boolean) =>
+    `${span} ${n === 1 ? 'comes' : 'come'} before the range${moves ? ': Back to Range starts it there.' : '.'}`,
+  // Record-time observation: a tap left out before the replay is the first suspect when the step after it differs.
+  // Said by reason when every one left out has the same one, and plainly when they differ.
+  divergedDropped: (span: string, n: number, reason: DropReason | null) =>
+    `${span} ${n === 1 ? 'was' : 'were'} not replayed${reason === 'stopped-scroll' ? ': tapped while a list was still moving, which only stops it.'
+      : reason === 'retried' ? ': tapped again right after, on a screen that had not changed.' : '.'}`,
+  droppedShort: 'Not replayed',
+  droppedTile: {
+    'stopped-scroll': 'Not replayed: tapped while the list was still moving.',
+    retried: 'Not replayed: it did nothing, and the next tap on the same element did.',
+  } satisfies Record<DropReason, string>,
+  divergedMatched: (n: number) => `${n} ${n === 1 ? 'step' : 'steps'} before it matched.`,
+  divergedRecorded: (step: number) => `When you recorded #${step}`,
+  divergedNow: 'Now, on the replay',
+  notCompared: 'Not compared',
+  differs: 'Differs',
+  continueAnyway: 'Continue anyway',
+  rangeMoved: (to: number, span: string) => `The start moved to #${to} to take in ${span}, which came before the step that looked different. Continue to match again.`,
+
+  editHeading: (n: number) => `${n} steps`,
+  removeStep: (label: string) => `Remove ${label}`,
+  putBackStep: (label: string) => `Put ${label} back in the flow`,
+  stepDetails: (label: string) => `Details of ${label}`,
+  fragile: 'fragile',
+  auto: 'auto',
+  skipped: 'not in the flow',
+  secret: 'secret',
+  fragileReasons: {
+    'no-element': 'Nothing on the screen is named at this point, so the flow taps the point itself.',
+    'no-selector': 'The element here cannot be named alone, so the flow taps the point itself.',
+    'not-centre': 'Tapping the element’s centre would land somewhere else, so the flow taps the point itself.',
+    swipe: 'A swipe replays its two ends at the speed it was made, not what it brought on screen.',
+    'field-unread': 'The field could not be read after typing, so this is the keys as typed on a US keyboard. Check the text.',
+    'keyboard-unknown': 'tapflow could not tell whether this touched a key on the on-screen keyboard or the app. Remove it if it was a key.',
+    'mid-transition': 'Tapped while the screen was still changing from the tap before it, so it may now land on the new screen. Remove it if it was a stray second tap.',
+  } satisfies Record<FragileReason, string>,
+  skipReasons: {
+    refused: 'The device refused this input.',
+    'hold-drag': 'A drag after a long press cannot be said in a flow.',
+    'held-button': 'A held button cannot be said in a flow.',
+    'too-long': 'Held longer than a flow allows (60 seconds).',
+    'no-pinch': 'The fingers moved but the scale hardly changed.',
+    'orientation-unknown': 'The device did not report which way it ended up.',
+    'posture-between': 'A flow can fold or unfold fully, not stop between.',
+    install: 'The run installs the build itself.',
+    network: 'A flow cannot switch the network.',
+    cut: 'A flow cannot cut text.',
+    keyboard: 'The on-screen keyboard toggle is not a flow step.',
+    'keyboard-key': 'A key on the on-screen keyboard. What it typed could not be read, so it is not in the flow. Type with your computer’s keyboard for text the flow can replay.',
+    'stopped-scroll': 'Tapped while the list was still moving: it stopped the list and pressed nothing, so it is not replayed.',
+    'no-response': 'The app did not respond to this tap when you recorded it.',
+    retried: 'You tapped the same element again right after, and the screen had not changed: this tap did nothing, so it is not replayed.',
+  } satisfies Record<SkipReason, string>,
+  autoReason: 'Turned into a scroll to the element the next step taps.',
+  secretLabel: 'Secret name',
+  secretHint: 'Read from this environment variable when the flow runs.',
+  secretDocs: 'Learn more',
+  secretDocsUrl: 'https://www.tapflow.dev/automation/flows#secrets',
+  secretInvalid: 'Use letters, digits and _ only, and do not start with a digit.',
+  secretTaken: 'Another secret has this name, with a different value.',
+  secretJoins: (name: string) => `Same value as ${name}: one secret.`,
+  // 1b-3c: typed text the app did not mark as hidden goes into the file as typed; Make secret keeps it out.
+  typedIntoFile: 'The value goes into the file.',
+  makeSecret: 'Make secret',
+  // 1b-3c: what a person expects a tap to bring, picked on the screen it left.
+  atThisTap: 'At this tap',
+  afterThisTap: 'After this tap',
+  momentLabel: 'Which moment the picture shows',
+  atHint: 'Where this tap lands.',
+  afterLead: (step: number) => `After #${step}:`,
+  afterHint: 'click what this tap should bring.',
+  afterAlt: (step: number) => `The screen after #${step}`,
+  pickElement: (label: string) => `Expect “${label}”`,
+  expected: 'Expected',
+  addExpected: '+ Add',
+  addExpectedLabel: 'Add what this tap should bring',
+  expectedChip: (label: string) => `“${label}”`,
+  showExpected: (label: string) => `Show “${label}” on the screen after this tap`,
+  removeExpected: (label: string) => `Remove “${label}” from what this tap should bring`,
+  expectedLeftOut: 'Struck out: it shows a secret’s value, so the flow leaves it out.',
+  expectedLeftOutLabel: (label: string) => `Show “${label}” on the screen after this tap — left out of the flow, it shows a secret’s value`,
+  expectedCount: (n: number) => `${n} expected`,
+  expectTitle: (label: string) => `Expect “${label}” after this tap`,
+  expectMatches: (n: number) => `Matches ${n} ${n === 1 ? 'element' : 'elements'} here`,
+  expectAdd: 'Add',
+  expectAlready: 'Already expected after this tap.',
+  expectRefused: {
+    typing: 'Not offered: an input shows what was typed, and a key is the keyboard.',
+    secret: 'Not offered: its text holds a secret’s value, which the flow file must not.',
+    unnamed: 'Not offered: it has no text to check.',
+  } as Record<string, string>,
+  expectWarnings: {
+    before: 'It was on the screen before this tap too, so seeing it says little about what the tap did.',
+    time: 'It reads like a time or a date, which another run shows differently.',
+  } as Record<string, string>,
+  byPosition: 'by position',
+  byPositionHint: 'Found by its place among elements alike: a change in their order changes what it taps.',
+  keepAsText: 'Keep as text',
+  showYaml: 'Show YAML',
+  hideYaml: 'Hide YAML',
+  yamlLabel: 'Flow YAML',
+  verifyAndExport: 'Verify and export',
+  backToRange: 'Back to Range',
+
+  verifyHeading: 'Verify',
+  verifyHelp: 'Runs the flow on this device with selectors only — the same way tapflow flow run will.',
+  verifying: (done: number, total: number) => `Running step ${done} of ${total}`,
+  passed: 'Passed. The flow ran on this device with selectors only, the way tapflow flow run will.',
+  failed: 'The flow failed on this device.',
+  stepStatus: { running: 'running', passed: 'passed', failed: 'failed', skipped: 'not run' },
+  suggestionsHeading: 'On that screen, one of these would select it:',
+  /** A touch Verify saw change nothing (#1125): an overlay the tree does not show may have taken it. */
+  touchChangedNothing: 'Nothing on the screen changed after this touch, so a run cannot check that it lands. If it should have changed something, something may be covering what it touches.',
+  /** What a run looks for after this touch, written into the flow (#1125). */
+  touchEffect: (line: string) => `A run checks that ${line} after this touch.`,
+  /** A touch the device could not judge (#1125): it went to the element's centre, which something may cover. */
+  uncheckedTouch: (note: string | undefined) =>
+    `Not checked to land on its element${note ? ` (${note})` : ''}, so it touched the centre, which something on screen may cover.`,
+  exportAnyway: 'Export anyway',
+  backToEdit: 'Back to Edit',
+
+  exportHeading: 'Export',
+  exportHelp: 'Your flow is ready. Save the YAML file and add it to your repository.',
+  fileLabel: 'File',
+  copyYaml: 'Copy YAML',
+  copied: 'Copied.',
+  copyByHand: 'Copying is not available on this page. The YAML is selected: copy it with your keyboard.',
+  download: 'Download',
+  howToUse: 'Put it in your app repository’s flows/ folder and CI runs it with tapflow flow run.',
+  secretsToSet: (names: string[]) => `Set ${names.join(', ')} when the flow runs: tapflow flow run ${names.map((n) => `--secret ${n}`).join(' ')}`,
+  appPinned: (bundleId: string) => `Runs only against builds of ${bundleId}.`,
+  done: 'Done',
+
+  errors: {
+    pauseLost: 'Capturing could not be paused, so the replay stopped — its steps may now be mixed into your capture.',
+    captureEnded: 'Your captured steps are gone: the device was released or restarted.',
+    connectionLost: 'The connection to the relay was lost. Start again once it is back.',
+  },
+}

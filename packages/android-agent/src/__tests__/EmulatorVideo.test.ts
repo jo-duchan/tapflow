@@ -25,6 +25,7 @@ function fakeClient(frames: Array<{ image: Buffer; width: number; height: number
       return call as never
     },
     sendTouch: vi.fn(),
+    streamInputEvent: vi.fn(),
     getDisplayConfigurations: vi.fn((_e: unknown, _o: unknown, cb: (e: null, r: unknown) => void) => cb(null, { displays: [] })) as unknown as RawEmulatorController['getDisplayConfigurations'], sendKey: vi.fn(), sendMouse: vi.fn(), sendWheel: vi.fn(), close: vi.fn(),
     // Video tests never reach these, but `RawEmulatorController` declares them and a double short
     // of a member is what #418 shipped behind a cast. Present so the annotation means something.
@@ -223,7 +224,7 @@ describe('EmulatorVideo', () => {
       streamScreenshot() {
         return { cancel() {}, async *[Symbol.asyncIterator]() { throw new Error('16 UNAUTHENTICATED') } } as never
       },
-      sendTouch: vi.fn(), sendKey: vi.fn(), sendMouse: vi.fn(), sendWheel: vi.fn(), close: vi.fn(),
+      sendTouch: vi.fn(), streamInputEvent: vi.fn(), sendKey: vi.fn(), sendMouse: vi.fn(), sendWheel: vi.fn(), close: vi.fn(),
       streamAudio: vi.fn(), getClipboard: vi.fn(), setClipboard: vi.fn(), getDisplayConfigurations: vi.fn(),
     }
     const fe = fakeEncoder()

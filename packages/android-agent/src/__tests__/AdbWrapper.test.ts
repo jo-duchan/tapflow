@@ -308,6 +308,45 @@ describe('AdbWrapper', () => {
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 
+    // Measured: `timeout 10 am start -W` returned to the host after 30.3 s, past Flow Capture's 30 s launch wait.
+    it('bounds the resolve and the launch on the host too, and counts a launch the host bound cut as sent', async () => {
+      const killed = Object.assign(new Error('Command failed: adb … (killed)'), { killed: true, stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
+      const runner = launcher({ resolve: RESOLVED, start: STARTED })
+      runner.execBounded = vi.fn(async (_ms: number, ...args: string[]) => {
+        if (args.includes('resolve-activity')) return RESOLVED
+        if (args.includes('am')) throw killed
+        return ''
+      })
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      expect(ran(runner, 'monkey')).toHaveLength(0)
+    })
+
+    // Pre-PR review: the launch with arguments, the monkey fallback and a deep link are bounded on the host the same way.
+    it('bounds a launch with arguments, the monkey fallback and a deep link on the host too', async () => {
+      const bounded = (start: string | Error): AdbRunner => {
+        const runner = launcher({ resolve: RESOLVED, start })
+        runner.execBounded = vi.fn(async (_ms: number, ...args: string[]) => {
+          if (args.includes('resolve-activity')) return RESOLVED
+          if (args.includes('am') && args.includes('android.intent.action.VIEW')) throw Object.assign(new Error('killed'), { stdout: 'Starting: Intent { act=android.intent.action.VIEW }\n' })
+          if (args.includes('am')) { if (start instanceof Error) throw start; return start }
+          return ''
+        })
+        return runner
+      }
+      const boundOf = (runner: AdbRunner, what: string) => vi.mocked(runner.execBounded!).mock.calls.filter((c) => c.includes(what)).map((c) => c[0])
+      const withArgs = bounded(STARTED)
+      await new AdbWrapper(withArgs).launchApp('emulator-5554', PKG, { arguments: { flag: true } })
+      expect(boundOf(withArgs, '-S')).toEqual([12_000])
+      const fellBack = bounded(Object.assign(new Error('killed'), { stdout: '' }))
+      await new AdbWrapper(fellBack).launchApp('emulator-5554', PKG)
+      expect(boundOf(fellBack, 'monkey')).toEqual([12_000])
+      const link = bounded(STARTED)
+      await new AdbWrapper(link).openUrl('emulator-5554', 'app://orders/7')
+      expect(boundOf(link, 'android.intent.action.VIEW')).toEqual([12_000])
+    })
+
     it('counts it launched when the device-side timeout ends the wait after the intent went out', async () => {
       const expired = Object.assign(new Error('Command failed: adb … exit 124'), { stdout: 'Starting: Intent { cmp=com.example.app/.MainActivity }\n' })
       const runner = launcher({ resolve: RESOLVED, start: expired })
@@ -633,6 +672,17 @@ describe('AdbWrapper', () => {
       await wrapper.inputText('emulator-5554', '50% off')
       // % → \% (literal), space → %s
       expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'input', 'text', '50\\%%soff')
+    })
+
+    // The text can be a flow's secret, and a failed exec's message is its whole command line.
+    it('fails without the typed text in its message', async () => {
+      const runner = mockRunner()
+      vi.mocked(runner.exec).mockRejectedValueOnce(Object.assign(new Error('Command failed: adb -s emulator-5554 shell input text hunter2'), { code: 1 }))
+      const wrapper = new AdbWrapper(runner)
+      const error = await wrapper.inputText('emulator-5554', 'hunter2').then(() => null, (e: unknown) => e as Error)
+      expect(error).toBeInstanceOf(PlatformError)
+      expect(error!.message).toBe('adb input text failed (exit 1)')
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error!))).not.toContain('hunter2')
     })
 
     it('rejects non-ASCII text instead of silently typing nothing', async () => {
@@ -972,6 +1022,17 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('keyguard', () => {
+    it('reads the keyguard from the window policy dump, and dismisses it through the window manager', async () => {
+      const runner = { exec: vi.fn().mockResolvedValue('      showing=true\n      secure=false\n'), execBinary: vi.fn(), listAvds: vi.fn() }
+      const adb = new AdbWrapper(runner as never)
+      expect(await adb.keyguardState('emulator-5554')).toEqual({ showing: true, secure: false })
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'dumpsys', 'window', 'policy')
+      await adb.dismissKeyguard('emulator-5554')
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'wm', 'dismiss-keyguard')
+    })
+  })
+
   describe('Lean mode commands', () => {
     const recorder = (answers: Record<string, string> = {}) => {
       const calls: string[] = []
@@ -1027,5 +1088,187 @@ describe('AdbWrapper', () => {
       // base64, so a quote in the content cannot end the shell string.
       expect(calls).toEqual([`echo ${b64} | base64 -d > /data/local/tmp/f.tmp && mv /data/local/tmp/f.tmp /data/local/tmp/f && sync`])
     })
+  })
+})
+
+// #1135: Flow Capture's field reads and writes, through the jar's `Focused` class.
+describe('AdbWrapper focused field', () => {
+  const runnerWith = (out: string, input?: (input: string, timeoutMs: number, ...args: string[]) => Promise<string>): AdbRunner => ({
+    exec: vi.fn(async (...args: string[]) => (args.includes('app_process') ? out : '')),
+    execBinary: vi.fn(),
+    listAvds: vi.fn(async () => []),
+    ...(input ? { execInput: vi.fn(input) } : {}),
+  })
+
+  it('reads the focused field from the jar\'s line of JSON', async () => {
+    const line = '{"identifier":"form.email","frame":{"x":1,"y":2,"width":3,"height":4},"secure":false,"value":"a\\nb"}'
+    const runner = runnerWith(`noise\n${line}\n`)
+    expect(await new AdbWrapper(runner).readFocused('emulator-5554')).toEqual({
+      identifier: 'form.email', frame: { x: 1, y: 2, width: 3, height: 4 }, secure: false, value: 'a\nb',
+    })
+    const call = vi.mocked(runner.exec).mock.calls.find((c) => c.includes('app_process'))!
+    expect(call.slice(-2)).toEqual(['dev.tapflow.uidump.Focused', 'read'])
+  })
+
+  it('reads nothing from output that is not JSON', async () => {
+    expect(await new AdbWrapper(runnerWith('Killed\n')).readFocused('emulator-5554')).toBeNull()
+  })
+
+  it('sets text through stdin as base64, never in argv', async () => {
+    const input = vi.fn(async () => '{"result":"ok"}\n')
+    const runner = runnerWith('', input)
+    expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', '비밀 pass\nword')).toBe('ok')
+    const [stdin, , ...args] = input.mock.calls[0] as unknown as [string, number, ...string[]]
+    expect(Buffer.from(stdin.trim(), 'base64').toString('utf8')).toBe('비밀 pass\nword')
+    expect(stdin.endsWith('\n')).toBe(true)
+    expect(args.slice(-2)).toEqual(['dev.tapflow.uidump.Focused', 'set'])
+    expect(args.join(' ')).not.toMatch(/비밀|pass|word/)
+  })
+
+  it.each(['ok', 'transformed', 'refused', 'rejected', 'no-focus', 'cannot-append-secure'])('passes the jar\'s %s through', async (result) => {
+    const runner = runnerWith('', async () => `{"result":"${result}"}`)
+    expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', 'x')).toBe(result)
+  })
+
+  it('answers failed for a verdict it does not know, or none', async () => {
+    expect(await new AdbWrapper(runnerWith('', async () => '{"result":"maybe"}')).setFocusedText('emulator-5554', 'x')).toBe('failed')
+    expect(await new AdbWrapper(runnerWith('', async () => { throw new Error('exit 1') })).setFocusedText('emulator-5554', 'x')).toBe('failed')
+  })
+
+  it('answers unavailable with no way to write stdin', async () => {
+    expect(await new AdbWrapper(runnerWith('')).setFocusedText('emulator-5554', 'x')).toBe('unavailable')
+  })
+
+  // A failed set used to say nothing about why (Android 16, four in one evening): the jar's exception is logged, and
+  // never the text, which can be a password.
+  it('logs the jar\'s error when a set fails, and never the text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const runner = runnerWith('', async () => '{"error":"java.lang.IllegalStateException: no window"}\n')
+      expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', 'hunter2')).toBe('failed')
+      const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toMatch(/field set failed: java\.lang\.IllegalStateException: no window/)
+      expect(logged).not.toMatch(/hunter2/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('reads the keyboard window from dumpsys', async () => {
+    const runner: AdbRunner = {
+      exec: vi.fn(async () => '  Window #3 Window{a InputMethod}:\n    touchable region=SkRegion((0,1517,1080,2400))\n    isVisible=true\n'),
+      execBinary: vi.fn(),
+      listAvds: vi.fn(async () => []),
+    }
+    expect(await new AdbWrapper(runner).imeWindow('emulator-5554')).toEqual({ shown: true, rect: { x: 0, y: 1517, width: 1080, height: 883 } })
+    expect(vi.mocked(runner.exec).mock.calls[0]).toEqual(['-s', 'emulator-5554', 'shell', 'dumpsys', 'window', 'InputMethod'])
+  })
+})
+
+describe('parseImeWindow', () => {
+  it('reads a hidden keyboard', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=false\n')).toEqual({ shown: false })
+  })
+
+  it('reads a shown keyboard with no region as shown, rect unknown', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=true\n')).toEqual({ shown: true })
+  })
+
+  it('reads nothing it cannot recognise', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('')).toBeNull()
+  })
+
+  // Lines as `dumpsys window InputMethod` printed them on API 34 (Pixel 9 emulator, 2026-11-11).
+  it('reads the package the keyboard would type into', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    const home = '    isVisible=false\n  imeLayeringTarget in display# 0 Window{fa7e255 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}\n  imeInputTarget in display# 0 Window{fa7e255 u0 com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}\n'
+    expect(parseImeWindow(home)).toEqual({ shown: false, target: 'com.google.android.apps.nexuslauncher' })
+    const layeringOnly = '    isVisible=false\n  imeLayeringTarget in display# 0 Window{136eb2b u0 com.android.settings/com.android.settings.Settings}\n'
+    expect(parseImeWindow(layeringOnly)).toEqual({ shown: false, target: 'com.android.settings' })
+  })
+
+  it('names no package for a window that has none', async () => {
+    const { parseImeWindow } = await import('../AdbWrapper')
+    expect(parseImeWindow('    isVisible=false\n  imeInputTarget in display# 0 Window{e0230a5 u0 NotificationShade}\n')).toEqual({ shown: false })
+  })
+})
+
+describe('parseHomePackage', () => {
+  it('reads the launcher from resolve-activity --brief', async () => {
+    const { parseHomePackage } = await import('../AdbWrapper')
+    expect(parseHomePackage('priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'))
+      .toBe('com.google.android.apps.nexuslauncher')
+  })
+
+  it('names none when the system would ask which home to use', async () => {
+    const { parseHomePackage } = await import('../AdbWrapper')
+    expect(parseHomePackage('priority=0 preferredOrder=0\nandroid/com.android.internal.app.ResolverActivity\n')).toBeNull()
+    expect(parseHomePackage('No activity found\n')).toBeNull()
+  })
+
+  it('asks a device once, and again after a failed read', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('x\ncom.sec.android.app.launcher/.activities.LauncherActivity\n')
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    expect(await adb.homePackage('emulator-5554')).toBeNull()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.sec.android.app.launcher')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.sec.android.app.launcher')
+    expect(exec).toHaveBeenCalledTimes(2)
+  })
+
+  // A serial is reused by whichever emulator comes up next, and that one may have another launcher. Each way the agent
+  // learns a serial's new owner is tested alone, since any one of them clearing the cache would hide another that does not.
+  const NEXUS = 'x\ncom.google.android.apps.nexuslauncher/.NexusLauncherActivity\n'
+  const LAUNCHER3 = 'x\ncom.android.launcher3/.uioverlays.QuickstepLauncher\n'
+
+  // A read that never answers would stay cached, and every keyboard read waits on it.
+  it('bounds the read, and asks again after one that timed out', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const execBounded = vi.fn().mockRejectedValueOnce(new Error('timed out')).mockResolvedValue(NEXUS)
+    const exec = vi.fn()
+    const adb = new AdbWrapper({ exec, execBounded, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    expect(await adb.homePackage('emulator-5554')).toBeNull()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    expect(execBounded.mock.calls[0]![0]).toBeGreaterThan(0)
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('asks again once tapflow boots another emulator on the serial', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    adb.setSerial('avd:Pixel_9', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    adb.setSerial('avd:Other', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the serial is let go', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    const exec = vi.fn().mockResolvedValueOnce(NEXUS).mockResolvedValueOnce(LAUNCHER3)
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => []) } as AdbRunner)
+    adb.setSerial('avd:Pixel_9', 'emulator-5554')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    adb.clearSerial('avd:Pixel_9')
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
+  })
+
+  it('asks again once the device list finds another emulator on the serial', async () => {
+    const { AdbWrapper } = await import('../AdbWrapper')
+    let avd = 'Pixel_9'
+    const exec = vi.fn(async (...args: string[]) => {
+      if (args[0] === 'devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+      if (args.includes('emu')) return `${avd}\nOK\n`
+      return avd === 'Pixel_9' ? NEXUS : LAUNCHER3
+    })
+    const adb = new AdbWrapper({ exec, execBinary: vi.fn(), listAvds: vi.fn(async () => ['Pixel_9', 'Other']) } as AdbRunner)
+    await adb.listDevices()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.google.android.apps.nexuslauncher')
+    avd = 'Other'
+    await adb.listDevices()
+    expect(await adb.homePackage('emulator-5554')).toBe('com.android.launcher3')
   })
 })

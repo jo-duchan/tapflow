@@ -4,7 +4,7 @@ import { skeletonSize } from '@/lib/deviceSkeleton';
 import { framelessChrome } from '@/lib/framelessChrome';
 
 import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRelay } from '@/hooks/useRelay';
 import { usePerfMode } from '@/hooks/usePerfMode';
 import { IOSViewer } from './device/IOSViewer';
@@ -23,6 +23,13 @@ import { newRequestId } from '@/lib/requestId';
 import { StatsOverlay } from './perf/StatsOverlay';
 import { MetricsPanel } from './perf/MetricsPanel';
 import { toast } from 'sonner';
+import { dropCaptureSnapshot, viewerCaptureTap, type ViewerCaptureState } from '@/lib/flowCapture/viewerTap';
+import type { CaptureTap } from '@/lib/flowCapture/tap';
+import { ThumbnailRecorder } from '@/lib/flowCapture/thumbnails';
+
+// Its own chunk: the dialog brings flow-runner's engine and `yaml` with it, which a QA session that never captures does
+// not need (#1125).
+const FlowCaptureDialog = lazy(() => import('./flow-capture/FlowCaptureDialog'));
 
 interface Props {
   sessionId: string;
@@ -45,10 +52,43 @@ interface Props {
    *  the session is alive and another socket holds it, so no protocol reason describes it, and widening
    *  `SessionTerminatedReason` would let `session:terminated` carry a reason it can never mean. */
   onSessionEnded?: (reason: SessionTerminatedReason | 'busy-elsewhere' | 'mac-overloaded') => void;
+  /** See `SimulatorInfoCard.capturingSteps`. */
+  capturingSteps?: boolean;
 }
 
-export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios', buildId, resetMode, resume = false, onRecordingUploaded, onSessionEnded }: Props) {
-  const sendRef = useRef<(msg: BrowserToRelay) => void>(() => {});
+export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios', buildId, resetMode, resume = false, onRecordingUploaded, onSessionEnded, capturingSteps }: Props) {
+  const sendRef = useRef<(msg: BrowserToRelay) => boolean>(() => false);
+  // Flow Capture's dialog (#1125). Its listeners see every message for this session before this viewer's handling,
+  // which returns early on the lifecycle frames a replay most needs to hear about (terminated, agent away, rebound).
+  // The dialog's view of this viewer, made when the button is pressed (an object reading refs, made during render, is
+  // what the React Compiler refuses); open exactly while it exists.
+  const [captureTap, setCaptureTap] = useState<CaptureTap | null>(null);
+  const captureOpen = captureTap !== null;
+  // The copy of the steps a Capture flow dialog takes belongs to this opening, so it goes when the opening ends, however
+  // it ends: closed, taken down with the device, or with this viewer. Not in the dialog: StrictMode mounts that twice,
+  // and the copy outlives that. A cleanup that deletes, not a read, so not a query.
+  useEffect(() => {
+    if (!captureTap) return;
+    return () => dropCaptureSnapshot(captureTap.sessionId);
+  }, [captureTap]);
+  const captureListenersRef = useRef(new Set<(msg: BrowserInbound) => void>());
+  const captureCloseListenersRef = useRef(new Set<() => void>());
+  const captureButtonRef = useRef<HTMLButtonElement | null>(null);
+  const captureSurfaceRef = useRef<(() => CanvasImageSource | null) | null>(null);
+  const capturingRef = useRef(false);
+  const captureOpenRef = useRef(false);
+  const thumbnailsRef = useRef<ThumbnailRecorder | null>(null);
+  useEffect(() => {
+    thumbnailsRef.current = new ThumbnailRecorder({
+      sessionId,
+      surface: () => captureSurfaceRef.current?.() ?? null,
+      recording: () => capturingRef.current && !captureOpenRef.current,
+    });
+    return () => { thumbnailsRef.current = null; };
+  }, [sessionId]);
+  const captureStateRef = useRef<ViewerCaptureState>({
+    sessionId, platform, buildId: buildId ?? 0, connected: false, chrome: null, postures: { postures: [], currentId: null },
+  });
   // One reset per mount; see the boot handler below.
   const resetSentRef = useRef(false);
   // How many rebind re-boots are still waiting for their `device:ready`, and whether the app was
@@ -237,6 +277,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // can put `''` on the wire, and a future producer echoing it back should not be applied to whichever
     // viewer happens to be mounted.
     if ('sessionId' in msg && msg.sessionId !== sessionId) return;
+    for (const listener of captureListenersRef.current) listener(msg);
 
     if (msg.type === 'session:joined') {
       // A join starts a boot cycle of its own (socket blip, re-entry). Any rebind still waiting for
@@ -267,6 +308,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // thing #426 was opened about.
       setAgentAway(true);
       setChrome(null);
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
       setDeviceReady(false);
       return;
     }
@@ -286,6 +329,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // spinning on an `app:launch-done` that died with the old agent.
       setDeviceReady(false);
       setChrome(null);
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
       setInstalling(false);
       setInstallError(null);
       setBootError(null);
@@ -365,7 +410,9 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // answers every terminal input itself (`RelayServer.ts`, `channel-unavailable`). A
       // tapping tester would refresh this toast indefinitely, and its advice would contradict the
       // status card — which already says the relay is holding the session open and waiting.
-      if (agentAway) return;
+      // Also while Flow Capture replays: its own inputs are answered here too, and it reports a refusal itself, inside
+      // the dialog, where a toast would not be heard.
+      if (agentAway || captureOpen) return;
       const { key, notice } = resolveInputError(msg.reason);
       // A reason this build does not know about is normalised away, and without this line it would
       // vanish with it: the tester correctly sees the conservative copy, but nobody can tell the
@@ -434,6 +481,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       // still runs, so the spinner clears and the device looks healthy while the app is never installed.
       // Pinned by the "agent's real boot sequence" case in DeviceViewer.lifecycleCorrelation.test.tsx.
       setChrome(null); // causes active viewer to unmount → cleanup
+      // Flow Capture's dialog goes with the viewer it sits in; left set, it opened again by itself when the frame came back.
+      setCaptureTap(null);
     }
     if (msg.type === 'device:ready') {
       // **Before the correlator, deliberately.** The relay replays this message from cache to a
@@ -553,7 +602,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
           return;
       }
     }
-  }, [sessionId, buildId, onSessionEnded, resetMode, installed, agentAway, sendBoot]);
+  }, [sessionId, buildId, onSessionEnded, resetMode, installed, agentAway, sendBoot, captureOpen]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
     const envelope = parseEnvelopeHeader(data);
@@ -577,7 +626,17 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     binaryFrameHandlerRef.current?.(payload, meta);
   }, [pushAudioFrame]);
 
-  const { send, connected } = useRelay(handleMessage, handleBinaryFrame);
+  const { send: relaySend, connected } = useRelay(handleMessage, handleBinaryFrame, () => {
+    for (const listener of captureCloseListenersRef.current) listener();
+  });
+  // Every input this viewer sends passes here once, toolbar commands and the dialog's replay included, so the picture
+  // of the screen each recorded step began on is taken in one place (1b-3b). The recorder decides from refs whether
+  // the person is being recorded right now; the dialog's own replay is not (`captureOpen`).
+  const send = useCallback((msg: BrowserToRelay) => {
+    const sent = relaySend(msg);
+    if (sent) thumbnailsRef.current?.note(msg);
+    return sent;
+  }, [relaySend]);
   useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
@@ -737,7 +796,22 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     swKeyboardVisible, swKeyboardPending, onKbdToggle,
     rebootPending, onReboot: reboot,
     restartButtonRef,
+    capturingSteps,
+    captureOpen,
+    // Only with capturing on and a build: a capture replays against the build it was made with.
+    onCaptureFlow: capturingSteps && buildId !== undefined ? () => setCaptureTap(viewerCaptureTap({
+      state: captureStateRef, send: sendRef, listeners: captureListenersRef, closeListeners: captureCloseListenersRef, surface: captureSurfaceRef,
+      thumbnails: thumbnailsRef,
+    })) : undefined,
+    captureButtonRef,
+    captureSurfaceRef,
   };
+
+  useLayoutEffect(() => {
+    captureStateRef.current = { sessionId, platform, buildId: buildId ?? 0, connected, chrome, postures };
+    capturingRef.current = capturingSteps === true;
+    captureOpenRef.current = captureOpen;
+  });
 
   // Before chrome arrives, show a phone skeleton + status card so the layout isn't empty
   if (!iosChrome && !androidChrome) {
@@ -791,6 +865,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
             installing={installing} installError={installError}
             decoderUnsupported={false}
             keyboardActive={false} agentAway={agentAway}
+            capturingSteps={capturingSteps}
           />
         </div>
       </div>
@@ -803,6 +878,11 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     <>
       {iosChrome && <IOSViewer {...commonProps} chrome={iosChrome} formFactor={formFactor} postures={postures} perfHookRef={devPerfHookRef} onStreamSize={onStreamSize} />}
       {androidChrome && <AndroidViewer {...commonProps} androidButtons={androidChrome.buttons} screenWidth={androidChrome.screenWidth} screenHeight={androidChrome.screenHeight} cornerRadius={androidChrome.cornerRadius} postures={postures} streamRotation={androidChrome.streamRotation} bodyRotation={androidChrome.bodyRotation} perfHookRef={devPerfHookRef} />}
+      {captureTap && (
+        <Suspense fallback={null}>
+          <FlowCaptureDialog tap={captureTap} returnFocusRef={captureButtonRef} onClose={() => setCaptureTap(null)} />
+        </Suspense>
+      )}
       {import.meta.env.DEV && perfMode && perfVisible && (
         <>
           <StatsOverlay perfHookRef={statsRef} />

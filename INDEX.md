@@ -60,6 +60,7 @@ Committed *why* behind non-obvious decisions. Read the relevant one **before** c
 | [android-rotation.md](./contributing/android-rotation.md) | rationale | Why rotation uses `wm user-rotation` + pinned scrcpy 3.3 — legacy command ignored on API 35+ |
 | [android-foldable-touch-coordinates.md](./contributing/android-foldable-touch-coordinates.md) | diagnosis | Why a folded foldable's taps miss — the divisor is the emulator's display, not the guest's panel |
 | [ios-device-recovery.md](./contributing/ios-device-recovery.md) | rationale | Why `tapflow start` does not pre-boot iOS, and where zombie-simulator recovery lives |
+| [capture-lag-attached-runner.md](./contributing/capture-lag-attached-runner.md) | diagnosis | Why a person's iOS device has no XCUITest runner attached — an idle runner lagged the app; measure Manual QA on and off |
 | [agent-keep-awake.md](./contributing/agent-keep-awake.md) | rationale | Why the agent holds a `caffeinate` assertion during a session — idle throttle drops the emulator to ~4-5 fps |
 | [agent-event-loop-blocking.md](./contributing/agent-event-loop-blocking.md) | diagnosis | Why the agents never run a child process synchronously on a timer — a stream that stutters at a steady interval, and how to find the call |
 | [relay-heartbeat.md](./contributing/relay-heartbeat.md) | rationale | Why the relay runs a ping/pong heartbeat — dead sockets otherwise linger to the TCP timeout |

@@ -46,6 +46,13 @@ export const INBOUND_DISPOSITION = {
   'app:launch-error': { settles: 'launchApp' },
   'app:clear-state-done': { settles: 'clearState' },
   'app:clear-state-error': { settles: 'clearState' },
+  'device:keyboard-set-done': { settles: 'setKeyboard' },
+  'device:keyboard-set-error': { settles: 'setKeyboard' },
+  'device:run-reset-done': {
+    ignored: 'Asked only by the dashboard\'s channel, a subclass of `SessionChannel` built with the relay it talks to '
+      + '(#1139). A `flow run` resets its device at the boot instead, and the report rides on `device:ready`.',
+  },
+  'device:run-reset-error': { ignored: 'Never asked from this package, for the reason its `-done` is not read.' },
   'open-url:done': { settles: 'openUrl' },
   'open-url:error': { settles: 'openUrl' },
   'input:done': { settles: 'awaitInputAck' },
@@ -70,11 +77,8 @@ export const INBOUND_DISPOSITION = {
     ignored: 'No clipboard step exists, and one could not be deterministic — the payload lands on the host '
       + 'OS clipboard, which is shared mutable state outside the flow.',
   },
-  'clipboard:error': { ignored: 'Same as `clipboard:data` — nothing here sends a clipboard request.' },
-  'clipboard:write-done': {
-    ignored: 'Same as `clipboard:data` — no clipboard step exists, so a confirmation here answers nothing a flow '
-      + 'asked for.',
-  },
+  'clipboard:error': { settles: 'pasteText' },
+  'clipboard:write-done': { settles: 'pasteText' },
   'network:state': {
     ignored: 'No network step exists. A flow that took its own device offline would be asserting against a '
       + 'device it can no longer drive, and the step after it could not report why it failed.',
@@ -85,12 +89,14 @@ export const INBOUND_DISPOSITION = {
       + 'depend on the on-screen keyboard\'s visibility.',
   },
   'device:postures': {
-    ignored: 'Which postures a foldable offers, and which it is in. A replay engine does not fold '
-      + 'the device: a flow that needs a posture would have to say so as a step, and none does.',
+    does: 'kept per session for a flow\'s `setPosture`, which picks the end of the list it names and waits for a '
+      + 'later one whose current posture is that id — an empty list is waited past, not taken as an answer',
   },
   'session:chrome': {
     does: 'handed to the stream listener when one is set, so the run\'s video can draw the device frame it was '
-      + 'recorded in; the engine never reads it — selectors come from the UI tree in normalized coordinates',
+      + 'recorded in, and kept per session so the engine can check a flow\'s `pressButton` steps against the buttons '
+      + 'the device declares before running it, and `setOrientation` can tell which way the device is held and wait '
+      + 'for the turn — selectors, and the turn a point is placed by, still come from the UI tree, never from this'
   },
   'session:deviceInfo': {
     does: 'handed to the stream listener when one is set and written into the run\'s video beside the chrome; '

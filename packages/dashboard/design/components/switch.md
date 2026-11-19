@@ -90,5 +90,5 @@ That is left to the designer's color pass, not a value to aim for.
 
 ## Figma
 
-Component set **Switch** (`65:166`) in the `Design System` page — `checked` × `state`, 6 variants. The value names
-were not checked against this spec. The label, the tooltip and the row are not in the set.
+Component set **Switch** (`1:2175`) on the `Forms` page of tapflow-design-system — `checked` × `state`, 6 variants.
+The names match this spec. The label, the tooltip and the row are not in the set.

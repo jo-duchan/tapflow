@@ -95,7 +95,7 @@ Call-site counts are a snapshot (2026-10-21): each `toast.<type>()` written in c
 
 ## Figma
 
-Component **Toast** (`86:470`) in the `Design System` page — `type` × 4. It was drawn from the wrapper's earlier
-classes, which never reached the screen (fixed in #1020), so its colors, icons and shadow likely differ from the
-table above, and it has no `loading`. Redrawing it from this spec is one of the items for the Figma sync; name the
-set "Toast (sonner)".
+Component set **Toast (sonner)** (`23:749`) on the `Overlays` page of tapflow-design-system — `type` × 5, drawn from
+the table above, with `Title`, `Description` and `Show description` properties. sonner's colors are the `Toast/*`
+variables (Light and Dark), which are not CSS custom properties. The Inter `ss01` / `ss02` alternates are not
+applied.

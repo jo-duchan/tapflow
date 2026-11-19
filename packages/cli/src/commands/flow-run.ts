@@ -12,6 +12,11 @@ import {
   tokenRefusal,
   isEligible,
   lookupBuild,
+  refusedFlow,
+  missingSecret,
+  missingSecretMessage,
+  unavailableButton,
+  unavailableButtonMessage,
   parseTagList,
   retryAdmission,
   admissionRefusalOf,
@@ -60,6 +65,9 @@ export interface FlowRunOptions {
   parallel?: number
   /** The platform of a `--parallel` run without `--build`; with one, the relay reads the build's. */
   platform?: string
+  /** Environment variables an `inputText: { secret }` step may type. Only these: the rest of the environment holds
+   *  the relay token and CI's other secrets, and a flow is a file anyone with the repo can change. */
+  secret?: string[]
 }
 
 // Exit codes are part of the CI contract: 0 = all flows passed,
@@ -93,6 +101,27 @@ const ADMISSION_WAITS: Record<AdmissionReason, string> = {
 }
 
 class FlowRunEnvironmentError extends Error {}
+
+/** `--secret`, once or repeated, as the parser hands it back; a value is kept as typed, since it is a name. */
+export function secretArg(value: TagsArg | undefined): string[] | undefined {
+  if (value === undefined) return undefined
+  return (Array.isArray(value) ? value : [value]).map(String)
+}
+
+/** The values `--secret` names, read once before the run. A name the environment does not hold is the run's mistake
+ *  to report now, not a flow's to fail on later. */
+function readSecrets(names: string[] | undefined): Record<string, string> | undefined {
+  if (!names?.length) return undefined
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) envFail(`--secret takes the name of an environment variable, like PASSWORD (got ${JSON.stringify(name)})`)
+    const value = Object.hasOwn(process.env, name) ? process.env[name] : undefined
+    // Empty is what CI expands a missing secret to (`\${{ secrets.X }}`), and typing nothing would fail later as the app's fault.
+    if (value === undefined || value === '') envFail(`--secret ${name}: ${name} is not set in the environment, or is empty`)
+    out[name] = value
+  }
+  return out
+}
 
 /** What the argument parser hands back for `--include-tags` / `--exclude-tags`. */
 export type TagsArg = string | number | boolean | (string | number | boolean)[]
@@ -198,6 +227,17 @@ function printFailure(result: FlowResult, flow: Flow, flowIndex: number, opts: F
   }
 }
 
+/**
+ * Touches the device could not judge (#1125), said under a flow whether it passed or failed: such a step touched its
+ * element's centre, which is how a covered row once passed as tapped, so a green flow must not hide that it has them.
+ */
+function printUnchecked(result: FlowResult, prefix = ''): void {
+  const unchecked = result.steps.filter((st) => st.reach === 'unchecked')
+  if (unchecked.length === 0) return
+  const why = [...new Set(unchecked.map((st) => st.reachNote ?? 'no reason given'))].join('; ')
+  console.error(`${prefix}  ! ${unchecked.length} touch${unchecked.length === 1 ? '' : 'es'} not checked to land on ${unchecked.length === 1 ? 'its element' : 'their elements'} (${why}) — touched at the centre`)
+}
+
 /** What a run's boot reset, said once per device. */
 function printReset(report: BootOutcome['runReset'], deviceName: string, prefix = ''): void {
   if (!report) {
@@ -208,7 +248,7 @@ function printReset(report: BootOutcome['runReset'], deviceName: string, prefix 
   if (report.failed.length > 0) console.error(`${prefix}reset failed: ${report.failed.join(', ')} — the run goes on, and these may hold what an earlier run left`)
 }
 
-function flowReport(result: FlowResult, device: DeviceInfo): FlowReport {
+function flowReport(result: FlowResult, device?: DeviceInfo): FlowReport {
   return {
     status: result.status,
     durationMs: result.durationMs,
@@ -217,9 +257,13 @@ function flowReport(result: FlowResult, device: DeviceInfo): FlowReport {
     steps: result.steps.map((st) => ({
       index: st.index, name: st.name, status: st.status, durationMs: st.durationMs,
       ...(st.message ? { message: st.message } : {}),
+      ...(st.reach ? { reach: st.reach } : {}),
+      ...(st.reachNote ? { reachNote: st.reachNote } : {}),
+      ...(st.effect ? { effect: st.effect } : {}),
       ...(st.suggestions ? { suggestions: st.suggestions } : {}),
     })),
-    device: { id: device.id, name: device.name, platform: device.platform },
+    // A flow refused before a device was chosen ran on none.
+    ...(device ? { device: { id: device.id, name: device.name, platform: device.platform } } : {}),
   }
 }
 
@@ -241,6 +285,7 @@ interface ParallelRun {
   eligible: number[]
   serviceTier?: ServiceTier
   runReset?: { uninstall: string[]; clear: string[] }
+  secrets?: Record<string, string>
   admissionTimeoutMs: number
   recorder?: RunRecorder
   lane?: VideoLane
@@ -345,6 +390,8 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
       const engineOpts = {
         ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),
         ...(recorder ? { captureLastScreen: true } : {}),
+        ...(run.secrets ? { secrets: run.secrets } : {}),
+        platform: lease.platform,
         onStep: ({ label: step, ...mark }: Parameters<NonNullable<EngineOptions['onStep']>>[0]) => {
           if (mark.phase === 'start' && step) client.activity(lease.sessionId, `step ${mark.index + 1}: ${step}`)
           worker.tap?.step(mark)
@@ -366,8 +413,14 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         recorder?.reportFlow(idx, flowReport(result, device), result.failureScreenshot ?? result.lastScreenshot)
         console.log(`${prefix}${result.status === 'passed' ? '✓' : '✗'} ${flow.name} (${(result.durationMs / 1000).toFixed(1)}s)`)
         if (result.status === 'failed') printFailure(result, flow, idx, opts, prefix)
+        printUnchecked(result, prefix)
         // The device, not the app: whatever went wrong may still be wrong for the next flow, so this worker stops.
-        if (result.status === 'failed' && result.failureKind === 'environment') {
+        // Unless nothing reached the device — a flow pressing a button this device lacks says nothing about the device,
+        // and leaving over it would cost the run a healthy one per such flow. A pinch refused as unsupported does leave:
+        // that is Android's adb fallback, which an emulator reaches only when its pointer channel is down — the device.
+        // And not over a step the device cannot do (`deviceLacks`, a posture on a device that does not fold): the
+        // device is fine for every other flow.
+        if (result.status === 'failed' && result.failureKind === 'environment' && !result.failedBeforeRun && !result.deviceLacks) {
           leftBehind.add(lease.sessionId)
           console.error(`${prefix}leaving this device: the flow failed for a reason outside the app`)
           return
@@ -485,6 +538,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     } else if (opts.platform !== undefined) {
       envFail('--platform is for --parallel; without it, pick the device with --device or --session')
     }
+    const secrets = readSecrets(opts.secret)
     const admissionTimeout = opts.admissionTimeout ?? DEFAULT_ADMISSION_TIMEOUT_SECONDS
     if (!(Number.isFinite(admissionTimeout) && admissionTimeout >= 0 && admissionTimeout <= MAX_TIMEOUT_SECONDS)) {
       envFail(`--admission-timeout must be a number of seconds from 0 to ${MAX_TIMEOUT_SECONDS}`)
@@ -556,10 +610,14 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
 
     // Which flows run is decided before a device is chosen, so a run where none would is refused without touching one.
     const target: EligibilityTarget = { includeTags: parseTagList(opts.includeTags), excludeTags: parseTagList(opts.excludeTags) }
+    let buildPlatform: string | undefined
     if (opts.build !== undefined) {
       const build = await lookupBuild(httpBaseOf(relayUrl), tokens, opts.build)
       if (build.kind === 'not-found') envFail(`build ${opts.build} not found on the relay (see list_builds / the dashboard)`)
-      if (build.kind === 'found') target.build = { id: opts.build, bundleId: build.bundleId }
+      if (build.kind === 'found') {
+        target.build = { id: opts.build, bundleId: build.bundleId }
+        if (build.platform !== null) buildPlatform = build.platform
+      }
       else if (flows.some((f) => f.appId !== undefined)) console.error(`app check skipped (${build.reason}): flows run whatever their appId`)
     }
     const eligible: number[] = []
@@ -576,11 +634,40 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       skipCounts.set(verdict.reason, (skipCounts.get(verdict.reason) ?? 0) + 1)
       recorder?.reportSkipped(flowIndex, { reason: verdict.reason, message: verdict.message })
     }
+    // A secret the run was not given is the run's mistake, like a variable missing from CI: said before any device is
+    // booted, reset or installed for it, rather than as one flow's failure after all of that.
+    for (const idx of eligible) {
+      const missing = missingSecret(flows[idx], secrets)
+      if (missing) envFail(`${flows[idx].name}: ${missingSecretMessage(missing.name)}`)
+    }
+    // A flow pressing a button the platform has none of fails here, before a device is chosen: the compile error to
+    // the engine's runtime check, which still runs for what only the device knows (iOS buttons other than home) and
+    // for a run that learns its platform only from the device. Failed rather than skipped (a person's decision): a
+    // flow that cannot run where it was sent is not one the run chose to leave out.
+    const platform = buildPlatform ?? (parallel !== undefined ? opts.platform : undefined)
+    const refused: { idx: number; result: FlowResult }[] = []
+    if (platform !== undefined) {
+      for (const idx of [...eligible]) {
+        const missing = unavailableButton(flows[idx], platform)
+        if (missing === null || missing === 'needs-chrome') continue
+        eligible.splice(eligible.indexOf(idx), 1)
+        const result = refusedFlow(flows[idx], missing.index, unavailableButtonMessage(missing, platform), { beforeRun: true })
+        refused.push({ idx, result })
+        console.log(`✗ ${flows[idx].name}`)
+        printFailure(result, flows[idx], idx, opts)
+        recorder?.reportFlow(idx, flowReport(result))
+      }
+    }
+
     // Nothing ran, so nothing was tested: a green exit here would pass a CI job that checked no flow at all.
     if (eligible.length === 0) {
       // The report is how CI shows why nothing ran, so it is written on this exit too.
-      if (opts.junit) writeJUnit(opts.junit, toJUnitXml([], skipped))
-      envFail(`no flow ran: ${skipped.length} skipped (${[...skipCounts].map(([reason, n]) => `${reason} ${n}`).join(', ')})`)
+      if (opts.junit) writeJUnit(opts.junit, toJUnitXml(refused.map((r) => r.result), skipped))
+      const reasons = [...skipCounts].map(([reason, n]) => `${reason} ${n}`).join(', ')
+      envFail(`no flow ran: ${[
+        ...(skipped.length > 0 ? [`${skipped.length} skipped (${reasons})`] : []),
+        ...(refused.length > 0 ? [`${refused.length} cannot run on ${platform}`] : []),
+      ].join(', ')}`)
     }
 
     const runReset = opts.reset === false ? undefined : runResetFor(opts, target, eligible.map((i) => flows[i]))
@@ -588,7 +675,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
     if (parallel !== undefined) {
       const { ran, problems } = await runParallel({
         relayUrl, tokens, clientId: client.clientId, opts, flows, eligible,
-        ...(serviceTier ? { serviceTier } : {}), ...(runReset ? { runReset } : {}),
+        ...(serviceTier ? { serviceTier } : {}), ...(runReset ? { runReset } : {}), ...(secrets ? { secrets } : {}),
         admissionTimeoutMs: admissionTimeout * 1000, ...(recorder ? { recorder } : {}), ...(parallelLane ? { lane: parallelLane } : {}),
         workers, cancelled: () => cancelling,
         onLease: (lease) => {
@@ -602,14 +689,16 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       const devices = new Set(ran.map((r) => r.sessionId)).size
       if (opts.junit) {
         const left: SkippedFlow[] = notRun.map((i) => ({ name: flows[i].name, ...(flows[i].file ? { file: flows[i].file } : {}), message: 'not run: no device was left to run it' }))
-        writeJUnit(opts.junit, toJUnitXmlSuites(suitesOf(ran), skipped, left))
+        const suites = suitesOf(ran)
+        if (refused.length > 0) suites.push({ name: `tapflow-flows (cannot run on ${platform})`, results: refused.map((r) => r.result) })
+        writeJUnit(opts.junit, toJUnitXmlSuites(suites, skipped, left))
         console.log(`JUnit report: ${opts.junit}`)
       }
-      const results = ran.map((r) => r.result)
+      const results = [...refused.map((r) => r.result), ...ran.map((r) => r.result)]
       const failed = results.filter((r) => r.status === 'failed')
       sawProductFailure = failed.some((r) => (r.failureKind ?? 'product') !== 'environment')
       console.log(
-        `\n${results.length - failed.length}/${eligible.length} flows passed on ${devices} device${devices === 1 ? '' : 's'}` +
+        `\n${results.length - failed.length}/${eligible.length + refused.length} flows passed on ${devices} device${devices === 1 ? '' : 's'}` +
         `${skipped.length > 0 ? `, ${skipped.length} skipped` : ''}${notRun.length > 0 ? `, ${notRun.length} not run` : ''}`,
       )
       // A flow nobody ran was tested by nobody: that is the environment's failure, as a run that found no device is,
@@ -671,13 +760,15 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       // A passed flow's last screen is evidence for the record; with nothing recording, it would be a screenshot per
       // flow taken for nobody.
       ...(recorder ? { captureLastScreen: true } : {}),
+      ...(secrets ? { secrets } : {}),
+      platform: device.platform,
       onStep: ({ label, ...mark }: Parameters<NonNullable<EngineOptions['onStep']>>[0]) => {
         // Whoever watches the run sees each step as it starts (A2), named without anything it types.
         if (mark.phase === 'start' && label) relay.activity(sessionId, `step ${mark.index + 1}: ${label}`)
         video?.tap.step(mark)
       },
     }
-    const results: FlowResult[] = []
+    const results: FlowResult[] = refused.map((r) => r.result)
 
     for (const flowIndex of eligible) {
       const flow = flows[flowIndex]
@@ -700,6 +791,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       if (result.status === 'failed' && result.failureKind !== 'environment') sawProductFailure = true
       console.log(result.status === 'passed' ? `✓ (${(result.durationMs / 1000).toFixed(1)}s)` : '✗')
       if (result.status === 'failed') printFailure(result, flow, flowIndex, opts)
+      printUnchecked(result)
     }
 
     if (opts.junit) {

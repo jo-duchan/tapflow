@@ -61,6 +61,10 @@
     /* semantic                                                   */
     --destructive: 0 100% 47%;       /* error        #ee0000     */
     --destructive-foreground: 0 0% 100%;
+    --warning: 48 100% 96%;          /* notice box   #fffbeb     */
+    --warning-foreground: 31 85% 25%; /* title, avatar-3 fg       */
+    --warning-border: 48 97% 77%;    /*              #fde68a     */
+    --warning-solid: 40 91% 57%;     /* a line or mark ~#f3b23b   */
 
     /* border / input                                             */
     --border: 0 0% 92%;              /* hairline     #ebebeb     */
@@ -110,6 +114,10 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 70% 62%;        /* shadcn dark — oklch(0.704) 기준 */
     --destructive-foreground: 0 0% 98%;
+    --warning: 31 60% 14%;           /* desaturated like the avatar slots */
+    --warning-foreground: 48 65% 78%; /* avatar-3 fg (dark)       */
+    --warning-border: 31 50% 30%;
+    --warning-solid: 43 96% 60%;     /* lighter to hold on dark   */
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 0 0% 98%;
@@ -157,8 +165,13 @@
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration: 120ms;
   }
-  button:active:not([aria-haspopup]):not(:disabled),
-  [role="button"]:active:not([aria-haspopup]):not(:disabled) {
+  /* Not on a button stretched over its card (`data-stretched`): a transform makes it the containing block of its
+     `::after`, so the press shrank the card-wide target to the label and the release landed off it. The click then
+     went to the card, and only the label selected Flow Capture's Edit rows (measured in Chrome). Nor on one that
+     moves its label itself (`data-press-label`): a line tab's underline marks where the tab is and stays put. A
+     utility cannot undo this rule, whose selector outweighs any `active:` class. */
+  button:active:not([aria-haspopup]):not(:disabled):not([data-stretched]):not([data-press-label]),
+  [role="button"]:active:not([aria-haspopup]):not(:disabled):not([data-stretched]):not([data-press-label]) {
     transform: translateY(1px);
   }
 }

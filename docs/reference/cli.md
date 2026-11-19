@@ -391,6 +391,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | `--exclude-tags <tags>` | — | Skip flows tagged with any of these (comma-separated). Wins over `--include-tags`. |
 | `--parallel <n>` | — | Share the flows across up to `n` devices (1–16) the relay chooses. See below. |
 | `--platform <platform>` | — | The platform of a `--parallel` run without `--build`: `ios` or `android` |
+| `--secret <name>` | — | An environment variable an `inputText: { secret: NAME }` step may type. Repeat it for each. See [Secrets](/automation/flows#secrets). |
 
 With neither `--session` nor `--device`, it uses the booted device when exactly one is booted. With none booted, or more than one, it stops with an environment error.
 

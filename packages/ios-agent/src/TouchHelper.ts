@@ -47,8 +47,13 @@ export class TouchHelper implements InputChannel {
   private ready = false
   private readyTimer: ReturnType<typeof setTimeout> | null = null
   private spawns: number[] = []
+  private readyWaiters: Array<(ready: boolean) => void> = []
   // When the current touch went down, and the up held back until it has lasted `MIN_CONTACT_MS`.
   private touchStartedAt = 0
+  // A single-finger touch is down in `gestureProc`: set when its open is delivered, cleared by its end, its cancel or a
+  // pinch. Not `ownsGesture()`, which stays true after a gesture ended until the next one opens — a cancel written then
+  // would reach a helper with nothing down.
+  private touchDown = false
   private heldEnd: { timer: ReturnType<typeof setTimeout>; resolve: (sent: boolean) => void } | null = null
 
   constructor(
@@ -65,6 +70,7 @@ export class TouchHelper implements InputChannel {
     // A held-back up is answered, not dropped: its caller is waiting on it to ack the tap.
     this.releaseHeldEnd(false)
     this.stopped = true
+    this.settleReadyWaiters(false)
     this.clearReadyDeadline()
     killWithSigkillFallback(this.proc)
     this.proc = null
@@ -76,6 +82,16 @@ export class TouchHelper implements InputChannel {
   // very much alive and must not be replaced, but a frame written to it is dropped on the floor.
   isReady(): boolean {
     return this.isRunning() && this.ready
+  }
+
+  whenReady(): Promise<boolean> {
+    if (this.isReady()) return Promise.resolve(true)
+    if (this.stopped) return Promise.resolve(false)
+    return new Promise((resolve) => this.readyWaiters.push(resolve))
+  }
+
+  private settleReadyWaiters(ready: boolean): void {
+    for (const resolve of this.readyWaiters.splice(0)) resolve(ready)
   }
 
   // Whether the helper process exists with an open pipe — the question a *replacement* decision
@@ -121,6 +137,7 @@ export class TouchHelper implements InputChannel {
     // frame's coordinates), but a frame naming another touch's point is one protocol change from a
     // tap on the wrong target.
     const sent = this.openGesture(this.coordFrame(1, x, y))
+    this.touchDown = sent
     this.lastX = x
     this.lastY = y
     this.touchStartedAt = Date.now()
@@ -134,7 +151,23 @@ export class TouchHelper implements InputChannel {
   }
 
   touchEnd(): boolean {
+    this.touchDown = false
     return this.continueGesture(this.coordFrame(3, this.lastX, this.lastY))
+  }
+
+  /**
+   * Lift the touch as cancelled, so the app does not take it for a tap (#1115). An up held back for the minimum contact
+   * is dropped, not sent: the cancel is the last word on that touch. Ownership goes with it, so the `input:touch:end` a
+   * leaving client sends next writes nothing. The helper sends an up where it cannot cancel (a mouse-path touch), so a
+   * touch is never left down.
+   */
+  touchCancel(): boolean {
+    this.releaseHeldEnd(false)
+    if (!this.touchDown) return false
+    this.touchDown = false
+    const sent = this.continueGesture(this.coordFrame(13, this.lastX, this.lastY))
+    this.gestureProc = null
+    return sent
   }
 
   /**
@@ -188,6 +221,7 @@ export class TouchHelper implements InputChannel {
   }
 
   pinchStart(x1: number, y1: number, x2: number, y2: number): boolean {
+    this.touchDown = false
     return this.openGesture(this.twoFingerFrame(6, x1, y1, x2, y2))
   }
 
@@ -347,6 +381,7 @@ export class TouchHelper implements InputChannel {
           this.ready = true
           tail = ''
           this.clearReadyDeadline()
+          this.settleReadyWaiters(true)
         // Retain only enough to rejoin a marker split across two chunks.
         } else tail = seen.slice(-READY_MARKER.length)
       }

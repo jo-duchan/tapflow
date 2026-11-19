@@ -85,11 +85,80 @@ final class FormViewController: UIViewController, UITextFieldDelegate {
 // MARK: - List
 
 final class ListViewController: UITableViewController {
+    private let scrim = UIView()
+    private let close = UIButton(type: .system)
+    private var decorY: NSLayoutConstraint?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.accessibilityIdentifier = "list.table"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        addLayers()
     }
+
+    /// Three layers over the rows, as the SwiftUI target has them: a label that takes no touches over Row 5, a floating
+    /// button at the bottom right, and the scrim it opens over every row until Close. Pinned to the table's frame, not
+    /// its content, so they stay put while the rows scroll under them.
+    private func addLayers() {
+        let frame = tableView.frameLayoutGuide
+        let decor = UILabel()
+        decor.text = "  Decor  "
+        decor.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.5)
+        decor.layer.cornerRadius = 16
+        decor.clipsToBounds = true
+        decor.isUserInteractionEnabled = false
+        decor.accessibilityIdentifier = "list.decor"
+        let fab = UIButton(type: .system)
+        fab.setImage(UIImage(systemName: "plus"), for: .normal)
+        fab.tintColor = .white
+        fab.backgroundColor = .systemBlue
+        fab.layer.cornerRadius = 28
+        fab.accessibilityLabel = "Add"
+        fab.accessibilityIdentifier = "list.fab"
+        fab.addAction(UIAction { [weak self] _ in Status.shared.tapped("list.fab"); self?.showScrim(true) }, for: .touchUpInside)
+        scrim.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        scrim.accessibilityIdentifier = "list.scrim"
+        scrim.isHidden = true
+        scrim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(scrimTapped)))
+        close.setTitle("Close", for: .normal)
+        close.accessibilityIdentifier = "list.scrim.close"
+        close.isHidden = true
+        close.addAction(UIAction { [weak self] _ in Status.shared.tapped("list.scrim.close"); self?.showScrim(false) }, for: .touchUpInside)
+        for v in [decor, fab, scrim, close] as [UIView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            tableView.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            decor.centerXAnchor.constraint(equalTo: frame.centerXAnchor),
+            decor.heightAnchor.constraint(equalToConstant: 44),
+            fab.widthAnchor.constraint(equalToConstant: 56), fab.heightAnchor.constraint(equalToConstant: 56),
+            // The safe area, not the frame: the table runs under the tab bar, which would cover the button.
+            fab.trailingAnchor.constraint(equalTo: tableView.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            fab.bottomAnchor.constraint(equalTo: tableView.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            scrim.topAnchor.constraint(equalTo: frame.topAnchor), scrim.bottomAnchor.constraint(equalTo: frame.bottomAnchor),
+            scrim.leadingAnchor.constraint(equalTo: frame.leadingAnchor), scrim.trailingAnchor.constraint(equalTo: frame.trailingAnchor),
+            close.centerXAnchor.constraint(equalTo: frame.centerXAnchor), close.centerYAnchor.constraint(equalTo: frame.centerYAnchor),
+        ])
+        decorY = decor.centerYAnchor.constraint(equalTo: frame.topAnchor)
+        decorY?.isActive = true
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 40% down, as the SwiftUI target places it: over Row 5 or so, never over Row 0.
+        decorY?.constant = tableView.frame.height * 0.4
+        // Cells are added as they scroll in, above anything added before them: the layers go back on top.
+        for id in ["list.decor", "list.fab", "list.scrim", "list.scrim.close"] {
+            if let v = tableView.subviews.first(where: { $0.accessibilityIdentifier == id }) { tableView.bringSubviewToFront(v) }
+        }
+    }
+
+    private func showScrim(_ shown: Bool) {
+        scrim.isHidden = !shown
+        close.isHidden = !shown
+    }
+
+    @objc private func scrimTapped() { Status.shared.tapped("list.scrim") }
 
     // Fifty rows so the list runs past the screen: rows that are not on screen are not loaded, and the
     // measurement records whether the tree reports them anyway.
@@ -175,6 +244,72 @@ final class HardViewController: UIViewController {
     @objc private func textTapped() { Status.shared.tapped("hard.text") }
 }
 
+// MARK: - Gestures
+
+/// What a flow's `longPressOn` and `pinch` steps act on. Plain views with identifiers, like `CustomControl`. A quick
+/// tap and a long press on the hold area say different things, so a long press that arrived as a tap shows as one.
+final class GesturesViewController: UIViewController {
+    // Which way the app itself is drawn — what a flow's `setOrientation` should leave — read from the view's own size,
+    // so a portrait-locked build stays portrait on a turned device.
+    private let orientation = UILabel()
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        orientation.text = view.bounds.width > view.bounds.height ? "orientation:landscape" : "orientation:portrait"
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        orientation.textAlignment = .center
+        orientation.accessibilityIdentifier = "gesture.orientation"
+
+        let hold = UILabel()
+        hold.text = "Hold me"
+        hold.textAlignment = .center
+        hold.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.2)
+        hold.isUserInteractionEnabled = true
+        hold.accessibilityIdentifier = "gesture.hold"
+        hold.heightAnchor.constraint(equalToConstant: 64).isActive = true
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        press.minimumPressDuration = 0.5
+        hold.addGestureRecognizer(press)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(holdTapped))
+        tap.require(toFail: press)
+        hold.addGestureRecognizer(tap)
+
+        // Judged once the fingers lift, by which way the scale went, so how far a pinch spread does not matter.
+        let zoom = UIView()
+        zoom.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.2)
+        zoom.accessibilityIdentifier = "gesture.zoom"
+        zoom.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
+
+        let stack = UIStackView(arrangedSubviews: [orientation, hold, zoom])
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+        ])
+    }
+
+    @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+        if recognizer.state == .began { Status.shared.tapped("gesture.hold.long") }
+    }
+
+    @objc private func holdTapped() { Status.shared.tapped("gesture.hold.short") }
+
+    @objc private func pinched(_ recognizer: UIPinchGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        if recognizer.scale > 1.2 { Status.shared.tapped("gesture.zoom.in") }
+        else if recognizer.scale < 0.8 { Status.shared.tapped("gesture.zoom.out") }
+    }
+}
+
 // MARK: - Web
 
 final class WebViewController: UIViewController, WKScriptMessageHandler {
@@ -208,7 +343,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler {
 /// The status label sits above the tab bar controller, so it is on screen whichever tab is selected.
 final class RootViewController: UIViewController, UITabBarControllerDelegate {
     private let tabs = UITabBarController()
-    private let tabIds = ["tab.form", "tab.list", "tab.hard", "tab.web"]
+    private let tabIds = ["tab.form", "tab.list", "tab.hard", "tab.web", "tab.gestures"]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -219,6 +354,7 @@ final class RootViewController: UIViewController, UITabBarControllerDelegate {
             (ListViewController(style: .plain), "List", "list.bullet"),
             (HardViewController(), "Hard", "exclamationmark.triangle"),
             (WebViewController(), "Web", "globe"),
+            (GesturesViewController(), "Gestures", "hand.tap"),
         ]
         tabs.viewControllers = screens.enumerated().map { index, screen in
             let (vc, title, symbol) = screen
@@ -227,6 +363,10 @@ final class RootViewController: UIViewController, UITabBarControllerDelegate {
             return vc
         }
         tabs.delegate = self
+        // What a flow's `pressButton: home` leaves behind, read once the app is brought back.
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            Status.shared.tapped("app.background")
+        }
 
         let status = Status.shared.label
         status.translatesAutoresizingMaskIntoConstraints = false

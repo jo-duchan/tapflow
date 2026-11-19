@@ -90,5 +90,5 @@ Figma file does not grow a second divider.
 
 ## Figma
 
-Component set **Separator** in the `Design System` page — `orientation` × 2. The value names were not checked
-against this spec.
+Component set **Separator** (`1:2564`) on the `Data display` page of tapflow-design-system — `orientation` × 2. The
+names match this spec.

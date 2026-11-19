@@ -40,32 +40,39 @@ steps:
 | `name` | No | Name shown in reports. Defaults to the file name. |
 | `appId` | Conditional | Bundle id of the app under test. Required when `clearState` is used without an argument. With `--build`, it is compared with that build's bundle id ([Choosing flows](#choosing-flows)). |
 | `tags` | No | A list of tags. Use them to pick flows with `--include-tags` and `--exclude-tags`. A tag cannot contain a comma. |
+| `viewport` | No | The screen size the flow's points were made on, `{ width, height }` (iOS in points, Android in pixels). A device of another size does not run the point steps. See [Tapping a point](#tapping-a-point). |
 | `steps` | Yes | The list of steps, run top to bottom. |
 
-Coordinates are normalized 0–1 everywhere. Selectors point at screen elements directly, so you will rarely write pixel coordinates into a flow.
+Coordinates are normalized 0–1 everywhere. Selectors point at screen elements directly, so you will rarely write pixel coordinates into a flow. Coordinates are measured on the screen as the app draws it. When the app is drawn in landscape, `[0.5, 0.1]` is the top center of the landscape screen.
 
 ## Steps
 
-The vocabulary is deliberately small. These ten cover most scenarios.
+The vocabulary is deliberately small. These steps cover most scenarios.
 
 | Step | Form | Behavior |
 |------|------|----------|
 | `clearState` | keyword or `clearState: <bundleId>` | Resets the app data. The keyword form uses the top-level `appId`. |
 | `launchApp` | keyword or `launchApp: { arguments, env }` | Launches the build under test and waits for its screen to settle: the role, label and id of every UI tree element unchanged for a second, so a splash screen is not taken for the first screen. A screen with no UI tree elements, such as a game, moves on after that second too. A screen whose labels keep changing moves on 3 seconds after it was first read, and one that cannot be read at all after the default per-selector wait. The wait never fails the step. A splash that stays unchanged for longer than a second can still be taken for the first screen. To pass launch arguments, see [Launch arguments](#launch-arguments). |
-| `tapOn` | selector | Taps the center of the matched element. |
-| `inputText` | string | Types text into the focused input field. |
-| `pressKey` | key name | Presses a keyboard key (`Enter`, `Backspace`, `Escape`, …). |
+| `tapOn` | selector or `[x, y]` | Taps the matched element where the device says a touch reaches it ([Where a touch lands](#where-a-touch-lands)), or a point. See [Tapping a point](#tapping-a-point). With an `expect` beside it, checks that the screen changes as it says after the tap ([Expected effects](#expected-effects)). |
+| `inputText` | string, `{ text, replace: true }` or `{ secret: NAME }` | Types text into the focused input field. With `replace: true` the text replaces what the field holds instead of being added to it; on Android that needs Android 13 or later, and an older device fails the step. For a value that must not be written in the flow file, such as a password, see [Secrets](#secrets). |
+| `pressKey` | key name or `{ code, modifiers }` | Presses a keyboard key (`Enter`, `Backspace`, `Escape`, …). For a key combination, list the keys to hold from `shift`, `ctrl`, `alt` and `meta`, as in `{ code: ArrowLeft, modifiers: [shift] }`. On Android the only letter keys that take `ctrl` or `meta` are A, C, V and X (A from Android 13), and `alt` does not apply to letter keys. |
+| `imeAction` | keyword | Presses the focused field's own action, the key at the corner of the on-screen keyboard: Done, Next, Search or Go. Use it rather than `pressKey: Enter` when the app acts on that key, since an Android app that checks which action it received ignores Enter. Android 11 or later. |
 | `swipe` | `{ from, to, durationMs? }` | Swipes between two points. Coordinates are 0–1. `durationMs` is milliseconds as a number, default 300, max 2147483647. Fractional values (e.g. 250.5) are accepted. |
-| `scroll` | keyword or `scroll: <direction>` | Scrolls the screen. The bare keyword scrolls down. |
+| `scroll` | keyword, `scroll: <direction>` or `{ direction, until }` | Scrolls the screen. The bare keyword scrolls down. With `until`, it scrolls until that element is on screen. See [Scrolling to an element](#scrolling-to-an-element). |
 | `openUrl` | URL string | Opens a deep link or URL. |
 | `assertVisible` | selector | Waits until the element appears; fails if it does not. |
 | `assertNotVisible` | selector | Waits until the element disappears; fails if it does not. |
+| `pressButton` | button name | Presses a hardware button. See [Hardware buttons](#hardware-buttons). |
+| `longPressOn` | selector, `[x, y]` or `{ on, durationMs? }` | Presses the matched element where a touch reaches it, or a point, and holds it, 1000 ms by default, at most 60000. To change the time, put the selector or point under `on`. Takes an `expect` as `tapOn` does. |
+| `pinch` | `{ on, scale, durationMs? }` | Two fingers about the center of an element or a point. See [Pinch](#pinch). |
+| `setOrientation` | `portrait` or `landscape` | Turns the device upright or sideways. See [Orientation and posture](#orientation-and-posture). |
+| `setPosture` | `folded` or `unfolded` | Folds or unfolds a foldable device. See [Orientation and posture](#orientation-and-posture). |
 
 There is no fixed `sleep` step. Waiting is always condition-based. To wait for a transition, give `assertVisible` a `timeout`.
 
 ### Selectors
 
-`tapOn`, `assertVisible`, and `assertNotVisible` target an element with a selector, which takes three forms.
+`tapOn`, `assertVisible`, `assertNotVisible`, `longPressOn` and the `on` of `pinch` target an element with a selector, which takes three forms.
 
 ```yaml
 # a single string — resolved in the order below
@@ -82,11 +89,14 @@ There is no fixed `sleep` step. Waiting is always condition-based. To wait for a
 
 # a label-less row: pick the Nth of its kind (0-based)
 - tapOn: { role: cell, index: 2 }
+
+# check a value: the whole label must match, never one that contains it
+- assertVisible: { label: "Total $32.00", exact: true }
 ```
 
 A bare-string selector resolves in the order **exact identifier → exact label → partial label → exact placeholder**. Once a stage matches, later stages are not tried.
 
-A placeholder is the hint text an empty input field shows. An input field with neither a label nor an identifier can be found by its placeholder. Because the placeholder is the last stage, an element whose label is the same text matches first. A placeholder never matches in part. On iOS the field can still be found by its placeholder after a value is typed into it. A `label:` selector looks at labels only.
+A placeholder is the hint text an empty input field shows. An input field with neither a label nor an identifier can be found by its placeholder. Because the placeholder is the last stage, an element whose label is the same text matches first. A placeholder never matches in part. On iOS the field can still be found by its placeholder after a value is typed into it. Android's UI tree carries no placeholder, so on Android this stage never matches. A `label:` selector looks at labels only. When no label is exactly the same, `label:` falls back to a label that contains the text; add `exact: true` to match only an element whose whole label is the same. Use it to check a value such as a total or a count: without it, "Total $32.00" also passes on "Total $32.001". `exact` takes a `label` and nothing else.
 
 If a `tapOn` selector matches more than one element, it fails immediately and lists the candidates. It never picks the first one implicitly, so an ambiguous selector fails visibly instead of quietly tapping the wrong place. `assertVisible` checks presence only, so it passes when at least one element matches.
 
@@ -100,6 +110,164 @@ To resolve an ambiguous match, add a disambiguator to the object form:
 The object form needs at least one of `id`, `label`, or `role`; `role`/`index` refine that set.
 
 `timeout` is in seconds and defaults to 10 (max 2147483.647, about 24.8 days). You can set it per selector. Values that round to 0ms (e.g. 0.0004s) are rejected.
+
+### Scrolling to an element {#scrolling-to-an-element}
+
+How far one swipe scrolls differs from run to run: a list travels further or less depending on the speed at release and on the platform. When you need a row further down a list, name the element to reach with `until` instead of counting swipes.
+
+```yaml
+- scroll: { until: "Row 16" }
+- scroll: { direction: up, until: { id: "header" } }
+- tapOn: "Row 16"
+```
+
+- The screen is read first, and nothing is scrolled when the element is already in view.
+- An element cut by the edge the list scrolls in from has not arrived yet: the bottom edge when you scroll down. A tap on its center can land on a tab bar drawn over it, so the step scrolls once more.
+- An element inside the screen has not arrived either while the device says a touch at its center would not reach it, as with a row that slid under a tab bar and still reads whole in the UI tree. The step scrolls once more. A device that cannot judge leaves it to the screen's edges, as before.
+- While it searches, the step drags and holds still for a moment before lifting. The list then does not glide on: each scroll moves it as far as the finger moved (40% of the screen up or down), so a search step does not glide on past the element. A list seen through a region shorter than that step can still be stepped past. A long list takes longer than flinging would. When two scrolls in a row move nothing (a pager snaps a held drag back to its page), the next scroll is a fling. On Android, when the emulator's touch channel is down and touches go through adb, every scroll is a fling.
+- The wait is the `until` selector's `timeout`. Without one it is 60 seconds or the run's default wait (`--timeout`), whichever is longer. An emulator takes over 2 seconds to read the screen once, so the default selector wait would allow only a few scrolls.
+- When three scrolls in a row move nothing, the step takes it as the end of the list. Text that changes by itself, such as a clock or a countdown, does not count as movement: when a scroll changed the screen and nothing on it moved, the step keeps reading without scrolling, and counts a part of the screen as changing on its own only when it changes in two of those readings in a row. A "Loading…" placeholder replaced by rows changes once and stops, so it counts as the scroll's doing. At the end, the step passes if the element is on screen, even cut, and the device can reach its centre, and fails if it is not there or is covered. A cut element that stays put for two scrolls, such as a button fixed to the bottom, also counts as arrived when the device can reach its centre; if nothing else on the screen moved either, the step first tries a fling, since a pager may have snapped the drags back.
+- A screen that scrolls one long text filling the screen, with nothing else moving, reads as unchanged and can be taken for the end of the list. A list that loads more items at its end must show them within two reads of the screen (2–5 seconds).
+
+### Holding an element {#holding-an-element}
+
+A bare `longPressOn` holds for 1000 ms, which is past the point where both platforms read a press as a long press. To hold for a different time, put the selector under `on`:
+
+```yaml
+- longPressOn: "Message"
+- longPressOn: { on: "Message", durationMs: 2500 }
+- longPressOn: { on: { id: "row-3" }, durationMs: 2500 }
+```
+
+On an Android device streaming over the adb fallback, a hold needs android-agent from the same release. An older agent delivers it as a tap and still reports success, so follow `longPressOn` with an assertion on what the hold opens.
+
+`durationMs` goes beside the selector, never inside it. `{ label: "Message", durationMs: 2500 }` is refused, because turning a bare string into `label:` would also change how it matches: `label:` does not look at identifiers.
+
+### Tapping a point {#tapping-a-point}
+
+A place the UI tree has no name for (a game, a map, a canvas) cannot be reached with a selector. Give a point instead. Points are 0–1 on the screen as the app draws it, so on a landscape screen they are landscape.
+
+```yaml
+- tapOn: [0.42, 0.61]
+- longPressOn: { on: [0.5, 0.5], durationMs: 1500 }
+```
+
+A point is the last resort. It does not wait for anything to appear, only for the elements on the screen to stop moving as the UI tree reports them (at most 3 seconds; motion drawn inside one element, such as a game's, is not seen), and a different screen size or layout puts it somewhere else. The same wait comes before every `swipe`, a plain `scroll`, and a `longPressOn` or `pinch` on a point. A tap meant to stop a moving list therefore lands after the list has stopped. Use a selector wherever one reaches the element, and put an `assertVisible` before a point tap to check the screen is the one you expect.
+
+Nothing can check what is under a point, so its step is recorded as `delivered`. With a top-level `viewport`, a device of another size is refused before the first step as an environment failure (exit code `2`). A device held either way counts as the same size. Flow Capture writes the size of the device Verify ran on into a flow that has point steps.
+
+```yaml
+viewport: { width: 402, height: 874 }
+steps:
+  - launchApp
+  - tapOn: [0.42, 0.61]
+```
+
+### Where a touch lands {#where-a-touch-lands}
+
+`tapOn`, `longPressOn` and a `pinch` on a selector do not press the center of the element's frame. They first ask the device where on the element a touch reaches it, and press there. When a tab bar, a floating button or a translucent scrim covers part of the element, the visible part is pressed. The same point has to come back twice in a row, so a list still settling from a scroll is waited for.
+
+- An element wholly covered by another that takes touches is checked again until the selector's `timeout`, then the step fails with `is covered by …: a touch on it would land on that instead`.
+- An element off the screen, or one that keeps moving, fails the step saying so.
+- iOS uses XCUITest's judgement and Android the drawing order of the accessibility tree. On Android, an element covered only by elements not marked as taking touches cannot be judged.
+- When the device cannot judge (older agents and relays included), the center is pressed as before and the step is recorded `unchecked`. `tapflow flow run` says so even under a flow that passed, as `! 1 touch not checked to land on its element (…)`, and [Flow Runs](/automation/runs) and Verify show the same.
+
+An overlay with no accessibility information is invisible to this judgement on both platforms, such as a translucent scrim built from a UIView that is not an accessibility element. A tap it takes still counts as reaching the element. [Expected effects](#expected-effects) below catch such a tap. Give an overlay that blocks touches an accessibility identifier, and the device can then judge what it covers.
+
+### Expected effects {#expected-effects}
+
+A tap that landed elsewhere, or one a hidden overlay took, was sent but changed nothing. With `expect` beside `tapOn` or `longPressOn`, the run checks that the screen changes as it says after the touch.
+
+```yaml
+- tapOn: "Save"
+  expect:
+    appear:
+      - { text: "Saved", role: text }
+    gone:
+      - { id: "save.button" }
+- tapOn: { id: "wifi" }
+  expect:
+    appear: [{ id: "wifi", checked: true }]
+```
+
+- Every element under `appear` must be shown, and none under `gone` may remain. The screen is read again for the default selector wait (10 seconds), then the step fails as the product's, naming what was missing.
+- A screen that already looked that way before the touch fails the step, because nothing shows the touch did anything. That keeps data left by an earlier run from passing it.
+- An element is named by `id` or `text`, narrowed by `role`, `checked` (a switch or checkbox that is on) and `selected`. `text` must equal the label exactly.
+- Flow Capture writes `expect` from what both Match's replay and Verify's run saw a touch do. Seen twice minutes apart, a number that changes by itself usually reads differently. A touch Match did not watch keeps what Verify saw: a tap the dialog added, or any tap after a Match that was stopped partway.
+- It leaves out input fields, password fields, keyboard keys and labels holding a secret's value, and text that changes by itself: a time, a date, a number of four digits or more, a time such as "5 min ago" or "250ms", a label that is only a number and has no identifier, a count such as "41 items" whose number the touch moved, and text whose number changed in the 1.5 seconds after the screen settled. Text that shows nothing is left out too, such as an icon drawn by an icon font (a box in any other font) or a zero-width space; such an element is named by its identifier if it has one. It picks elements with an identifier and near the top of the screen first, up to 4 of each.
+- A step without `expect` is not checked. A flow you write by hand can go on checking results with `assertVisible`.
+- A flow with `expect` cannot be read by a `tapflow` from before this feature. Update the `tapflow` your CI runs it with as well.
+
+### Secrets {#secrets}
+
+Type a value that must not be written in the flow file, such as a password, by name:
+
+```yaml
+- tapOn: { id: "password" }
+- inputText: { secret: PASSWORD }
+```
+
+Pass the value with `--secret` when you run `tapflow flow run`. It is read from the environment variable of the same name.
+
+```sh
+PASSWORD=hunter2 tapflow flow run .tapflow/flows/login.yaml --secret PASSWORD
+```
+
+- Only the names given with `--secret` are read. The environment holds other secrets too, such as the relay token, so changing a flow file alone cannot type one of them into the app.
+- The value appears in no run record, JUnit report or step name. The step is named `inputText(secret PASSWORD)`.
+- A flow that uses a secret the run was not given stops the run with an environment error before a device is chosen. So does a `--secret` whose environment variable is not set or is empty, since CI passes a secret it does not have as an empty value.
+- `run_flow` over MCP is given no secrets, so it does not run a flow with this step.
+
+### Pinch {#pinch}
+
+`pinch` puts two fingers on either side of a center and changes the space between them by `scale`. A `scale` above 1 spreads them apart, which zooms in. Below 1 brings them together, which zooms out. It takes any value from 0.1 to 10 except 1.
+
+```yaml
+- pinch: { on: "Map", scale: 2 }               # zoom in on the element's center
+- pinch: { on: [0.5, 0.4], scale: 0.5 }        # zoom out about a point (0–1)
+- pinch: { on: "Photo", scale: 3, durationMs: 800 }
+```
+
+`on` is a selector or a point. A point is for a screen with nothing in the UI tree to name, such as a map or a canvas. The gesture takes 500 ms by default, at most 60000.
+
+The `scale` is kept exactly and the space between the fingers is what adapts. The fingers spread along whichever axis has more room, and they stay inside the screen. When the center is so close to a corner that even the narrowest spacing does not fit, the step fails and says so.
+
+An Android device streaming over the adb fallback, without a gRPC or scrcpy pointer channel, cannot pinch. The step then fails as an environment failure, not as a failure of the app: the run exits with code 2 unless another flow failed in the app, which makes it 1.
+
+### Hardware buttons {#hardware-buttons}
+
+`pressButton` takes a button name.
+
+| Name | iOS | Android |
+|------|-----|---------|
+| `home` | Yes | Yes |
+| `lock`, `power` | When the device has a power button | Yes (the power key) |
+| `volume_up`, `volume_down` | When the device has volume buttons | Yes |
+| `back`, `recent_apps` | No | Yes |
+
+On iOS, any other button the device's frame declares can be pressed by its name as well, such as `action`.
+
+A flow that presses a button the device lacks fails before its first step, instead of running on to fail one step later at an assertion that would not explain why. When `flow run` knows the platform before it picks a device, from the build in `--build` or from `--platform` with `--parallel`, the flow fails without a device being booted for it, and the other flows still run. A button that depends on the device, such as `lock` on iOS, is checked against the device before the first step. Either way the failure is an environment failure, since the app was never tested: the run exits with code 2 unless another flow failed in the app, which makes it 1. On iOS, use the app's own back control with `tapOn` instead of `back`, or tag the flow and run it only where the button exists.
+
+### Orientation and posture {#orientation-and-posture}
+
+`setOrientation` turns the device to `portrait` or `landscape`. `setPosture` folds a foldable device (`folded`) or opens it (`unfolded`).
+
+```yaml
+- setOrientation: landscape
+- assertVisible: "Landscape layout"
+- setOrientation: portrait
+- setPosture: folded
+- setPosture: unfolded
+```
+
+Both steps wait until the device reports that it is in the requested state. When it already is, they send nothing. If the report does not arrive within the default per-selector wait (`--timeout`, 10 seconds by default), the step ends as an environment failure.
+
+With `landscape`, the device turns to whichever of its two sideways directions it picks. An app locked to portrait is still drawn upright after the device turns, so check the screen after a turn with `assertVisible`. Selectors and coordinates after a turn are measured on the screen as the app draws it. A step that takes only coordinates (`swipe`, `scroll`, `pinch` on a point) reads the app's orientation from the last UI tree it read. If someone turns the device from the dashboard while a flow runs, those steps are placed by the previous orientation until the next tree read.
+
+A foldable on Android 15 or later puts up a "Swipe up to continue" lock screen when it folds. The agent takes it down, so the steps after a fold see the app. A device that was locked before the fold, or one with a PIN, pattern or password, is left locked, so do not set a secure lock on a device you run flows on.
+
+A step the device cannot do ends as an environment failure. `setPosture` fails this way on a device that does not fold. `setOrientation` fails this way on a device that does not report which way it is held: an iOS device with more than one panel, or an Android device streaming over scrcpy without gRPC. With `--parallel`, the worker does not leave the device over this failure, because other flows still run fine on it.
 
 ### Resetting state
 

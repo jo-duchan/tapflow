@@ -132,14 +132,14 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
 | `screenshot` | Capture the current screen (PNG, or JPEG on iOS when requested) |
 | `query_ui_tree` | Read the on-screen UI as a structured accessibility tree (role, label, identifier, frame) |
-| `tap` | Tap at a coordinate |
+| `tap` | With `element` (an identifier or label from `query_ui_tree`), tap where the device says it reaches that element, so a tab bar or a sheet over its frame's centre is not what gets tapped; an element something covers fails, naming what covers it. Where the tree names nothing, tap a screenshot coordinate. With `holdMs`, press and hold (a long press); on Android's adb fallback this needs a current agent, see [Holding an element](/automation/flows#holding-an-element) |
 | `swipe` | Swipe between two coordinates |
 | `type_text` | Type text into the focused field |
 | `press_key` | Press a keyboard key |
 | `press_button` | Press a hardware button (home, lock, etc.) |
 | `install_app` | Install an app |
 | `launch_app` | Launch an installed app. `arguments` and `env` pass [launch arguments](/automation/flows#launch-arguments). The result's `applied` names the keys the app received, [launch defaults](/reference/configuration#launch-defaults) included |
-| `run_flow` | Replay a YAML flow deterministically (no further LLM calls) |
+| `run_flow` | Replay a YAML flow deterministically (no further LLM calls). Also how a coding agent pinches, turns or folds the device: a [`pinch`](/automation/flows#pinch), [`setOrientation` or `setPosture`](/automation/flows#orientation-and-posture) step |
 | `list_runs` | List the run records `tapflow flow run` left on the relay (filter by status, build, flow name, CI or local) |
 | `get_run` | Read one run record: each failed flow's steps (a passed flow's step count), failure message and file path, and screenshots of up to four failed flows |
 | `get_testing_guide` | How to test a mobile feature with these tools: cases to cover, what cannot be tested here, how to avoid false bugs, how to save a verified flow, and the report format |

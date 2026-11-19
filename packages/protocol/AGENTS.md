@@ -50,6 +50,30 @@ The cost of a broad name is ambiguity about what belongs — answered by the two
     correlated request set is `scripts/__tests__/correlatedRequestsGated.test.mjs`'s job, because
     nothing else compares the two.
 
+- **Which hardware buttons a platform can press** lives in `src/buttons/`, reached as
+  `@tapflowio/protocol/buttons`: Android's closed map, iOS's aliases onto chrome button names, and
+  `buttonAvailability`. Both agents read it and so does flow-runner, which refuses a flow pressing a
+  button the device lacks before it runs. Here rather than in either agent for the reason the package
+  exists — two copies of "which buttons exist" drift, and the drift would be a flow refused where it works
+  or let through where the agent presses nothing.
+
+- **Which way a screen is turned** lives in `src/screen/`, reached as `@tapflowio/protocol/screen`:
+  `chromeOrientation` reads portrait or landscape off a device's chrome, and `toFramePoint` carries a point
+  from the app's interface onto the portrait framebuffer a touch is sent on, by the tree response's
+  `interfaceTurn`. flow-runner and mcp-server both read it, because the two drivers place touches from the
+  same tree and a second copy of the transform would let them disagree about where a landscape tap lands.
+  `interfaceTurn` is the **app's** turn, not the device's: measured, a portrait-locked app on a device held
+  sideways reports turn 0, and a device-based transform would move every tap on it. Its skew is the
+  add-a-member case below: an older agent or relay omits the field, and every consumer reads absence as
+  no turn, which is what it did before the field existed.
+
+- **Flow Capture's record** lives in `src/capture/`, reached as `@tapflowio/protocol/capture`, types only: the
+  entries the relay keeps and returns from the capture snapshot route. A REST body rather than a message, here because
+  the relay writes it and flow-runner's capture module reads it. `CapturedMessage` is derived from `BrowserToRelay`,
+  not from `./validate`'s parse product, so the readers' type graph does not reach the relay-only validator. Its
+  `field` entries come from `ui:field:request`/`ui:field:response` (#1135), a pair the relay makes and consumes and
+  **never forwards**: the answer is the field's whole contents, what the person typed and any text the app or AutoFill put there. `FocusedField.value` is absent on a secure field.
+
 - **The connection handshake's query parameters**, as prose rather than types — see
   [Connection handshake](#connection-handshake--what-the-upgrade-url-carries). No message carries them, but a
   client written outside this repo needs them as much as it needs the messages (#581).
@@ -282,6 +306,16 @@ Five requests carry a required `requestId`: the four terminal frames (`input:tou
 **Opening and move frames carry none, and neither does `input:rotate` or `input:posture`.** Nothing acks them
 (`ios-agent/AGENTS.md`: *"Opening frames stay silent: they carry no ack obligation"*), so an id there would
 name a waiter that does not exist. `input:keyboard:toggle` is out for a different reason — see below.
+
+**`input:touch:cancel` is a terminal frame with no correlator, and that is not a contradiction** (#1115). Only a
+client leaving the session sends it, so nothing is left to wait on it; it is followed by an `input:touch:end`,
+which is answered. That pairing is also the skew answer, by the rule in *Changing what a value means*: an agent that
+cancels injects nothing for the end, and one that predates the message (or a relay that drops it as an unknown type)
+completes the gesture with the end, as before — on the device no combination is worse than today, so no client
+needs a marker.
+The one reader that does need to know is the relay's watcher feed, which would otherwise show that end as a tap: it
+asks for the agent's `touch-cancel` capability. There is no pinch cancel: a pinch is applied by its moves, and scrcpy
+keeps the pointers a cancel leaves.
 
 **Required on both sides, unlike the lifecycle pair**, and the discriminator is the one this file already
 uses: no producer of these four replies sends one unsolicited. `ackInput` on both agents fires on terminal

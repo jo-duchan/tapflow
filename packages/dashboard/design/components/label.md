@@ -61,7 +61,8 @@ renders. Do not draw a disabled Label; a disabled field is shown by its control 
   `htmlFor`. Give it an `id` and point the control at it with `aria-labelledby`, as `VideoStorageCard` does.
   A label with neither names nothing. That is fine when the control carries its own name — the avatar and logo
   pickers' buttons have `aria-label` ("Change avatar"), so their Label is a visible heading only. It is a gap
-  when the control has no other name: `UploadBuildDialog`'s File and Status labels name nothing today.
+  when the control has no other name. `UploadBuildDialog` associates File with its picker button and Status
+  with its select trigger.
 - Above a control the label sits in the field assembly: `Label` + control + `FieldHint` or error, `gap-2` (28 of
   33). The outliers are `AddAppDialog` (`gap-1.5`, 3) and `VideoStorageCard` (`gap-3`, 2, where the label shares
   a row with the slider's value). See [field.md](./field.md).
@@ -70,6 +71,5 @@ renders. Do not draw a disabled Label; a disabled field is shown by its control 
 
 ## Figma
 
-Component set **Label** (`103:559`) in the `Design System` page — `hint` × `state`. The `state` axis there has
-a disabled value that code never renders (see above), so its disabled variants can be removed. The Figma
-value names for `hint` were not checked against this spec.
+Component set **Label** (`1:2635`) on the `Forms` page of tapflow-design-system — `hint` × 2, named as in this spec.
+There is no disabled variant.

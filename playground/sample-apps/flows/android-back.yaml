@@ -1,0 +1,7 @@
+# Android's back button, which iOS does not have: on iOS this flow fails before it runs, as an environment failure.
+name: Android back
+steps:
+  - launchApp
+  - tapOn: "Gestures"
+  - pressButton: back
+  - assertVisible: "tapped:app.back"

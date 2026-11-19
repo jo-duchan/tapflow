@@ -53,7 +53,7 @@ describe('a rebind settles only the boots its old agent was supposed to answer (
     agent.send(JSON.stringify({
       type: 'agent:register',
       agentId, agentName: 'the-mac', platform: 'ios',
-      devices,
+      devices, capabilities: ['keyboard-set', 'run-reset'],
     }))
     const reply = await waitForType<AgentRegistered>(agent, 'agent:registered')
     const byDevice = new Map(reply.registeredSessions.map((r) => [r.deviceId, r.sessionId]))
@@ -115,6 +115,37 @@ describe('a rebind settles only the boots its old agent was supposed to answer (
     expect(seen.indexOf('session:rebound')).toBeLessThan(seen.indexOf('device:boot-error'))
 
     first.agent.close(); second.agent.close(); browser.close()
+  })
+
+  // #1139: a replay's run reset and keyboard set are stranded the same way, and the reset's waiter is minutes long.
+  it.each([
+    ['device:run-reset', { apps: ['com.app'] }, 'device:run-reset-error'],
+    ['device:keyboard-set', {}, 'device:keyboard-set-error'],
+  ])('fails a %s dispatched to the old agent, with its correlator', async (type, payload, errorType) => {
+    const first = await register([DEV_A])
+    const sessionId = first.byDevice.get('devA')!
+    const browser = await join(sessionId)
+    browser.send(JSON.stringify({ type, sessionId, requestId: 'rq-prep', payload }))
+    expect((await waitForType<{ type: string; requestId: string }>(first.agent, type)).requestId).toBe('rq-prep')
+    const second = await register([DEV_A])
+    await waitForType<SessionRebound>(browser, 'session:rebound')
+    const err = await waitForType<{ type: string; requestId: string; message: string }>(browser, errorType)
+    expect(err.requestId).toBe('rq-prep')
+    expect(err.message).toMatch(/rebound/)
+    first.agent.close(); second.agent.close(); browser.close()
+  })
+
+  it('forgets a run reset its agent answered, so a later rebind answers nothing for it', async () => {
+    const first = await register([DEV_A])
+    const sessionId = first.byDevice.get('devA')!
+    const browser = await join(sessionId)
+    browser.send(JSON.stringify({ type: 'device:run-reset', sessionId, requestId: 'rq-done', payload: { apps: [] } }))
+    await waitForType(first.agent, 'device:run-reset')
+    expect(pendingBootCount()).toBe(1)
+    first.agent.send(JSON.stringify({ type: 'device:run-reset-done', sessionId, requestId: 'rq-done', report: { done: [], failed: [] } }))
+    await waitForType(browser, 'device:run-reset-done')
+    expect(pendingBootCount()).toBe(0)
+    first.agent.close(); browser.close()
   })
 
   it('lets a boot dispatched to the new agent after the rebind complete, unrejected', async () => {

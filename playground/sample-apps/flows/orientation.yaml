@@ -1,0 +1,22 @@
+# setOrientation, and the steps after it placed in the app as it is drawn: on iOS the tree is read in the turned
+# interface while touches land in the portrait framebuffer, so a tap that is not turned misses (the reason the
+# turn exists). The same YAML on every sample app. Run with --build.
+name: Orientation
+steps:
+  - launchApp
+  - tapOn: "Gestures"
+  - setOrientation: landscape
+  - assertVisible: "orientation:landscape"
+  # A coordinate step right after the turn: the app's turn must already be read, or this pinch lands sideways.
+  - pinch: { on: [0.44, 0.6], scale: 0.5 }
+  - assertVisible: "tapped:gesture.zoom.out"
+  - tapOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.short"
+  - longPressOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.long"
+  - pinch: { on: { id: gesture.zoom }, scale: 2 }
+  - assertVisible: "tapped:gesture.zoom.in"
+  - setOrientation: portrait
+  - assertVisible: "orientation:portrait"
+  - tapOn: { id: gesture.hold }
+  - assertVisible: "tapped:gesture.hold.short"

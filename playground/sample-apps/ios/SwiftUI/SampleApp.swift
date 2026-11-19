@@ -22,6 +22,7 @@ struct SampleApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var status: Status
+    @Environment(\.scenePhase) private var phase
     @State private var tab = "tab.form"
 
     var body: some View {
@@ -42,11 +43,16 @@ struct RootView: View {
                 WebScreen()
                     .tabItem { Label("Web", systemImage: "globe") }
                     .tag("tab.web")
+                GesturesScreen()
+                    .tabItem { Label("Gestures", systemImage: "hand.tap") }
+                    .tag("tab.gestures")
             }
             // SwiftUI gives a tab item no identifier hook that survives into the tab bar, so the tabs are
             // reached by label. Recorded in `expected/` rather than worked around here.
             .onChange(of: tab) { _, new in status.tapped(new) }
         }
+        // What a flow's `pressButton: home` leaves behind, read once the app is brought back.
+        .onChange(of: phase) { _, new in if new == .background { status.tapped("app.background") } }
     }
 }
 
@@ -95,16 +101,48 @@ struct FormScreen: View {
 
 struct ListScreen: View {
     @EnvironmentObject private var status: Status
+    @State private var scrim = false
 
     // Fifty rows so the list runs past the screen. SwiftUI's List is lazy, so the rows that are not on
     // screen are not built, and the measurement records whether the tree reports them anyway.
+    //
+    // Three layers over the rows, for whether a tap on a row is judged by what the touch would reach: a label that
+    // takes no touches over Row 5 (a tap on Row 5 still lands), a floating button at the bottom right that covers the
+    // rows' trailing edge, and the scrim that button opens, which covers every row until Close.
     var body: some View {
-        List(0..<50, id: \.self) { row in
-            Button("Row \(row)") { status.tapped("list.row.\(row)") }
-                .accessibilityIdentifier("list.row.\(row)")
+        ZStack(alignment: .bottomTrailing) {
+            List(0..<50, id: \.self) { row in
+                Button("Row \(row)") { status.tapped("list.row.\(row)") }
+                    .accessibilityIdentifier("list.row.\(row)")
+            }
+            .listStyle(.plain)
+            .accessibilityIdentifier("list.table")
+            GeometryReader { geo in
+                Text("Decor")
+                    .padding(.horizontal, 24).padding(.vertical, 12)
+                    .background(Color.yellow.opacity(0.5), in: Capsule())
+                    .accessibilityIdentifier("list.decor")
+                    .allowsHitTesting(false)
+                    .position(x: geo.size.width / 2, y: geo.size.height * 0.4)
+            }
+            Button { status.tapped("list.fab"); scrim = true } label: {
+                Image(systemName: "plus").font(.title2).foregroundStyle(.white).frame(width: 56, height: 56)
+                    .background(Color.accentColor, in: Circle())
+            }
+            .accessibilityLabel("Add")
+            .accessibilityIdentifier("list.fab")
+            .padding(16)
+            if scrim {
+                Color.black.opacity(0.3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { status.tapped("list.scrim") }
+                    .accessibilityIdentifier("list.scrim")
+                Button("Close") { status.tapped("list.scrim.close"); scrim = false }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("list.scrim.close")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .listStyle(.plain)
-        .accessibilityIdentifier("list.table")
     }
 }
 
@@ -142,6 +180,46 @@ struct HardScreen: View {
                 .focused($nicknameFocused)
                 .onChange(of: nicknameFocused) { _, focused in if focused { status.tapped("hard.field") } }
             Spacer()
+        }
+        .padding(20)
+    }
+}
+
+// MARK: - Gestures
+
+/// What a flow's `longPressOn` and `pinch` steps act on. A quick tap and a long press on the same element say
+/// different things, so a long press that arrived as a tap is visible as one.
+struct GesturesScreen: View {
+    @EnvironmentObject private var status: Status
+
+    var body: some View {
+        // Which way the app itself is drawn — what a flow's `setOrientation` should leave — read from the screen's
+        // own size, so a portrait-locked build stays portrait on a turned device.
+        GeometryReader { geo in
+            content(landscape: geo.size.width > geo.size.height)
+        }
+    }
+
+    private func content(landscape: Bool) -> some View {
+        VStack(spacing: 20) {
+            Text(landscape ? "orientation:landscape" : "orientation:portrait")
+                .accessibilityIdentifier("gesture.orientation")
+            Text("Hold me")
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(Color.blue.opacity(0.2))
+                .accessibilityIdentifier("gesture.hold")
+                .onTapGesture { status.tapped("gesture.hold.short") }
+                .onLongPressGesture(minimumDuration: 0.5) { status.tapped("gesture.hold.long") }
+
+            // Judged once the fingers lift, by which way the scale went, so how far a pinch spread does not matter.
+            Rectangle()
+                .fill(Color.green.opacity(0.2))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("gesture.zoom")
+                .gesture(MagnifyGesture().onEnded { value in
+                    if value.magnification > 1.2 { status.tapped("gesture.zoom.in") }
+                    else if value.magnification < 0.8 { status.tapped("gesture.zoom.out") }
+                })
         }
         .padding(20)
     }

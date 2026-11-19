@@ -11,6 +11,7 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/agent-core/package.json packages/agent-core/
+COPY packages/flow-runner/package.json packages/flow-runner/
 COPY packages/dashboard/package.json packages/dashboard/
 COPY packages/relay/package.json packages/relay/
 COPY packages/ios-agent/package.json packages/ios-agent/
@@ -23,15 +24,17 @@ COPY docs/package.json docs/
 
 RUN git init && pnpm install --frozen-lockfile
 
-# Source files for build (agent-core → dashboard → relay only)
+# Source files for build (agent-core → flow-runner → dashboard → relay only)
 COPY packages/protocol packages/protocol
 COPY packages/agent-core packages/agent-core
+COPY packages/flow-runner packages/flow-runner
 COPY packages/dashboard packages/dashboard
 COPY packages/relay packages/relay
 COPY playground/server.js playground/
 
 RUN pnpm --filter @tapflowio/protocol build && \
     pnpm --filter @tapflowio/agent-core build && \
+    pnpm --filter @tapflowio/flow-runner build && \
     pnpm --filter @tapflowio/dashboard build && \
     pnpm --filter @tapflowio/relay build
 

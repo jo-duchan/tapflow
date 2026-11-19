@@ -72,12 +72,15 @@ export function handleMe(req: http.IncomingMessage, res: http.ServerResponse): v
   if (!auth) return
 
   const db = getDb()
-  const user = db.prepare('SELECT id, email, display_name, avatar_url, role FROM users WHERE id = ?').get(auth.userId) as
-    { id: number; email: string; display_name: string | null; avatar_url: string | null; role: string } | undefined
+  const user = db.prepare('SELECT id, email, display_name, avatar_url, role, flow_capture FROM users WHERE id = ?').get(auth.userId) as
+    { id: number; email: string; display_name: string | null; avatar_url: string | null; role: string; flow_capture: number } | undefined
 
   if (!user) return json(res, 404, { error: 'User not found' })
   const displayName = user.display_name ?? user.email.split('@')[0]
-  json(res, 200, { id: user.id, email: user.email, displayName, avatarUrl: user.avatar_url, role: user.role })
+  json(res, 200, {
+    id: user.id, email: user.email, displayName, avatarUrl: user.avatar_url, role: user.role,
+    flowCapture: user.flow_capture === 1,
+  })
 }
 
 export async function handleChangePassword(

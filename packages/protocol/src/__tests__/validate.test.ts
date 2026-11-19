@@ -518,3 +518,21 @@ describe('a lease is never dropped for its payload', () => {
     expect(parseInbound({ type: 'device:lease', payload: {} }).ok).toBe(false)
   })
 })
+
+// Flow Capture's default range starts after the home screen (`onHome`). The relay consumes this reply, so a field the
+// schema does not declare is stripped and the range falls back to guessing.
+describe('a keyboard read carries whether the home screen was in front', () => {
+  const read = (keyboard: unknown) => {
+    const r = ok({ type: 'ui:keyboard:response', sessionId: 's', requestId: 'r', keyboard })
+    return (r.msg as { keyboard: unknown }).keyboard
+  }
+
+  it('keeps onHome', () => {
+    expect(read({ shown: null, onHome: true })).toEqual({ shown: null, onHome: true })
+    expect(read({ shown: false, onHome: false })).toEqual({ shown: false, onHome: false })
+  })
+
+  it('reads an onHome that is not a boolean as absent, keeping the keyboard', () => {
+    expect(read({ shown: false, onHome: 'yes' })).toEqual({ shown: false })
+  })
+})
