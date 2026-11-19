@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import type { Duplex } from 'stream'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
@@ -157,6 +158,28 @@ const BOOT_REFUSAL_MESSAGES: Record<BootRefusalReason, string> = {
 // Terminal input messages the MCP client awaits an ack for — if the agent is offline
 // the relay replies input:error so the client fails truthfully (non-terminal moves/starts
 // expect no ack and are dropped silently).
+/** How long a refused socket may stay open, unread, after its close frame and FIN, before it is destroyed. */
+const REFUSED_LINGER_MS = 1_000
+
+/**
+ * Refuses a socket at the handshake and reads it no further than one socket buffer. `close()` alone keeps reading
+ * until the peer answers or 30 s pass, buffering a message up to `maxPayload` (100 MiB) meanwhile — so a peer with
+ * no credential that never answered could make the relay hold that much per connection.
+ *
+ * Paused, the peer's close reply goes unread too, so the peer would wait for ws's 30 s timer to learn the
+ * connection is over. The FIN after the close frame tells it at once: MCP's startup waits only 1 s for the close
+ * code before calling a refusal a slow relay. The timer destroys a socket whose peer never closes its side.
+ *
+ * Only for a socket refused before it was served: one closed later (`closeForAuth`) could send messages of that
+ * size while it was open, and keeps the ordinary close.
+ */
+function refuseUnread(ws: WebSocket, socket: Duplex, reason: string): void {
+  ws.close(1008, reason)
+  ws.pause()
+  socket.end()
+  setTimeout(() => ws.terminate(), REFUSED_LINGER_MS).unref()
+}
+
 /** Why a session is not this socket's to command. One reason, two prose strings — the treatment `#492`
  *  settled for `agent offline` / `Session not found`: telling a caller the session is in use when it is
  *  idle steers it off a device it could have had. Shared so the two never drift. */
@@ -1312,7 +1335,7 @@ export class RelayServer {
       })
       if (decision.action === 'reject') {
         this.logConnectionRejection(addr, decision.reason, pat?.patId)
-        ws.close(1008, decision.reason)
+        refuseUnread(ws, request.socket, decision.reason)
         return
       }
       // Only an accepted token was used; a refused one keeps its "last used".

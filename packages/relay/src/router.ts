@@ -50,6 +50,10 @@ export class Router {
       try {
         await route.handler(req, res, params)
       } catch (err) {
+        if (err instanceof BodyTooLargeError) {
+          json(res, 413, { error: 'Body too large' })
+          return true
+        }
         // 관측성: 스택을 삼키지 말고 기록한다. 단 응답 본문에는 상세를 노출하지 않는다.
         const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
         logger.error(redactSecrets(`${method} ${url} — handler error: ${detail}`))
@@ -67,17 +71,24 @@ export function json(res: http.ServerResponse, status: number, body: unknown): v
   res.end(payload)
 }
 
-export function readBody(req: http.IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
+/**
+ * The most a JSON request body may be. Every caller's body is a few hundred bytes; this is the size `runs.ts`
+ * already allowed its own, the largest JSON the relay takes.
+ */
+export const MAX_JSON_BODY_BYTES = 1024 * 1024
+
+/** Thrown by `readJson` past `MAX_JSON_BODY_BYTES`; `Router.handle` answers it with 413. */
+export class BodyTooLargeError extends Error {
+  constructor() { super('Body too large') }
 }
 
+/**
+ * Bounded because login, password reset and setup call this before any credential is checked: an unbounded
+ * read let one anonymous request hold as much memory as it cared to send.
+ */
 export async function readJson<T = unknown>(req: http.IncomingMessage): Promise<T> {
-  const buf = await readBody(req)
+  const buf = await readBodyLimited(req, MAX_JSON_BODY_BYTES)
+  if (buf === null) throw new BodyTooLargeError()
   return JSON.parse(buf.toString('utf-8')) as T
 }
 

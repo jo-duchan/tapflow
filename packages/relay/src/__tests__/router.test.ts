@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type http from 'http'
-import { Router, json, readBody, readJson } from '../router.js'
+import { Router, json, readJson, BodyTooLargeError, MAX_JSON_BODY_BYTES } from '../router.js'
 
 // --- 헬퍼 ---
 
@@ -149,22 +149,14 @@ describe('json', () => {
 
 // --- readBody / readJson ---
 
-describe('readBody', () => {
-  it('요청 바디를 Buffer로 수집한다', async () => {
-    const req = makeReq('POST', '/', 'hello world')
-    const buf = await readBody(req)
-    expect(buf.toString()).toBe('hello world')
-  })
-
-  it('에러 이벤트 발생 시 reject', async () => {
+describe('readJson', () => {
+  it('rejects when the request errors', async () => {
     const req = makeReq('POST', '/')
-    const promise = readBody(req)
+    const promise = readJson(req)
     process.nextTick(() => req.emit('error', new Error('read error')))
     await expect(promise).rejects.toThrow('read error')
   })
-})
 
-describe('readJson', () => {
   it('JSON 바디를 파싱해 객체로 반환', async () => {
     const req = makeReq('POST', '/', JSON.stringify({ key: 'value' }))
     const data = await readJson<{ key: string }>(req)
@@ -174,6 +166,50 @@ describe('readJson', () => {
   it('잘못된 JSON이면 SyntaxError throw', async () => {
     const req = makeReq('POST', '/', 'not json')
     await expect(readJson(req)).rejects.toThrow(SyntaxError)
+  })
+
+  it('accepts a body of exactly MAX_JSON_BODY_BYTES', async () => {
+    const pad = 'x'.repeat(MAX_JSON_BODY_BYTES - JSON.stringify({ k: '' }).length)
+    const req = makeReq('POST', '/', JSON.stringify({ k: pad }))
+    const data = await readJson<{ k: string }>(req)
+    expect(data.k.length).toBe(pad.length)
+  })
+
+  it('rejects a body one byte over MAX_JSON_BODY_BYTES without parsing it', async () => {
+    const pad = 'x'.repeat(MAX_JSON_BODY_BYTES - JSON.stringify({ k: '' }).length + 1)
+    const req = makeReq('POST', '/', JSON.stringify({ k: pad }))
+    await expect(readJson(req)).rejects.toBeInstanceOf(BodyTooLargeError)
+  })
+
+  it('stops holding chunks once the limit is passed', async () => {
+    // Fed in pieces, as a socket would: the body as a whole is several times the limit.
+    const em = new EventEmitter() as http.IncomingMessage
+    em.method = 'POST'; em.url = '/'; em.headers = {}
+    const promise = readJson(em)
+    const piece = Buffer.alloc(256 * 1024, 0x20)
+    for (let i = 0; i < 16; i++) em.emit('data', piece)
+    em.emit('end')
+    await expect(promise).rejects.toBeInstanceOf(BodyTooLargeError)
+  })
+})
+
+describe('Router — an oversized JSON body', () => {
+  it('answers 413, not 500, when a handler reads a body over the limit', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = new Router()
+    const after = vi.fn()
+    router.post('/big', async (req, res) => {
+      await readJson(req)
+      after()
+      json(res, 200, { ok: true })
+    })
+    const res = makeRes()
+    await router.handle(makeReq('POST', '/big', 'x'.repeat(MAX_JSON_BODY_BYTES + 1)), res)
+    expect(res._written[0]?.status).toBe(413)
+    expect(JSON.parse(res._written[0]!.body)).toEqual({ error: 'Body too large' })
+    expect(after).not.toHaveBeenCalled()
+    expect(errorSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
   })
 })
 
