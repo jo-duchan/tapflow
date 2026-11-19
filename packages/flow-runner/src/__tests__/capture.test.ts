@@ -1453,11 +1453,16 @@ describe('flowToYaml', () => {
       { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
       { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
       { type: 'tapOn', selector: { text: 'a\u2028b' } },
+      // Review (CodeRabbit): a joiner is text only beside text; alone it shows nothing.
+      { type: 'tapOn', selector: { text: '\u200D' } },
+      { type: 'tapOn', selector: { text: ' \u3000' } },
     ] as const
     const yaml = flowToYaml({ name: 'Login\u200B', tags: ['\u3164'], steps: steps as never })
     expect(parseFlow(yaml, 'x.yaml').name).toBe('Login\u200B')
     expect(yaml).toContain('name: "Login\\u200B"')
     expect(yaml).toContain('tapOn: "a\\u2028b"')
+    expect(yaml).toContain('tapOn: "\\u200D"')
+    expect(yaml).toContain('tapOn: " \\u3000"')
     expect(yaml).toContain('tags: [ "\\u3164" ]')
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: "\\U000F01F0"')

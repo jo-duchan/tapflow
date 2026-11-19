@@ -1,6 +1,6 @@
 import { Document, isScalar, visit } from 'yaml'
 import { parseFlow, type Flow, type Selector, type Step } from '../schema.js'
-import { UNSEEN } from '../unseen.js'
+import { UNSEEN, visible } from '../unseen.js'
 
 function selectorValue(s: Selector): unknown {
   if (s.text !== undefined) return s.text
@@ -54,15 +54,16 @@ function canonical(v: unknown): string {
 /**
  * The `yaml` library writes a character no one can see (`UNSEEN`) as it is, but for the controls, so a string holding
  * one is written double-quoted with each of them escaped (`"\U000F01F0"`): the file then says which character it is,
- * and reads back as the same string.
+ * and reads back as the same string. A string that shows nothing at all has every character but a plain space escaped:
+ * a joiner is left as it is inside text, where it is part of an emoji or a word, but alone it is one more blank.
  */
 const SHORT: Readonly<Record<string, string>> = { '\n': '\\n', '\t': '\\t', '\r': '\\r', '"': '\\"', '\\': '\\\\' }
 
-function doubleQuoted(value: string): string {
+function doubleQuoted(value: string, blank: boolean): string {
   let out = ''
   for (const ch of value) {
     const cp = ch.codePointAt(0)!
-    out += SHORT[ch] ?? (UNSEEN.test(ch)
+    out += SHORT[ch] ?? ((blank ? ch !== ' ' : UNSEEN.test(ch))
       ? cp <= 0xff ? `\\x${hex(cp, 2)}` : cp <= 0xffff ? `\\u${hex(cp, 4)}` : `\\U${hex(cp, 8)}`
       : ch)
   }
@@ -96,8 +97,10 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
       if (node.items.every((i) => isScalar(i))) node.flow = true
     },
     Scalar(_, node) {
-      if (typeof node.value !== 'string' || !UNSEEN.test(node.value)) return
-      escaped.push(doubleQuoted(node.value))
+      if (typeof node.value !== 'string' || node.value.length === 0) return
+      const blank = !visible(node.value)
+      if (!blank && !UNSEEN.test(node.value)) return
+      escaped.push(doubleQuoted(node.value, blank))
       node.value = placeholder(escaped.length - 1)
     },
   })
