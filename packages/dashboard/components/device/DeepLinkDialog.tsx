@@ -8,12 +8,13 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
   /** Takes the url rather than a `send`, because the caller has to mint and record the correlation id
    *  that lets the viewer tell this deeplink's reply from someone else's on the same session. */
   openUrl: (url: string) => void;
 }
 
-export function DeepLinkDialog({ open, onOpenChange, openUrl }: Props) {
+export function DeepLinkDialog({ open, onOpenChange, onCloseAutoFocus, openUrl }: Props) {
   // Counted per opening and used as the form's key, so each opening starts empty. Unmounting on close
   // alone was not enough: Radix keeps the content mounted through its exit animation, and a dialog
   // reopened in that window kept what was typed. Adjusted while rendering, not from an effect.
@@ -27,6 +28,8 @@ export function DeepLinkDialog({ open, onOpenChange, openUrl }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        data-deeplink-dialog
+        onCloseAutoFocus={onCloseAutoFocus}
         className="w-[500px] max-w-[500px] h-[52px] !rounded-[18px] p-[10px] border border-border bg-background shadow-lg overflow-hidden [&>button]:hidden"
         aria-describedby={undefined}
       >

@@ -9,7 +9,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useId, useState } from 'react';
-import type { MutableRefObject, ReactNode } from 'react';
+import type { MouseEventHandler, MutableRefObject, ReactNode } from 'react';
 import type { NetworkUnavailableReason } from '@tapflowio/protocol';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 
@@ -52,7 +52,7 @@ interface SimulatorToolbarProps {
     pending: boolean;
     onSelect: (id: string) => void;
   };
-  onDeepLink: () => void;
+  onDeepLink: MouseEventHandler<HTMLButtonElement>;
   /**
    * Platform buttons that move around the app or the OS — home, back, recent apps. Rendered in the
    * **Navigation** group. See `packages/dashboard/AGENTS.md` → "Where a new device button goes".
