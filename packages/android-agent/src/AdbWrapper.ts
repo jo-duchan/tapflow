@@ -451,9 +451,31 @@ export class AdbWrapper {
     const packageLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) =>
       line.startsWith(`package:${packageName} `) || line === `package:${packageName}`
     )
-    const uidText = packageLine?.match(/(?:^|\s)uid:(\d+)(?:\s|$)/)?.[1]
-    const uid = Number(uidText)
-    return uidText && Number.isSafeInteger(uid) && uid >= 0 ? uid : null
+    // Match a comma-separated list of UIDs, e.g. uid:10123,1010123
+    const uidText = packageLine?.match(/(?:^|\s)uid:([\d,]+)(?:\s|$)/)?.[1]
+    if (!uidText) return null
+
+    const uids = uidText.split(',')
+      .map((s) => Number(s))
+      .filter((uid) => Number.isSafeInteger(uid) && uid >= 0)
+    if (uids.length === 0) return null
+    if (uids.length === 1) return uids[0]!
+
+    // The app is installed for multiple users. The launch targets the current user.
+    const userArgs = ['-s', serial, 'shell', 'am', 'get-current-user']
+    const userOut = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...userArgs)
+      : await this.runner.exec(...userArgs)
+    const currentUser = Number(userOut.trim())
+
+    if (Number.isSafeInteger(currentUser) && currentUser >= 0) {
+      // Android UIDs are userId * 100000 + appId.
+      const targetUid = uids.find((uid) => Math.floor(uid / 100000) === currentUser)
+      if (targetUid !== undefined) return targetUid
+    }
+
+    // If we cannot determine the current user or it's not in the list, return the first one.
+    return uids[0]!
   }
 
   async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
