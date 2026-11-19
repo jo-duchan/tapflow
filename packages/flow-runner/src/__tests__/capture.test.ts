@@ -1216,6 +1216,21 @@ describe('toFlowSteps', () => {
       expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
     })
 
+    // Review: a cell the size of its list is one of its items, not a container around it; dropped, the two controls
+    // side by side inside it read as a row and the sideways swipe that showed Delete became a scroll.
+    it('keeps a list-sized cell as an item: a sideways swipe on its row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const row = (x: number) => [
+        el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: 'Mail from Ann', frame: { x: x + 0.05, y: 0.32, width: 0.4, height: 0.06 } }),
+        el({ role: 'button', label: 'Star', frame: { x: x + 0.6, y: 0.32, width: 0.1, height: 0.06 } }),
+      ]
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.1, width: 0.2, height: 0.8 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...row(0)])), matchStep(tap!, ctxOf([table, ...row(-0.2), del]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
     it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
       const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
       const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })
