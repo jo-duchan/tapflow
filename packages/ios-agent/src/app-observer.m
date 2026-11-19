@@ -20,6 +20,8 @@
 #import <sys/stat.h>
 #import <unistd.h>
 
+#include "main-bundle.h"
+
 typedef struct { double x, y, w, h; } TFORect;
 
 static NSString *g_dir;          // /tmp/tapflow-observe-<udid>, 0700
@@ -625,10 +627,11 @@ static BOOL tfo_should_activate(const char *udid) {
   const char *target = getenv("TAPFLOW_OBSERVE_BUNDLE");
   if (udid == NULL || *udid == '\0' || target == NULL || *target == '\0') return NO;
   if (strlen(udid) > 64) return NO;
-  NSString *me = NSBundle.mainBundle.bundleIdentifier;
-  const char *bytes = me.UTF8String;
-  if (bytes == NULL || strlen(bytes) != [me lengthOfBytesUsingEncoding:NSUTF8StringEncoding]) return NO;
-  return strcmp(bytes, target) == 0;
+  // No Objective-C before the answer: every process runs this before `main`, with no autorelease pool, and a daemon
+  // aborts on `NSBundle`'s (`tf_main_bundle_id`, `tf_exe_in_app_bundle_decision`).
+  char me[256];
+  if (!tf_main_bundle_id(me, sizeof me)) return NO;
+  return strcmp(me, target) == 0;
 }
 
 __attribute__((constructor))

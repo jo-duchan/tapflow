@@ -39,6 +39,7 @@
 // The decidable half, in plain C so a test can compile it with no simulator SDK. See the note at the
 // top of that file for what is in it and why it is a header rather than a `.c`.
 #include "hook-decisions.h"
+#include "main-bundle.h"
 
 #import <os/log.h>
 #import <stdatomic.h>
@@ -148,15 +149,14 @@ static BOOL tf_should_activate(void) {
   if (snprintf(probe, sizeof probe, "/tmp/tapflow-nethook-%s.json.%d.tmp", udid, getpid())
       >= (int)sizeof probe) return NO;
 
-  NSString *me = NSBundle.mainBundle.bundleIdentifier;
-  const char *bytes = me.UTF8String;
-  // **An embedded NUL would make `strcmp` agree where `NSString` did not.** `CFBundleIdentifier` is
-  // read from a binary plist, which can carry one; `com.x\0z` compares equal to `com.x` byte-wise and
-  // would activate the hooks in an app nobody named. Refused here rather than in the decision, which
-  // takes a C string and cannot see past the terminator.
-  if (bytes != NULL && strlen(bytes) != [me lengthOfBytesUsingEncoding:NSUTF8StringEncoding]) return NO;
+  // **Read with no Objective-C** (`tf_main_bundle_id`): a daemon aborts on `NSBundle`'s autorelease
+  // here, with no pool, and two it killed held every web view in the simulator white
+  // (`tf_exe_in_app_bundle_decision`). It also refuses an embedded NUL: `CFBundleIdentifier` is read
+  // from a binary plist, which can carry one, and `com.x\0z` compares equal to `com.x` byte-wise.
+  char me[256];
+  if (!tf_main_bundle_id(me, sizeof me)) return NO;
 
-  return tf_should_activate_decision(udid, target, bytes) ? YES : NO;
+  return tf_should_activate_decision(udid, target, me) ? YES : NO;
 }
 
 

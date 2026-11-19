@@ -405,6 +405,18 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   gate runs after load. UIKit is reached at run time, after the gate: class names, selectors, the string values of its
   constants, rects as four doubles. The gate has network-hook.m's refusals (an embedded NUL in the bundle id, a udid
   that does not fit).
+- **No Objective-C in either gate** (`tf_main_bundle_id`, `src/main-bundle.c`). The constructors run before `main`,
+  with no autorelease pool, and `+[NSBundle mainBundle]` autoreleases: `fileproviderd` and `GSSCred` abort on it
+  (`autoreleaseNoPage` → `_objc_fatal`, inside the pool push itself, so `@autoreleasepool` does not help), measured
+  on iOS 26.5. Both gates read the bundle id whenever a target was named, so with Capture on (`TAPFLOW_OBSERVE_BUNDLE`)
+  both daemons crashed in a loop — 95 reports in one day — and WebKit's navigations, which wait on them, never
+  finished: Safari and every web view stayed white, the app's own WebView included. It surfaced with app
+  accessibility on at boot (more processes start), which first read as accessibility being the cause; turning it
+  on in a running device changed nothing, and the crash reports named the library. So a process that is not
+  directly inside an `.app` (`tf_exe_in_app_bundle_decision`, the executable's path) stops before any bundle is
+  read — no daemon is, and no target ever is anything else — and an app's identifier is read through
+  CoreFoundation, which autoreleases nothing. Verified with Capture on: no daemon report after the boot, Safari and
+  the sample app's WebView load, the observer names taps, the network hook installs in the app.
 - **Asked by file, answered by file, in `/tmp/tapflow-observe-<udid>` (0700).** The host's /tmp is the simulator's
   (measured), so the agent writes a nonce and the bundle it asks about to `request` by rename and that app, watching
   the directory, answers `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is

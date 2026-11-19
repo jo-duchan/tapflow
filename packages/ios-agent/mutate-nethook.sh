@@ -125,4 +125,11 @@ mutate "fd: no fallback"             's@haveLimit ? soft : 1024ULL@haveLimit >= 
 mutate "fd: casts before clamping"   's@return trimmed ? TF_MAX_FD_SCAN : (int)want;@return (int)want;@' || fails=1
 mutate "fd: trims without saying so" 's@\*capped = trimmed;@*capped = 0 \&\& trimmed;@' || fails=1
 
+# tf_exe_in_app_bundle_decision — a daemon that reaches the bundle read aborts (fileproviderd, GSSCred)
+mutate "app: a missing path is an app"   's@  if (exe == NULL) return 0;@  if (exe == NULL) return 1;@' || fails=1
+mutate "app: no executable named counts" "s@if (slash == NULL || slash\[1\] == '\\\\0') return 0;@if (slash == NULL) return 0;@" || fails=1
+mutate "app: a bare .app directory counts" "s@ || slash\[-5\] == '/') return 0;@) return 0;@" || fails=1
+mutate "app: any path is an app"         's@return strncmp(slash - 4, ".app", 4) == 0;@return strncmp(slash - 4, ".app", 4) <= 0 || 1;@' || fails=1
+mutate "app: the suffix is not anchored" 's@return strncmp(slash - 4, ".app", 4) == 0;@return strstr(exe, ".app") != NULL;@' || fails=1
+
 [[ $fails -eq 0 ]] && echo "=== all mutations killed ===" || { echo "=== a mutation survived ==="; exit 1; }

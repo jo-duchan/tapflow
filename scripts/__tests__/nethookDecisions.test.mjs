@@ -137,6 +137,29 @@ describe('which process gets hooked', () => {
   })
 })
 
+// The gates run in every process of the simulator before `main`, and a daemon aborts on Objective-C there (measured:
+// fileproviderd and GSSCred, which left every web view white). An app runs from directly inside its `.app`; no daemon
+// does, so the executable's path is the question asked before any bundle is read.
+describe('who is an app, before anything reads a bundle', () => {
+  it.each([
+    ['/Users/me/Library/Developer/CoreSimulator/Devices/U/data/Containers/Bundle/Application/X/wdiodemoapp.app/wdiodemoapp', 1, 'an installed app'],
+    ['/Library/Developer/CoreSimulator/Volumes/iOS/RuntimeRoot/Applications/MobileSafari.app/MobileSafari', 1, 'a system app'],
+    ['/Volumes/V/System/Library/Frameworks/FileProvider.framework/Support/fileproviderd', 0, 'a daemon in a framework'],
+    ['/Volumes/V/System/Library/PrivateFrameworks/Heimdal.framework/Helpers/GSSCred', 0, 'a helper'],
+    ['/Volumes/V/usr/libexec/axassetsd', 0, 'a daemon in libexec'],
+    ['/Applications/X.app/PlugIns/Share.appex/Share', 0, 'an app extension is not an app'],
+    ['/Applications/X.app/Frameworks/Helper', 0, 'something deeper inside an app'],
+    ['/Applications/X.app/', 0, 'a bundle with no executable named'],
+    ['/Applications/.app/X', 0, 'a directory called only .app'],
+    ['/Applications/X.application/X', 0, 'an extension that only begins with app'],
+    ['X.app/X', 1, 'a relative path still ends in its bundle'],
+    ['--null', 0, 'no path'],
+    ['', 0, 'an empty path'],
+  ])('%s is an app: %i (%s)', (exe, want) => {
+    expect(Number(ask('inapp', exe))).toBe(want)
+  })
+})
+
 describe('how far the descriptor scan goes', () => {
   const ask2 = (...a) => ask(...a).split('\t').map(Number)
 
