@@ -129,6 +129,8 @@ mutate "fd: trims without saying so" 's@\*capped = trimmed;@*capped = 0 \&\& tri
 mutate "app: a missing path is an app"   's@  if (exe == NULL) return 0;@  if (exe == NULL) return 1;@' || fails=1
 mutate "app: no executable named counts" "s@if (slash == NULL || slash\[1\] == '\\\\0') return 0;@if (slash == NULL) return 0;@" || fails=1
 mutate "app: a bare .app directory counts" "s@ || slash\[-5\] == '/') return 0;@) return 0;@" || fails=1
+# Review: the bound that keeps `slash[-5]` inside the string. Moved, `.app/X` reads the byte before it.
+mutate "app: the bound admits a bare .app" 's@slash - exe < 5@slash - exe < 4@' || fails=1
 mutate "app: any path is an app"         's@return strncmp(slash - 4, ".app", 4) == 0;@return strncmp(slash - 4, ".app", 4) <= 0 || 1;@' || fails=1
 mutate "app: the suffix is not anchored" 's@return strncmp(slash - 4, ".app", 4) == 0;@return strstr(exe, ".app") != NULL;@' || fails=1
 

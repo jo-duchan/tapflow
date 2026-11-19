@@ -119,8 +119,8 @@ static BOOL tf_should_activate(void) {
   /**
    * **The two cheap reads come first, and that ordering is the point rather than style.** This runs
    * in a `constructor` in **every** process the simulator starts — SpringBoard, backboardd, every
-   * daemon — and all but one of them fail here. Reading `NSBundle.mainBundle` parses the main
-   * executable's `Info.plist`, so doing it before the environment is checked would put that cost on
+   * daemon — and all but one of them fail here. Reading the main bundle (`tf_main_bundle_id`) parses
+   * the main executable's `Info.plist`, so doing it before the environment is checked would put that cost on
    * every process on the device for an answer that is `NO`. The first version of this refactor did
    * exactly that, by making the bundle id an argument.
    *

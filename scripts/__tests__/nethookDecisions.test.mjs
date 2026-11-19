@@ -151,6 +151,8 @@ describe('who is an app, before anything reads a bundle', () => {
     ['/Applications/X.app/Frameworks/Helper', 0, 'something deeper inside an app'],
     ['/Applications/X.app/', 0, 'a bundle with no executable named'],
     ['/Applications/.app/X', 0, 'a directory called only .app'],
+    // Review: the lower bound on the slash, which keeps `slash[-5]` inside the string.
+    ['.app/X', 0, 'a path that is only .app'],
     ['/Applications/X.application/X', 0, 'an extension that only begins with app'],
     ['X.app/X', 1, 'a relative path still ends in its bundle'],
     ['--null', 0, 'no path'],
