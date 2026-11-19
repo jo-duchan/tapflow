@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind, FieldReadReason, FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -450,6 +450,18 @@ export class CaptureStore {
     } catch { /* see recordInput */ }
   }
 
+  /**
+   * What a recorded gesture's touch-down hit, as the agent observed it inside the app. Kept only for a gesture this
+   * capture recorded: an id it never saw names nothing in it.
+   */
+  recordTouched(sessionId: string, holder: Holder, requestId: string, touched: TouchObservation): void {
+    try {
+      const capture = this.captures.get(sessionId)
+      if (!capture || !this.recording(sessionId, holder, capture) || !capture.touches.has(requestId)) return
+      this.append(capture, { at: this.now(), kind: 'touched', requestId, touched })
+    } catch { /* see recordInput */ }
+  }
+
   recordChrome(sessionId: string, holder: Holder, chrome: unknown): void {
     try {
       const capture = this.captureFor(sessionId, holder)
@@ -541,7 +553,7 @@ export class CaptureStore {
     if (at < 0) return 'unknown-input'
     // A touch is kept only when the reads say it was off the soft keyboard, before it and after: the screen as a key is
     // pressed shows what was just typed, a password's last character included. A touch with no read to say — an agent
-    // that does not read the keyboard, a Mac over its memory line, iOS with the app not in front — keeps no picture.
+    // that does not read the keyboard, iOS with the app not in front — keeps no picture.
     const touch = capture.touches.get(requestId)
     if (touch) {
       const keys = this.touchOnKeys(capture, touch)

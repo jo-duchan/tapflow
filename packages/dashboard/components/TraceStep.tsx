@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 import { ChevronRight, CircleCheck, CircleDashed, CircleX, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
 export type TraceState = 'running' | 'done' | 'failed' | 'skipped'
 
 /**
  * One step of a trace: an icon for how it went, its name, and what it holds when opened — the look of shadcn's Trace
- * ("Thought for 5s"), rebuilt as a plain disclosure because Trace is Base UI and this package is Radix on Tailwind 3.
+ * ("Thought for 5s"), rebuilt as a disclosure (Radix Collapsible) because Trace is Base UI and this package is Radix on Tailwind 3.
  * MCP's Agent activity and Flow Capture's Verify draw their steps with it, so a step looks the same wherever a run is
  * watched. With no `children` there is nothing to open, and the row is not a button.
  */
@@ -33,20 +34,21 @@ export function TraceStep({ state, label, meta, title, open = false, onToggle, c
   if (!children || !onToggle) {
     return <div title={title} className={cn('flex min-w-0 items-center gap-2.5', tone)}>{head}</div>
   }
+  // A Collapsible, so the panel grows and shrinks rather than appearing; no heading, as each step is a row of a list.
   return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button" title={title} aria-expanded={open} aria-controls={contentId} onClick={onToggle}
+    <Collapsible open={open} onOpenChange={onToggle} className="flex flex-col gap-1.5">
+      <CollapsibleTrigger
+        title={title} aria-controls={open ? contentId : undefined}
         className={cn(
           'flex min-w-0 items-center gap-2.5 rounded-sm text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           tone,
         )}
       >
         {head}
-        <ChevronRight aria-hidden="true" className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
-      </button>
-      {open && <div id={contentId} className="ml-2 border-l pl-4">{children}</div>}
-    </div>
+        <ChevronRight aria-hidden="true" className={cn('size-4 shrink-0 transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
+      </CollapsibleTrigger>
+      <CollapsibleContent id={contentId}><div className="ml-2 border-l pl-4">{children}</div></CollapsibleContent>
+    </Collapsible>
   )
 }
 

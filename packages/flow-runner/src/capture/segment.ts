@@ -1,11 +1,20 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
-import type { FocusedField, KeyboardState } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
 export type Point = [number, number]
 export type Fingers = [Point, Point]
+
+/** Why a step is left out before Match replays it, by what the app reported of the touch (record-time observation):
+ *  `stopped-scroll`, a tap that went down while a list was still gliding, which the OS takes as "stop" on both
+ *  platforms and delivers to nothing — replayed on a settled screen it would press what the person never pressed. */
+export type DropReason =
+  | 'stopped-scroll'
+  /** Tapped again on the same element with the screen unchanged in between: this first tap did nothing, and the one
+   *  after it is the one that acted (`retryCandidates`, confirmed by the recorded pictures). */
+  | 'retried'
 
 /** What the agent said about a step: its ack, or none — a message nothing acks, or an ack the record does not have. */
 export type Outcome = 'landed' | 'refused' | 'unknown'
@@ -38,6 +47,8 @@ interface StepBase {
    *  answered before the step and the first asked after it: right after a field is tapped the one before can still have
    *  the keyboard on its way up, or be missing, and leaving a little more out costs less than a false stop. */
   keyboardRect?: KeyboardRect
+  /** Left out before the replay (`DropReason`): not sent, not compared, not in the flow, and said so in the list. */
+  dropped?: DropReason
 }
 
 type KeyboardRect = NonNullable<KeyboardState['rect']>
@@ -45,7 +56,13 @@ type KeyboardRect = NonNullable<KeyboardState['rect']>
 /** A person's action on the device: the unit the dialog lists, replays and turns into a flow step. */
 /** `keyboard: 'unknown'`: the soft keyboard may have been up around the touch and the reads could not say whether it was on a key
  *  (#1135). Replayed and kept as the person did it, and marked, since a key it was would type in the replay. */
-type Touch = { space?: PointSpace; keyboard?: 'unknown' }
+type Touch = {
+  space?: PointSpace
+  keyboard?: 'unknown'
+  /** What the agent reported of this touch's touch-down (`capture:touched`): whether a list was moving, the element
+   *  and button it hit. Absent where no report came — an older agent, a touch outside the app, a hit read too late. */
+  touched?: TouchObservation
+}
 
 export type RawStep = StepBase & (
   | { kind: 'tap'; point: Point } & Touch
@@ -70,7 +87,7 @@ export type RawStep = StepBase & (
    * - otherwise, `text` is the keys read on a US layout, a guess on both platforms: the device's IME decides what
    *   they type (Gboard on Android). `fieldRead` says whether a read was tried: `unread` when the agent reads fields
    *   but none was usable (the warning is the reader's), `secure` for a field that never shows its value. Absent: the
-   *   relay read no field at all (an agent without `field-value`, a Mac over its memory line), and the matcher warns.
+   *   relay read no field at all (an agent without `field-value`), and the matcher warns.
    * - `field`: the identifier of the field the relay read it went into. A field focused before the range began has no
    *   tap in it, so a replay from a fresh launch taps this one first (`focusTap`).
    * - `askValue`: typed on the soft keyboard into a field that hides its text (#1140), so neither the keys nor a read
@@ -262,7 +279,31 @@ export function segment(entries: readonly CaptureEntry[]): RawStep[] {
     }
   }
   endRun()
-  return withKeyboardRect(withHome(oneAskedSecret(withFieldValues(out, entries)), entries), entries)
+  // Touches first: `withHome` reads the app's report of a touch as where it went down.
+  return withKeyboardRect(withHome(withTouches(oneAskedSecret(withFieldValues(out, entries)), entries), entries), entries)
+}
+
+const TOUCH_KINDS = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'holdDrag'])
+
+/**
+ * Each touch with the app's report of it (`touched`, joined by the gesture's end), and a tap the report says went down
+ * on a moving list dropped (`stopped-scroll`): measured on iOS 26.5, such a tap starts SwiftUI's recogniser and never
+ * ends it, only the scroll's pan does — the list stops and nothing is pressed. The person then taps again, and Match,
+ * replaying on a list that has long since settled, would press with the first tap what the second pressed.
+ */
+function withTouches(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
+  const reports = new Map<string, TouchObservation>()
+  // The later of two for one gesture: the agent repeats the report once the app's verdict (`acted`) is in.
+  for (const e of entries) if (e.kind === 'touched') reports.set(e.requestId, e.touched)
+  if (reports.size === 0) return steps
+  return steps.map((s) => {
+    if (!TOUCH_KINDS.has(s.kind)) return s
+    const end = s.messages.find((m) => m.msg.type === 'input:touch:end')?.msg
+    const touched = end && 'requestId' in end && end.requestId ? reports.get(end.requestId) : undefined
+    if (!touched) return s
+    const stopped = s.kind === 'tap' && touched.moving && s.outcome !== 'refused'
+    return { ...s, touched, ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
+  })
 }
 
 /** Each step with the keyboard area around its start (`keyboardRect`), from the raw reads as `withHome` takes them. */
@@ -299,26 +340,55 @@ function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
  *
  * Home is also asked of the first read taken after the step: a read before it can be stale, taken just after the icon
  * tap while the app was still coming up, and a person quick to tap in the app would have that tap read as the home
- * screen's and left out. A step home before and the app after is not known, which stops the default range there.
+ * screen's and left out. A step home before and the app after is not known, which stops the default range there —
+ * unless it is the icon's tap by the app's own reports (`openedTheApp`).
  */
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
   if (reads.length === 0) return steps
   let i = 0
-  let lastRead: (typeof reads)[number] | undefined
   let previousEnd = -Infinity
-  return steps.map((s) => {
-    while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
+  return steps.map((s, n) => {
     const sinceLast = previousEnd
     previousEnd = s.endAt
+    // A report says this touch went down in the app, whatever a read trailing the icon's tap says. No touch on the home
+    // screen is reported: iOS's observer runs only in the app under test, and Android's agent reports only a touch whose
+    // topmost window is that app's.
+    if ('touched' in s && s.touched) return { ...s, onHome: false }
     // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
-    // tap's would place the first tap in the app on the home screen.
+    // tap's would place the first tap in the app on the home screen. A touch changes what is in front only once it lifts
+    // (an icon opens its app, a swipe up goes home), so a read answered before it lifted still tells where it began: a
+    // read takes about half a second, and a person turning home-screen pages faster than that left a swipe with none
+    // answered before it began (iOS 26.5). Still one asked before it began: that is the read the measured case had, and
+    // a later one is asked about a screen the touch is already on. A button acts as it goes down, so for one only a read
+    // before it counts. What this cannot tell: a swipe home made within a read of opening the app reads as made on the
+    // home screen.
+    const until = TOUCH_KINDS.has(s.kind) ? s.endAt : s.at
+    // Reads are asked one at a time, so in answer order they are in asking order too.
+    while (i < reads.length && reads[i]!.at <= until) i++
+    let k = i - 1
+    while (k >= 0 && reads[k]!.requestedAt > s.at) k--
+    const lastRead = k >= 0 ? reads[k] : undefined
     const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
     if (last === undefined) return s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
-    if (last && after === false) return s
+    if (last && after === false) return openedTheApp(steps, n) ? { ...s, onHome: true } : s
     return { ...s, onHome: last }
   })
+}
+
+/**
+ * Whether the step at `n`, home before it and the app after it, is the tap that opened the app from its icon: a tap no
+ * app reported, followed straight by a touch the app reports as the first in its process (`seq` 1).
+ * A missing report alone cannot say it: an app just started may report its first tap too late to be paired, and that
+ * tap looks the same (design review). Anything else stays unknown, which stops the default range's skip there.
+ */
+function openedTheApp(steps: readonly RawStep[], n: number): boolean {
+  const s = steps[n]!
+  if (s.kind !== 'tap' || s.touched) return false
+  // The very next step: a launch, a link or a button between them would be what opened the app, not this tap.
+  const next = steps[n + 1]
+  return next !== undefined && 'touched' in next && next.touched?.seq === 1
 }
 
 /** A touch as the keyboard reads around it judge it: a key, the action key, the app, or not known. */

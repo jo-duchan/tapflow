@@ -242,11 +242,18 @@ exercises whatever was last *built* of another. #459 shipped a regression behind
 run for exactly that reason: `ios-agent` stands up a real `RelayServer`, and the relay it stood up
 was the previous one. It surfaced only when the pre-commit `tsc -b` refreshed the build.
 
-`ssr.resolve`, not `resolve` — vitest runs in node and takes the SSR resolution path. Measured:
+`ssr.resolve`, not `resolve` — a node-environment test takes the SSR resolution path. Measured:
 `resolve.conditions`, `NODE_OPTIONS=--conditions=source` and `server.deps.inline` all still loaded
 `dist`. And `source` is **prepended** to vite's defaults rather than replacing them; a replacement
 list applies to every dependency, and dropping `node` from it sent jsdom to the wrong entry of
 `decimal.js`.
+
+**A jsdom suite is the exception: it resolves on the client side, which `ssr.resolve` does not reach.**
+The dashboard's tests loaded its siblings' `dist` (flow-runner, protocol) for exactly that reason until its
+config prepended `source` to `resolve.conditions` as well (`DEBUG=vite:resolve` showed
+`@tapflowio/flow-runner/browser -> dist/browser.js`); a flow-runner change passed or failed there by what was
+last built. The guard plants its marker as a statement inside a function body and reads it back through the
+source text — an appended `export const` read as absent even while `dist` loaded.
 
 Adding a package that imports a sibling in its tests means adding the config too.
 `scripts/__tests__/testsReadSource.test.mjs` finds those packages by inspection and fails if one is

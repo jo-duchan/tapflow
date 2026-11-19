@@ -1,0 +1,7 @@
+---
+"@tapflowio/flow-runner": patch
+"@tapflowio/mcp-server": patch
+"@tapflowio/android-agent": patch
+---
+
+A swipe now ends where it was asked to. Its eight moves stopped at 7/8 of the way, and every agent lifts the finger where the last move was, so every swipe without a hold (a flow's `swipe` and plain `scroll`, MCP's `swipe`) stopped an eighth short of its end point; `scroll { until }`'s held drags already reached it. Flow Capture's Verify dropped drag-and-drop pieces short of their slots while Match, which replays the recorded moves, placed them (WebdriverIO demo app on Android). The last move is now the end point, and the lift comes one interval after it, all within the duration. A plain `scroll` or `swipe` now moves the finger a seventh further in the same time, so it moves the content further and a fling is released a little faster. On Android 16 the agent's field server answered only its first request: from that version uiautomator's connection helper prepares the main Looper on every connect, which a process can do once, so every later field read or set, reach check and recording hold failed ("Only one Looper may be created per thread"), and typing replaced text failed in Flow Capture's Verify. The server now makes its connections itself. Typing into an empty password field whose hint shows (a React Native field) was refused as adding to a password that holds text, on every Android version: the hint was counted as its contents. A field set or IME action the device could not carry out now logs the error it reported, never the text.

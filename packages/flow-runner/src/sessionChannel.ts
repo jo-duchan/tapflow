@@ -1,3 +1,4 @@
+import { holdStill, MAX_HOLD_MS } from './hold.js'
 import type {
   BrowserToRelay, ChromePayload, InputErrorReason, LaunchApplied, LaunchOptions, PosturesPayload, SessionTerminatedReason,
 } from '@tapflowio/protocol'
@@ -652,32 +653,47 @@ export abstract class SessionChannel {
     await this.awaitInputAck(sessionId, requestId, 'tap')
   }
 
-  async swipe(sessionId: string, from: [number, number], to: [number, number], durationMs: number): Promise<void> {
+  /**
+   * `holdMs` keeps the finger still at `to` before it lifts, so the release has no speed and the content stops where
+   * the finger left it: a drag rather than a fling (`scroll { until }`, which a fling's glide carried past its element).
+   */
+  async swipe(sessionId: string, from: [number, number], to: [number, number], durationMs: number, holdMs = 0): Promise<void> {
     // No local RangeError: schema.ts is the gate (it rejects non-finite,
     // non-positive and over-limit durations, including fractional 250.5 which
     // stays valid for 0.23.0 compatibility), and a construction here breaks
     // the sessionNoteCoverage gate with no session note in reach.
+    // Eight moves, the last on `to`, then the lift one interval later, nine intervals in all. The moves used to
+    // stop at 7/8 of the way, and every agent lifts where the last move was, so every swipe ended an eighth short — a
+    // drag-and-drop piece Verify dropped short of its slot (wdio demo app on
+    // Android: short of the end it failed at 300, 900 and 2000 ms; on the end it passed at 300 and 900).
     const STEPS = 8
-    const interval = durationMs / STEPS
+    const interval = durationMs / (STEPS + 1)
+    // Clamped rather than refused, for the reason above: no hold for a value that is not a time, at most a minute.
+    const hold = Number.isFinite(holdMs) && holdMs > 0 ? Math.min(holdMs, MAX_HOLD_MS) : 0
     const requestId = newRequestId()
     this.send({ type: 'input:touch:start', sessionId, payload: { x: from[0], y: from[1] } })
     const gesture: OpenGesture = { kind: 'touch', at: { x: from[0], y: from[1] } }
     this.openGestures.set(sessionId, gesture)
-    for (let i = 1; i < STEPS; i++) {
+    for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
       if (this.openGestures.get(sessionId) !== gesture) return this.leftMidGesture(sessionId, 'swipe')
       const t = i / STEPS
       this.send({
         type: 'input:touch:move',
         sessionId,
-        payload: { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t },
+        // The last is `to` itself, not 1 × the path, which floating point can leave a hair off.
+        payload: i === STEPS ? { x: to[0], y: to[1] } : { x: from[0] + (to[0] - from[0]) * t, y: from[1] + (to[1] - from[1]) * t },
       })
     }
     await delay(interval)
+    const moveTo = (payload: { x: number; y: number }) => this.send({ type: 'input:touch:move', sessionId, payload })
+    if (hold > 0 && !(await holdStill(to, hold, moveTo, () => this.openGestures.get(sessionId) === gesture))) {
+      return this.leftMidGesture(sessionId, 'swipe')
+    }
     if (!this.closeGesture(sessionId, gesture)) return this.leftMidGesture(sessionId, 'swipe')
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: to[0], y: to[1] } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
-    await this.awaitInputAck(sessionId, requestId, 'swipe', durationMs)
+    await this.awaitInputAck(sessionId, requestId, 'swipe', durationMs + hold)
   }
 
   async typeText(sessionId: string, text: string): Promise<void> {

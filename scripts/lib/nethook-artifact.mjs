@@ -40,7 +40,7 @@ export const RECORD = `${AGENT_DIR}/nethook-shipped.json`
  * `inline-hook.h` is here and not merely implied by the `.c`: a changed macro or struct layout is a
  * changed binary, and the header is where those live.
  */
-const SOURCE_FILES = ['src/network-hook.m', 'src/hook-decisions.h', 'src/inline-hook.c', 'src/inline-hook.h', 'build-nethook.sh']
+const SOURCE_FILES = ['src/network-hook.m', 'src/hook-decisions.h', 'src/inline-hook.c', 'src/inline-hook.h', 'src/app-observer.m', 'build-nethook.sh']
 
 /**
  * **A declared input that is not there is an error, not an empty set.**

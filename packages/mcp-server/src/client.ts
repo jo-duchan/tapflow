@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
-import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
+import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, MAX_HOLD_MS, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
 // Protocol owns the wire shape; this file used to declare an identical copy under a name the
 // relay uses for a *different* shape. Kept exported as `DeviceInfo` because that is this
@@ -187,6 +187,9 @@ interface Waiter {
    *  keying per session "is not available"; it is available now, by putting the id on the record rather than
    *  by guessing it. */
   sessionId?: string
+  /** The socket the request went out on: a socket's close settles its own waiters, not those of the socket that
+   *  replaced it, whose answers can still arrive (CodeRabbit on #1190). Null when none was open. */
+  socket: WebSocket | null
 }
 
 /** What a refused boot tells the calling agent, per `BootRefusalReason`: a reason added to the union is a compile
@@ -214,6 +217,14 @@ const BOOT_REFUSALS: Record<BootRefusalReason, string> = {
  */
 
 export class SessionLeftError extends Error {}
+
+function leftError(sessionId: string): SessionLeftError {
+  return new SessionLeftError(
+    `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
+    'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
+    'the request blindly. Call connect_device again if you still want this session.',
+  )
+}
 
 /**
  * The relay said this session ended while a request was still in flight (#512, finding 4).
@@ -463,6 +474,12 @@ export class TapflowClient {
   private readonly held = new Set<string>()
   /** Sessions held on a socket a reconnect replaced: the relay released them when that socket closed. */
   private readonly released = new Set<string>()
+  /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
+  private readonly leaves = new Map<string, number>()
+  /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. Each
+   *  swipe owns its record and clears only that one, so a swipe left behind by a replaced socket cannot clear the
+   *  record of a newer swipe on the same session (CodeRabbit on #1190). */
+  private readonly openTouches = new Map<string, { x: number; y: number }>()
 
   constructor(
     private readonly relayUrl: string,
@@ -544,10 +561,12 @@ export class TapflowClient {
       ws.on('close', (code: number, reason: Buffer) => {
         // `disconnect()` lets go of the socket first, so a close this client asked for is not recorded.
         if (this.ws === ws) this.lastClose = { code, reason: reason.toString() }
-        this.ws = null
+        // An old socket's close can land after a reconnect opened its replacement: it must not let go of that one.
+        if (this.ws === ws) this.ws = null
         const detail = this.closeDetail()
         const closed = `WebSocket closed${detail}`
-        const pending = this.waiters.splice(0)
+        const pending = this.waiters.filter((w) => w.socket === ws || w.socket === null)
+        this.waiters = this.waiters.filter((w) => !pending.includes(w))
         for (const w of pending) {
           clearTimeout(w.timer)
           // The other place a waiter is settled without an answer, so the other place the note belongs. A
@@ -800,7 +819,7 @@ export class TapflowClient {
         const note = sessionId ? this.sessionNote(sessionId) : undefined
         reject(new RequestTimeoutError(note ? `Request timed out — ${note}` : 'Request timed out'))
       }, timeoutMs)
-      this.waiters.push({ predicate, resolve, reject, timer, sessionId })
+      this.waiters.push({ predicate, resolve, reject, timer, sessionId, socket: this.ws })
     })
   }
 
@@ -896,14 +915,19 @@ export class TapflowClient {
    * call detached, so a model holding both calls open at once is ordinary rather than exotic.
    */
   disconnectDevice(sessionId: string): void {
+    // A finger this client put down is lifted before it leaves, as flow-runner's channel does: the relay stops routing
+    // this session's frames as it processes the leave, so the swipe itself can no longer end it (CodeRabbit on #1190).
+    const touch = this.openTouches.get(sessionId)
+    if (touch) {
+      this.send({ type: 'input:touch:cancel', sessionId })
+      this.send({ type: 'input:touch:end', sessionId, requestId: randomUUID(), payload: touch })
+      this.openTouches.delete(sessionId)
+    }
     this.send({ type: 'session:leave', sessionId })
+    this.leaves.set(sessionId, (this.leaves.get(sessionId) ?? 0) + 1)
     this.held.delete(sessionId)
     this.released.delete(sessionId)
-    this.settleSessionWaiters(sessionId, () => new SessionLeftError(
-      `This client left session ${sessionId} while the request was in flight. Whether it reached the ` +
-      'device is unknown, so check device state rather than assuming it did nothing, and do not repeat ' +
-      'the request blindly. Call connect_device again if you still want this session.',
-    ))
+    this.settleSessionWaiters(sessionId, () => leftError(sessionId))
   }
 
   // Correlated by `requestId` when the reply carries one, and by `sessionId` + type when it does not.
@@ -1114,35 +1138,63 @@ export class TapflowClient {
     endX: number,
     endY: number,
     durationMs = 300,
+    holdMs = 0,
   ): Promise<void> {
     // Fractional durations (e.g. 250.5) stay valid for 0.23.0 compatibility;
     // routed through failed() so a session-scoped failure carries the session note.
     if (!Number.isFinite(durationMs) || !(durationMs > 0) || durationMs > MAX_TIMER_MS) {
       throw this.failed(sessionId, `swipe duration must be a positive finite number no greater than ${MAX_TIMER_MS}ms`)
     }
+    if (!Number.isFinite(holdMs) || holdMs < 0 || holdMs > MAX_HOLD_MS) {
+      throw this.failed(sessionId, `swipe hold must be a finite number from 0 to ${MAX_HOLD_MS}ms`)
+    }
+    // Eight moves, the last on `to`, then the lift one interval later, nine intervals in all. The moves used to
+    // stop at 7/8 of the way, and every agent lifts where the last move was, so every swipe ended an eighth short — a
+    // drag-and-drop piece a replay dropped short of its slot (wdio demo app on
+    // Android: short of the end it failed at 300, 900 and 2000 ms; on the end it passed at 300 and 900).
     const STEPS = 8
-    const interval = durationMs / STEPS
+    const interval = durationMs / (STEPS + 1)
+    const leaves = this.leaves.get(sessionId) ?? 0
+    const ws = this.ws
+    // A leave ends the swipe as left (disconnectDevice lifted the finger); a dropped or replaced socket ends it as
+    // unconfirmed, since frames already sent may have reached the device (CodeRabbit on #1190).
+    const touch = { x: startX, y: startY }
+    const release = () => { if (this.openTouches.get(sessionId) === touch) this.openTouches.delete(sessionId) }
+    const left = () => (this.leaves.get(sessionId) ?? 0) !== leaves
+    const lost = () => this.ws !== ws || ws?.readyState !== WebSocket.OPEN
+    const stop = (): Error => {
+      if (left()) return leftError(sessionId)
+      release()
+      return this.failed(sessionId,
+      `Could not confirm the input reached the device: the relay connection dropped during the swipe${this.closeDetail()}. ` +
+        'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
+    }
+    const at = (point: { x: number; y: number }) => {
+      if (left() || lost()) throw stop()
+      this.send({ type: 'input:touch:move', sessionId, payload: point })
+      touch.x = point.x
+      touch.y = point.y
+    }
 
     this.send({ type: 'input:touch:start', sessionId, payload: { x: startX, y: startY } })
-    for (let i = 1; i < STEPS; i++) {
+    this.openTouches.set(sessionId, touch)
+    for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
       const t = i / STEPS
       // coordinates here are normalized 0-1 — rounding would snap every
       // intermediate move to a screen edge
-      this.send({
-        type: 'input:touch:move',
-        sessionId,
-        payload: {
-          x: startX + (endX - startX) * t,
-          y: startY + (endY - startY) * t,
-        },
-      })
+      // The last is the end itself, not 1 × the path, which floating point can leave a hair off.
+      at(i === STEPS ? { x: endX, y: endY } : { x: startX + (endX - startX) * t, y: startY + (endY - startY) * t })
     }
     await delay(interval)
+    // A drag held still before the lift, as flow-runner's channel does it (`scroll { until }` through `run_flow`).
+    if (holdMs > 0 && !(await holdStill([endX, endY], holdMs, at, () => !left() && !lost()))) throw stop()
+    if (left() || lost()) throw stop()
+    release()
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload: { x: endX, y: endY } })
     // A swipe that stays put is a hold to Android's adb path, which replays it after the end arrives — as a long press.
-    await this.awaitInputAck(sessionId, requestId, durationMs)
+    await this.awaitInputAck(sessionId, requestId, durationMs + holdMs)
   }
 
   // Awaits the agent's ack so a following input (e.g. pressKey Enter) is sent

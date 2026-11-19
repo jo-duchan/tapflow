@@ -20,7 +20,7 @@ const REPO = path.resolve(import.meta.dirname, '../..')
 // Measured floor. A source list that lost an entry hashes to something stable, and every assertion
 // below then passes while watching less than it says — the shape
 // `contributing/test-and-guard-coverage.md` calls a guard that certifies its own absence.
-const SOURCE_FILES = 5
+const SOURCE_FILES = 6
 
 describe('the shipped injected library matches what it was recorded against', () => {
   it('has a record at all', () => {

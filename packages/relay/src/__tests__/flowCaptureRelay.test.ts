@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import net from 'net'
 import os from 'os'
@@ -137,31 +137,47 @@ describe('Flow Capture through the relay', () => {
       expect(reads.map((r) => [r.phase, r.field?.value])).toEqual([['focus', '안녕'], ['value', '안녕']])
     })
 
-    it('tells the agent to warm its tree runner when a recorded person boots, on an agent that reads fields only', async () => {
+    it('tells the agent a recorded person is booting, and nothing else to warm', async () => {
       const fieldAgent = await capableAgent()
       const alice = await browser(1)
       await join(alice)
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
-      expect(boot.payload.recorded).toBe(true)
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload.observed).toBe(true)
+      // `recorded` (an unreleased runner hint) is gone: no agent warms anything for a recorded person.
+      expect(boot.payload).not.toHaveProperty('recorded')
     })
 
-    it('does not warm it for a person who turned capturing off', async () => {
+    it('does not observe a person who turned capturing off, whatever their browser claims', async () => {
       getDb().prepare('UPDATE users SET flow_capture = 0 WHERE id = 1').run()
       const fieldAgent = await capableAgent()
       const alice = await browser(1)
       await join(alice)
-      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')
-      expect(boot.payload.recorded).toBe(false)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2', recorded: true, observed: true } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload.observed).toBe(false)
+      expect(boot.payload).not.toHaveProperty('recorded')
     })
 
-    it('does not warm it on an agent that cannot read fields: the runner would cost memory for nothing', async () => {
+    it('does not observe a boot made while the dialog\'s replay holds the pause', async () => {
+      const fieldAgent = await capableAgent()
+      const alice = await browser(1)
+      await join(alice)
+      // The pause is held over a capture, which the first input starts.
+      alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
+      await waitForType(fieldAgent, 'input:key')
+      expect((await api('PUT', `/sessions/${sessionId}/capture/pause`, { cookie: cookieFor(1) })).status).toBe(200)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')
+      expect(boot.payload.observed).toBe(false)
+    })
+
+    it('observes on an agent that cannot read fields: watching touches needs no field read', async () => {
       const alice = await browser(1)
       await join(alice)
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
-      const boot = await waitForType<{ type: string; payload: { recorded?: boolean } }>(agent, 'device:boot')
-      expect(boot.payload.recorded).toBe(false)
+      const boot = await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(agent, 'device:boot')
+      expect(boot.payload.observed).toBe(true)
     })
 
     it('asks nothing of an agent that cannot answer', async () => {
@@ -311,19 +327,24 @@ describe('Flow Capture through the relay', () => {
       expect(reads[0]!.field).not.toHaveProperty('value')
     })
 
-    it('reads no field and warms no runner on a Mac over its memory line', async () => {
+    // The memory line gated these reads for an iOS agent that answered them through its tree runner, which never
+    // shipped: every agent that names the capabilities reads without starting anything on the Mac.
+    it('reads the field and the keyboard on a Mac over its memory line, and observes the person', async () => {
       const fieldAgent = await capableAgent()
       const alice = await browser(1)
       await join(alice)
-      let asked = 0
-      fieldAgent.on('message', (d) => { if (String(d).includes('ui:field:request')) asked++ })
+      const asked = { field: 0, keyboard: 0 }
+      fieldAgent.on('message', (d) => {
+        if (String(d).includes('ui:field:request')) asked.field++
+        if (String(d).includes('ui:keyboard:request')) asked.keyboard++
+      })
       fieldAgent.send(JSON.stringify({ type: 'agent:resources', resources: { cpuPercent: 0, memUsedMB: 99, memTotalMB: 100, slotsAvailable: 1, slotsTotal: 1, reportedAt: Date.now() } }))
       await new Promise((r) => setTimeout(r, 100))
       alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-2' } }))
-      expect((await waitForType<{ type: string; payload: { recorded?: boolean } }>(fieldAgent, 'device:boot')).payload.recorded).toBe(false)
+      expect((await waitForType<{ type: string; payload: { recorded?: boolean; observed?: boolean } }>(fieldAgent, 'device:boot')).payload.observed).toBe(true)
       alice.send(JSON.stringify({ type: 'input:key', sessionId, requestId: 'k1', payload: { code: 'KeyD', modifiers: 0 } }))
-      await new Promise((r) => setTimeout(r, 900))
-      expect(asked).toBe(0)
+      await vi.waitFor(() => expect(asked.field).toBeGreaterThan(0), { timeout: 2000 })
+      await vi.waitFor(() => expect(asked.keyboard).toBeGreaterThan(0), { timeout: 2000 })
     })
   })
 
@@ -332,6 +353,56 @@ describe('Flow Capture through the relay', () => {
     await join(alice)
     await tap(alice, 'r1')
     expect(kinds((await snapshot(1))!.entries)).toEqual(['input:touch:start', 'input:touch:end', 'ack'])
+  })
+
+  // Record-time observation (P1): what a recorded touch hit, from inside the app, kept beside the gesture it names.
+  describe('what a recorded touch hit, from the agent', () => {
+    const observation = { point: { x: 0.5, y: 0.5 }, moving: false, element: { label: 'Donuts', traits: 1, frame: { x: 0.1, y: 0.3, width: 0.3, height: 0.04 } } }
+
+    it('keeps it for a gesture the capture recorded, from the session\'s own agent', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation }))
+      await expect.poll(async () => (await snapshot(1))!.entries.find((e) => e.kind === 'touched')).toEqual(expect.objectContaining({ kind: 'touched', requestId: 'r1', touched: observation }))
+    })
+
+    it('keeps nothing for a gesture it never recorded, from another socket, or that it cannot read', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'nobody', observation }))
+      // Another Mac's agent, naming this session: only the session's own agent says what its device's touches hit.
+      const other = new WebSocket(`ws://localhost:${relayPort}`)
+      open.push(other)
+      await waitForOpen(other)
+      other.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: `other-agent-${seq}`, devices: [{ id: 'dev-9', name: 'iPhone 17', platform: 'ios', status: 'booted' }] }))
+      await waitForType(other, 'agent:registered')
+      other.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation }))
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation: { point: 'here' } }))
+      // Ordered after the three: a tap the agent answers.
+      await tap(alice, 'r2')
+      expect(kinds((await snapshot(1))!.entries)).not.toContain('touched')
+    })
+
+    // P2a: the app's verdict arrives as a second report for the gesture; a field the relay cannot read is dropped alone.
+    it('keeps the verdict, tap count and seq, and drops a field it cannot read rather than the report', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation: { ...observation, tapCount: 2, acted: true, seq: 1 } }))
+      agent.send(JSON.stringify({ type: 'capture:touched', sessionId, requestId: 'r1', observation: { ...observation, tapCount: 0, acted: 'yes', seq: 0 } }))
+      await expect.poll(async () => (await snapshot(1))!.entries.filter((e) => e.kind === 'touched').map((e) => (e as { touched: unknown }).touched))
+        .toEqual([{ ...observation, tapCount: 2, acted: true, seq: 1 }, observation])
+    })
+
+    it('tells the agent it keeps them, on every boot', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      alice.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
+      const boot = await waitForType<{ type: string; payload: { touchObservations?: boolean } }>(agent, 'device:boot')
+      expect(boot.payload.touchObservations).toBe(true)
+    })
   })
 
   // 1b-3b: the screen each step began on, sent by the person's own dashboard after the input.

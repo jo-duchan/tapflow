@@ -61,7 +61,8 @@ renders. Do not draw a disabled Label; a disabled field is shown by its control 
   `htmlFor`. Give it an `id` and point the control at it with `aria-labelledby`, as `VideoStorageCard` does.
   A label with neither names nothing. That is fine when the control carries its own name — the avatar and logo
   pickers' buttons have `aria-label` ("Change avatar"), so their Label is a visible heading only. It is a gap
-  when the control has no other name: `UploadBuildDialog`'s File and Status labels name nothing today.
+  when the control has no other name. `UploadBuildDialog` associates File with its picker button and Status
+  with its select trigger.
 - Above a control the label sits in the field assembly: `Label` + control + `FieldHint` or error, `gap-2` (28 of
   33). The outliers are `AddAppDialog` (`gap-1.5`, 3) and `VideoStorageCard` (`gap-3`, 2, where the label shares
   a row with the slider's value). See [field.md](./field.md).

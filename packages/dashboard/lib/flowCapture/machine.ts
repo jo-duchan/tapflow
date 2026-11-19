@@ -1,6 +1,8 @@
 import {
-  askedValues, defaultRange, stepsBeforeRange, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type StepRange,
+  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector, type StepExpect,
+  type StepRange,
 } from '@tapflowio/flow-runner/browser'
+import type { AfterTouch } from './runner'
 import type { HeldResetReport } from './channel'
 
 /**
@@ -50,6 +52,11 @@ export interface CaptureState {
   /** Typed text the person made a secret in Edit (1b-3c), by index into `captured.steps`: the name it was given. A field
    *  the app does not mark as hiding its text — a card number, an API key — is otherwise written into the file. */
   made: Record<number, string>
+  /** The screen each touch left, by index into `matched` (one to one with `captured.steps`): Edit's "after this tap". */
+  after: Record<number, AfterTouch>
+  /** What the person expects each touch to bring (1b-3c), by index into `captured.steps`: written as an `assertVisible`
+   *  right after it. */
+  expected: Record<number, Selector[]>
   /** `live`: the steps the run has reached, as they start and end, for showing it while it runs; `result` replaces it. */
   verify: { status: 'running' | 'passed' | 'failed'; done: number; live: LiveStep[]; result?: FlowResult } | null
   /** Why the dialog stopped, said in the dialog. */
@@ -72,6 +79,27 @@ export interface CaptureState {
   /** How many of the last matched steps the replay added (a focus tap, a turn): taken to Edit without the step they were
    *  added for, they would be a flow of its own. */
   insertedTail: number
+  /** Match ended with taps the app did not respond to when recorded (P2c): the matched steps, waiting at Match's end for
+   *  the person to keep any before they go to Edit. Nothing is running then. */
+  review?: Review
+  /** Of those taps, the ones the person kept, by index into `steps` — the recording's own, so a choice outlives Start
+   *  again and a range moved around it. The rest are left out. */
+  kept: number[]
+  /** The review the steps in Edit came from: kept so a tap left out there can be put back in Edit (P2c), the flow made
+   *  again with it. Gone with the next replay. */
+  reviewed?: Review
+}
+
+/** A tap Match's review offers to leave out: `index` into the matched steps, `step` into the recording's. */
+export interface ReviewTap {
+  index: number
+  step: number
+  repeat: boolean
+}
+
+export interface Review {
+  matched: CapturedStep[]
+  taps: ReviewTap[]
 }
 
 export interface Divergence {
@@ -82,6 +110,13 @@ export interface Divergence {
   nowUrl: string
   /** What was left out of the comparison, as fractions of the picture: drawn as not compared. */
   masks: ScreenRect[]
+  /** Where they differ, as fractions of the picture: drawn as boxes. */
+  areas: ScreenRect[]
+  /** Most of the screen differs: said as one, not boxed place by place. */
+  mostly: boolean
+  /** Areas Continue anyway accepted at an earlier stop, carried to this step's screen and left out of `masks`' compare:
+   *  how many, and the step (into `steps`) first accepted from. */
+  carried?: { count: number; from: number }
 }
 
 export type CaptureEvent =
@@ -94,6 +129,14 @@ export type CaptureEvent =
   | { type: 'match-started'; total: number }
   | { type: 'step-matched'; step: CapturedStep; screenshot?: string; inserted?: boolean }
   | { type: 'match-finished'; captured: CapturedFlow }
+  /** Match ended (or was taken as far as it got) with taps to review: it waits at its end instead of going to Edit. */
+  | { type: 'match-reviewed'; review: Review }
+  /** Keep (or leave out again) a reviewed tap, by index into `steps`. */
+  | { type: 'set-kept'; step: number; kept: boolean }
+  /** Continue from Match's review: to Edit, the taps not kept left out. */
+  | { type: 'review-continued' }
+  /** In Edit, put a tap the review left out back into the flow, by index into `steps`. */
+  | { type: 'put-back'; step: number }
   | { type: 'match-failed'; error: string }
   | ({ type: 'diverged' } & Divergence)
   /** Continue anyway: the step is replayed and the comparison goes on from the next. */
@@ -102,6 +145,11 @@ export type CaptureEvent =
   | { type: 'back-to-range' }
   | { type: 'remove-step'; index: number }
   | { type: 'rename-secret'; from: string; to: string }
+  | { type: 'step-after'; index: number; after: AfterTouch }
+  /** What Match saw a touch do, by index into `matched`: on the step, as the run's own result has it. */
+  | { type: 'step-observed'; index: number; observed: StepExpect | null }
+  | { type: 'add-expected'; index: number; selector: Selector }
+  | { type: 'remove-expected'; index: number; n: number }
   | { type: 'make-secret'; index: number }
   | { type: 'keep-as-text'; index: number }
   /** The stepper: go to a step already reached (`canGoTo`). */
@@ -115,8 +163,8 @@ export type CaptureEvent =
 
 export const initialState: CaptureState = {
   phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
-  matched: [], screenshots: [], captured: null, removed: [], renamed: {}, made: {}, verify: null, error: null,
-  matchedRange: null, reached: 0, asked: {}, insertedTail: 0,
+  matched: [], screenshots: [], captured: null, removed: [], renamed: {}, made: {}, after: {}, expected: {}, verify: null, error: null,
+  matchedRange: null, reached: 0, asked: {}, insertedTail: 0, kept: [],
 }
 
 /**
@@ -124,8 +172,8 @@ export const initialState: CaptureState = {
  * the same steps in the next. Renamed secrets carry over: they are keyed by the name the capture gave the secret.
  */
 const replayed = {
-  matched: [], screenshots: [], captured: null, removed: [], made: {}, verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
-  diverged: undefined, moved: undefined, insertedTail: 0,
+  matched: [], screenshots: [], captured: null, removed: [], made: {}, after: {}, expected: {}, verify: null, error: null, matchedRange: null, reached: 1, reset: undefined,
+  diverged: undefined, moved: undefined, insertedTail: 0, review: undefined, reviewed: undefined,
 }
 
 const PHASE_AT: Record<number, Phase> = { 0: 'range', 2: 'edit', 3: 'verifying', 4: 'export' }
@@ -135,7 +183,7 @@ const edited = (state: CaptureState) => ({ verify: null, reached: Math.min(state
 
 export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
   switch (event.type) {
-    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {} }
+    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {}, kept: [] }
     case 'load-failed': return { ...state, phase: 'failed', error: event.error }
     case 'set-range': return { ...state, range: event.range, moved: undefined }
     case 'set-name': return { ...state, name: event.name }
@@ -158,11 +206,30 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     // Clears a stop's message: Edit what matched after Stop used to carry "stopped" into Verify, which then began failed.
     case 'match-finished': return {
       ...state, phase: 'edit', captured: event.captured, renamed: joinsThatHold(state.renamed, event.captured.secrets),
-      matchedRange: state.range, reached: 2, error: null, diverged: undefined,
+      matchedRange: state.range, reached: 2, error: null, diverged: undefined, review: undefined,
+    }
+    case 'match-reviewed': return state.phase === 'matching' ? { ...state, review: event.review, error: null, diverged: undefined } : state
+    case 'review-continued': {
+      if (!state.review) return state
+      return { ...reduce(state, { type: 'match-finished', captured: reviewedCapture(state.review, state.kept) }), reviewed: state.review }
+    }
+    // The flow is made again from the review with the tap kept: same steps in the same places, so what Edit holds by a
+    // step's place (removed, made, expected, after) still points where it did. Like any edit, it asks for Verify again.
+    // A tap put back and then removed stays kept: the next Match's review shows it checked, where it can be unchecked.
+    case 'put-back': {
+      if (!state.reviewed || state.kept.includes(event.step)) return state
+      const kept = [...state.kept, event.step]
+      const captured = reviewedCapture(state.reviewed, kept)
+      return { ...state, ...edited(state), kept, captured, renamed: joinsThatHold(state.renamed, captured.secrets) }
+    }
+    case 'set-kept': {
+      const kept = state.kept.filter((i) => i !== event.step)
+      return { ...state, kept: event.kept ? [...kept, event.step] : kept }
     }
     // Stays on Match, so what was matched so far can still be taken into Edit or replayed from the start. Only while a
     // run is on screen: a run stopped by Back to Range or Edit what matched answers after the dialog has moved on.
-    case 'match-failed': return state.phase === 'matching' || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
+    // Not at a review: the run it came from was taken as far as it got, and its stop is what said so (review of P2c).
+    case 'match-failed': return (state.phase === 'matching' && !state.review) || state.phase === 'verifying' ? { ...state, error: event.error, diverged: undefined } : state
     case 'diverged': {
       const { type: _, ...divergence } = event
       return state.phase === 'matching' ? { ...state, diverged: divergence } : state
@@ -173,7 +240,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       // A range the person chose is theirs: only one still at the default is moved, and the move is said.
       const move = before.length > 0 && state.range.start === defaultRange(state.steps).start
       return {
-        ...state, phase: 'range', error: null, diverged: undefined,
+        ...state, phase: 'range', error: null, diverged: undefined, review: undefined,
         ...(move ? { range: { ...state.range, start: before[0]! }, moved: before } : {}),
       }
     }
@@ -187,6 +254,23 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
       const renamed = { ...state.renamed }
       for (const name of secretNames(state)) if ((renamed[name] ?? name) === current) renamed[name] = event.to
       return { ...state, ...edited(state), renamed: { ...renamed, [event.from]: event.to } }
+    }
+    case 'step-observed': {
+      const step = state.matched[event.index]
+      if (!step) return state
+      const matched = [...state.matched]
+      matched[event.index] = { ...step, observed: event.observed }
+      return { ...state, matched }
+    }
+    case 'step-after': return { ...state, after: { ...state.after, [event.index]: event.after } }
+    case 'add-expected': {
+      const list = state.expected[event.index] ?? []
+      if (list.some((s) => JSON.stringify(s) === JSON.stringify(event.selector))) return state
+      return { ...state, ...edited(state), expected: { ...state.expected, [event.index]: [...list, event.selector] } }
+    }
+    case 'remove-expected': {
+      const list = (state.expected[event.index] ?? []).filter((_, n) => n !== event.n)
+      return { ...state, ...edited(state), expected: { ...state.expected, [event.index]: list } }
     }
     case 'make-secret': {
       const step = state.captured?.steps[event.index]?.step
@@ -202,7 +286,7 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
     }
     case 'go-to': {
       const phase = PHASE_AT[event.step]
-      return phase && canGoTo(state, event.step) ? { ...state, phase, error: null } : state
+      return phase && canGoTo(state, event.step) ? { ...state, phase, error: null, review: undefined } : state
     }
     case 'verify-started': return { ...state, phase: 'verifying', verify: { status: 'running', done: 0, live: [] }, reached: 3, reset: undefined, error: null }
     case 'device-reset': return { ...state, reset: event.report }
@@ -216,8 +300,9 @@ export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
 
 /** Whether something is running on the device: the replay, or the verification. Nothing is gone back to then. */
 export function isRunning(state: CaptureState): boolean {
-  // An error ends either run: a verification that threw is left `running`, with the reason in `error`.
-  return state.error === null && (state.phase === 'matching' || (state.phase === 'verifying' && state.verify?.status === 'running'))
+  // An error ends either run: a verification that threw is left `running`, with the reason in `error`. So does a Match
+  // waiting at its end for its review.
+  return state.error === null && ((state.phase === 'matching' && !state.review) || (state.phase === 'verifying' && state.verify?.status === 'running'))
 }
 
 const sameRange = (a: StepRange, b: StepRange | null) => b !== null && a.start === b.start && a.end === b.end
@@ -310,4 +395,28 @@ function freeSecretName(state: CaptureState): string {
   let n = 2
   while (names.has(`SECRET_${n}`)) n++
   return `SECRET_${n}`
+}
+
+/**
+ * The taps Match's review offers to leave out (`noResponseTaps`), each with its step in the recording. A matched step
+ * carries the recording's own step object (`withAsked` replaces only typed text), so it is found by identity; one not
+ * found (a step the replay made) is not offered.
+ */
+export function reviewTaps(steps: readonly RawStep[], matched: readonly CapturedStep[]): ReviewTap[] {
+  return noResponseTaps(matched).flatMap((t) => {
+    const step = steps.indexOf(matched[t.index]!.raw)
+    return step < 0 ? [] : [{ index: t.index, step, repeat: t.repeat }]
+  })
+}
+
+/** The flow Match's review makes: the reviewed taps the person did not keep left out, before the flow is made. */
+export function reviewedCapture(review: Review, kept: readonly number[]): CapturedFlow {
+  const keep = new Set(kept)
+  return toFlowSteps(leaveOut(review.matched, review.taps.filter((t) => !keep.has(t.step)).map((t) => t.index)))
+}
+
+/** Where Match goes when it ends, or is taken as far as it got: to its review when the app ignored some taps, else Edit. */
+export function matchEnded(steps: readonly RawStep[], matched: CapturedStep[]): CaptureEvent {
+  const taps = reviewTaps(steps, matched)
+  return taps.length > 0 ? { type: 'match-reviewed', review: { matched, taps } } : { type: 'match-finished', captured: toFlowSteps(matched) }
 }

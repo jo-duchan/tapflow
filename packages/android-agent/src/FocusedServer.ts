@@ -1,18 +1,21 @@
 import { randomBytes } from 'crypto'
+import { performance } from 'perf_hooks'
 import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { createLogger } from '@tapflowio/agent-core'
 
 const logger = createLogger('android-agent:focused-server')
 
-/** A request to the jar's `Focused`: read the field, set its text, or press its IME action. */
-export type FocusedOp = 'read' | 'set' | 'ime' | 'reach'
+/** A request to the jar's `Focused`: read the field, set its text, or press its IME action; where touches land
+ *  (`reach`), what a touch-down hit (`hit`); keep one UiAutomation connection for every request or let it go
+ *  (`hold`, `release`); or nothing but keeping the server up (`ping`). */
+export type FocusedOp = 'read' | 'set' | 'ime' | 'reach' | 'hit' | 'hold' | 'release' | 'ping' | 'dump'
 
 /**
  * What became of a request. `not-sent`: nothing reached the device, so the one-shot `Focused` may do it instead.
  * `sent`: it was written; `out` is the answer, or `null` when none came — the device may have done it, so a set or an
  * IME action must not be done again (a set inserts at the caret: twice is the text twice).
  */
-export type FocusedOutcome = { sent: false } | { sent: true; out: string | null }
+export type FocusedOutcome = { sent: false } | { sent: true; out: string | null; writtenAt: number }
 
 export interface FocusedServerOptions {
   /** Start the server: the adb arguments go to a child whose stdin and stdout are the server's. */
@@ -35,6 +38,10 @@ interface Server {
   exited: Promise<void>
   /** Ended on purpose (`stop`): a request waiting for it is not a start that failed. */
   stopping: boolean
+  /** It holds a UiAutomation connection (`hold`): nothing else on the device can connect until it is released. */
+  held: boolean
+  /** It answered a hold with an error (its cache cannot be cleared): not asked again until it restarts. */
+  holdRefused: boolean
   idle: ReturnType<typeof setTimeout> | undefined
 }
 
@@ -77,7 +84,7 @@ export class FocusedServers {
    * `startFailed` says the server could not be started on this device: the jar on it may be gone (a wiped emulator on
    * the same serial), so the caller pushes it again.
    */
-  async request(serial: string, jar: string, op: FocusedOp, text?: string): Promise<FocusedOutcome & { startFailed?: true }> {
+  async request(serial: string, jar: string, op: FocusedOp, text?: string, timeoutMs = this.answerTimeoutMs): Promise<FocusedOutcome & { startFailed?: true }> {
     if ((this.failedUntil.get(serial) ?? 0) > this.now()) return { sent: false }
     const server = this.servers.get(serial) ?? this.start(serial, jar)
     if (server.idle) clearTimeout(server.idle)
@@ -94,20 +101,39 @@ export class FocusedServers {
       server.pending.delete(id)
       return { sent: false }
     }
+    // On a monotonic clock: what a touch's hit sets the device's clock against (`TouchWatch`).
+    const writtenAt = performance.now()
     let timer: ReturnType<typeof setTimeout> | undefined
-    const out = await Promise.race([answer, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), this.answerTimeoutMs) })])
+    // A tree dump has its own bound (its quiet wait, then a window to read), longer than every other request's.
+    const out = await Promise.race([answer, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs) })])
     clearTimeout(timer)
     server.pending.delete(id)
     // No answer: the server may be stuck inside a connection, which would refuse the next dump's. It goes before the
     // queue moves on, and the next request starts another.
     if (out === null) {
-      logger.warn(`${serial}: no answer from the field server in ${this.answerTimeoutMs} ms; restarting it`)
+      logger.warn(`${serial}: no answer from the field server in ${timeoutMs} ms; restarting it`)
       await this.stop(serial)
     } else if (this.servers.get(serial) === server) {
       server.idle = setTimeout(() => { void this.stop(serial) }, this.idleStopMs)
       server.idle.unref?.()
     }
-    return { sent: true, out }
+    if (op === 'hold' && out !== null) {
+      if (out.includes('"held":true')) server.held = true
+      else if (out.includes('"error"')) server.holdRefused = true
+    }
+    // A release with no answer leaves the server restarted above, which lets go of the connection with the process.
+    if (op === 'release') server.held = false
+    return { sent: true, out, writtenAt }
+  }
+
+  /** Whether a hold would be worth asking for: the server has not refused one (a restarted server is asked again). */
+  mayHold(serial: string): boolean {
+    return this.servers.get(serial)?.holdRefused !== true
+  }
+
+  /** Whether the device's server holds its UiAutomation connection now. A server that died or was restarted does not. */
+  isHeld(serial: string): boolean {
+    return this.servers.get(serial)?.held === true
   }
 
   /** End the device's server and wait for it, bounded: a device gone, an agent going away, a server that hung. */
@@ -173,7 +199,7 @@ export class FocusedServers {
         resolveOne?.(line.slice(space + 1))
       }
     })
-    const server: Server = { child, nonce, ready, pending, exited, stopping: false, idle: undefined }
+    const server: Server = { child, nonce, ready, pending, exited, stopping: false, held: false, holdRefused: false, idle: undefined }
     this.servers.set(serial, server)
     return server
   }

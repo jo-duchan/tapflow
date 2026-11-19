@@ -142,7 +142,7 @@ describe('the steps the stepper goes to', () => {
 })
 
 describe('what Edit makes of the flow', () => {
-  const state = { captured, removed: [2], renamed: { PASSWORD: 'LOGIN_PASSWORD' }, made: {}, name: 'Sign in', tags: 'smoke, login' }
+  const state = { captured, removed: [2], renamed: { PASSWORD: 'LOGIN_PASSWORD' }, made: {}, expected: {}, name: 'Sign in', tags: 'smoke, login' }
 
   it('drops removed steps, renames secrets, and keeps only the values of secrets still used', () => {
     const edited = editedCapture(state)!
@@ -247,11 +247,12 @@ describe('the touches drawn', () => {
     expect(markOf(turned as unknown as RawStep)).toBeNull()
   })
 
-  it('moves the cursor to each touch and keeps the last few trails', () => {
+  // User, session ff5d3d3c: the last few strokes left on the replay read as a swipe made again and again.
+  it('moves the cursor to each touch and keeps only that touch\'s trail', () => {
     let m = NO_MARKS
     for (let i = 1; i <= 6; i++) m = addMark(m, i, { kind: 'tap', x: i / 10, y: 0.5 })
     expect(m.cursor).toEqual({ x: 0.6, y: 0.5 })
-    expect(m.trails.map((t) => t.id)).toEqual([3, 4, 5, 6])
+    expect(m.trails.map((t) => t.id)).toEqual([6])
     expect(addMark(m, 7, { kind: 'swipe', from: [0, 0], to: [1, 1] }).cursor).toEqual({ x: 1, y: 1 })
   })
 })

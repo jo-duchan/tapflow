@@ -16,6 +16,12 @@ licensed under the Apache License, Version 2.0.
     Copyright (C) 2018 Genymobile
     Copyright (C) 2018-2026 Romain Vimont
 
+This product bundles tinyh264
+(https://github.com/udevbe/tinyh264), by Erik De Rijcke,
+licensed under the Apache License, Version 2.0.
+It is built into the dashboard, which ships in the relay package, and decodes
+H.264 video in the browser when WebCodecs is not available.
+
 This product includes emulator_controller.proto from the Android Emulator
 (https://android.googlesource.com/platform/external/qemu),
 licensed under the Apache License, Version 2.0.

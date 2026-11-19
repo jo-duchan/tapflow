@@ -38,6 +38,21 @@ const RUN_RESET_PASTEBOARD_TIMEOUT_MS = 10_000
 // actually took is per device and per app, and `network:state.available` carries that — the split the
 // protocol documents. Added last, after the handler and the boot-time arming, because the string on
 // its own is what puts a control on screen.
+// Pairing the app's touch-down reports with the gestures sent (record-time observation). The report lands within a frame
+// of the touch (one turn of the app's main queue, measured); a tap's end comes 80 ms or more after its start.
+const TOUCH_REPORT_WAIT_MS = 500
+// The app's verdict (`acted`) is written a second after the lift (app-observer.m `TFO_ACT_GRACE_MS`), later on a busy
+// main queue: past this it is not waited for, and the gesture keeps the report it already has.
+const TOUCH_END_WAIT_MS = 3_000
+// Verdicts no pairing came for (a gesture whose down report was never paired) are not kept past this many.
+const TOUCH_END_KEEP = 16
+
+/** One touch across app processes: a seq restarts with each, so a verdict is kept and found by all three (CodeRabbit, #1168). */
+const touchKey = (t: { bundle: string; seq: number; at: number }): string => `${t.bundle}:${t.seq}:${t.at}`
+const TOUCH_REPORT_POLL_MS = 50
+const TOUCH_REPORT_KEEP_MS = 5_000
+const TOUCH_REPORT_SKEW_MS = 1_500
+const TOUCH_REPORT_NEAR = 0.03
 const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
@@ -111,6 +126,8 @@ import { PhysicalOrientation, ORIENTATION_DEGREES, turned, type DeviceOrientatio
 import type { GuestOrientation } from './GuestHelper.js'
 import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
+import { AppObserver, fieldOf, keyboardOf, type AppTouch, type AppTouchEnd, type AppTouchReport, type ObserverRead } from './AppObserver.js'
+import { AppAccessibility } from './AppAccessibility.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
@@ -154,6 +171,12 @@ export interface IOSAgentOptions {
   lean?: boolean
   /** Where the launchd overrides are written. Injectable for the same reason as `network`. */
   leanStore?: LeanStore
+  /** The app observer's host side. Injectable for the same reason as `network`; under vitest the default asks in a
+   *  directory under the OS temp folder rather than the simulators' /tmp. */
+  appObserver?: AppObserver
+  /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
+   *  default keeps its markers in a directory under the OS temp folder. */
+  appAccessibility?: AppAccessibility
   /** Device frame loading. Under vitest the default points at directories that do not exist, so a suite never
    *  reads the developer's Xcode chrome or spends seconds rendering it. */
   chromeLoader?: DeviceChromeLoader
@@ -385,6 +408,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // The posture last reported per device, so the poll reports only a change.
   private readonly reportedPosture = new Map<string, string | null>()
   private readonly uiTreeReader = new XCUITreeReader()
+  // The soft keyboard and the focused field for Flow Capture, from inside the app under test rather than through the
+  // tree runner (AGENTS.md, "App observer").
+  private readonly appObserver: AppObserver
+  private readonly appAccessibility: AppAccessibility
+  // Apps being installed, by device, with how many installs of each are in flight: such an app cannot be in front,
+  // which a read with no app named yet then says.
+  private readonly installing = new Map<string, Map<string, number>>()
+  // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
+  // observation): the gestures sent there, newest last, and the reports not yet paired with one.
+  private readonly touchWatch = new Map<string, { since: number; starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[]; ends: Map<string, AppTouchEnd> }>()
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -455,6 +488,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // handler, so the only path that tells a tester enforcement was lost was reachable in production
     // and in nothing else.
     this.network.setEnforcementLostHandler((deviceId) => { this.reportEnforcementLost(deviceId) })
+    this.appObserver = options.appObserver ?? new AppObserver(
+      { appRunning: (udid, bundleId) => this.simctl.appRunning(udid, bundleId) },
+      process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
+    )
+    this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
+      this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
+    )
     this.fps = options.fps ?? 30
     this.intervalMs = options.intervalMs
     this.reconnectDelays = options.reconnectDelays ?? [1000, 2000, 4000, 8000, 16000, 30000]
@@ -499,6 +539,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.relayUrl = relayUrl
     const allDevices = await this.simctl.listDevices(listTimeoutMs)
     this.revertLeftoverLean(allDevices)
+    this.restoreLeftoverAccessibility(allDevices)
     // A `disconnect()` during this await or the one above does not cancel the connect. Every caller
     // today exits the process on the next line (the CLI's SIGINT handlers); one that keeps running
     // needs a generation check here before the socket is built.
@@ -740,6 +781,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       this.cleanupDeviceState(state)
     }
     this.deviceStates.clear()
+    // Nobody reads the app's touch reports once this agent is gone: off, and what is on disk removed.
+    for (const deviceId of this.touchWatch.keys()) void this.appObserver.stopTouches(deviceId).catch(() => {})
+    this.touchWatch.clear()
     for (const deviceId of [...this.guests.keys()]) this.stopGuest(deviceId)
     this.uiTreeReader.stop()
     // The liveness watcher outlives every device it was started for, so it is stopped here with the
@@ -827,6 +871,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
+    if (this.touchWatch.delete(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
     // so a simulator that goes away while offline would otherwise keep its udid named there for the
     // rest of the Mac's uptime — and the next boot of that same device would come up offline with
@@ -1045,6 +1091,18 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    *  `device:boot-error` as a failure — deliberately, since Android's dead-stream report has no id it could
    *  carry (#426). So sending one for a boot with no correlator would put an error toast on a tester's
    *  screen for a device that is booting normally. */
+  /**
+   * Name the app the observer answers for (`TAPFLOW_OBSERVE_BUNDLE`), before it can start: dyld reads the environment
+   * at process start. Its own variable, not the network target's, which also opens that control's verdict window
+   * (`SimulatorNetwork.target`) and would unsettle the network state of an app already running. Best-effort: an app
+   * not named is not observed, and its reads come back unknown.
+   */
+  private async observeApp(deviceId: string, bundleId: string): Promise<void> {
+    await this.simctl.setSimulatorEnv(deviceId, 'TAPFLOW_OBSERVE_BUNDLE', bundleId).catch((e: unknown) => {
+      logger.warn('could not name the app to observe:', (e as Error).message)
+    })
+  }
+
   private abandonBoot(state: DeviceState, seq: number, sessionId: string, requestId?: string): void {
     const reason = state.bootAbandon.get(seq) ?? 'superseded'
     state.bootAbandon.delete(seq)
@@ -1067,7 +1125,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   // `requestId` is a parameter, never a field on `state`: `bootSeq` exists because two boots overlap,
   // and a correlator hoisted onto shared state would answer the first request with the second's id.
   // Optional because the relay's idle timer boots nothing — but every *browser* boot carries one.
-  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, deviceId: string, fullErase = false, acceptH264 = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, warmTree = false, serviceTier?: ServiceTier, runReset?: RunResetRequest, observed = false, touchObservations = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -1215,6 +1273,37 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       await this.network.arm(deviceId).catch((e: unknown) => {
         logger.warn('could not arm the network injection:', (e as Error).message)
       })
+      // The app observer rides on the same injection: its directory, made private and emptied before any app runs,
+      // so nothing a previous boot left is read as this one's.
+      await this.appObserver.prepare(deviceId).catch((e: unknown) => {
+        logger.warn('could not prepare the app observer:', (e as Error).message)
+      })
+      // A boot a shutdown or a newer boot replaced since the prepare must not turn anything on (correctness review).
+      if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
+      // App accessibility, before any app launches (a running app keeps what it started with): on for a person Flow
+      // Capture records, so the observer can name what each touch hit; put back for anyone else, which also undoes
+      // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
+      // Decided at the boot only: a person who turns capturing on mid-session, or a boot inside a replay's pause, is
+      // observed from their next boot (design review).
+      await (observed ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
+        logger.warn(`could not ${observed ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
+      })
+      // The write above can take seconds (`defaults`, up to 5 s): a shutdown or disconnect in it already stopped the
+      // reports, and this boot must not turn them back on with nobody left to read them (CodeRabbit, #1166).
+      if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
+      // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
+      const observeTouches = observed && touchObservations
+      if (observeTouches) this.touchWatch.set(deviceId, { since: Date.now(), starts: [], reports: [], ends: new Map() })
+      else this.touchWatch.delete(deviceId)
+      await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
+        logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
+      })
+      // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
+      // read it. A newer boot is still waiting for its device here, so this stop cannot land on its watch.
+      if (observeTouches && seq !== state.bootSeq) {
+        await this.appObserver.stopTouches(deviceId).catch(() => {})
+        this.abandonBoot(state, seq, sessionId, requestId); return
+      }
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
       // DeviceHub and every viewer, so it is read and reported as it is, and a reload or a second viewer joins it
       // there rather than turning it under the first. It is stood up only when there is nothing to report — no
@@ -1304,6 +1393,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // An automation client's first selector step would otherwise spend the runner's cold start inside its timeout, and
       // a person Flow Capture records would have their first field read only after it (~12 s measured, #1135).
       if (warmTree) this.uiTreeReader.warm(deviceId)
+      else this.uiTreeReader.unkeep(deviceId)
 
       // Sync AppleKeyboards after ready — fire-and-forget so streaming isn't delayed.
       // hw=Automatic lets the hardware layout follow the active input source on LANG1/CapsLock.
@@ -1390,6 +1480,119 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   /**
+   * The app observer's read for the app under test. With none named yet and one being installed, the answer is that
+   * no app is in front: an app still installing cannot be, and asking nobody read as unknown, which kept Capture's
+   * range on the home-screen taps a person made while the install ran (a Food Truck install took ~10 s; measured).
+   */
+  private observerRead(deviceId: string): Promise<ObserverRead> {
+    const bundle = this.lastBundleIds.get(deviceId)
+    if (!bundle && this.installing.has(deviceId)) return Promise.resolve({ kind: 'away' })
+    return this.appObserver.read(deviceId, bundle ?? '')
+  }
+
+  /**
+   * Pair the app's report of a touch-down with the gesture `requestId` ended, and give it to the relay's capture. The
+   * agent pairs them, not the relay: it sent the touch and the app reported it on this Mac's clock, where the relay may
+   * run on another. Matched by the point (the same portrait space) and the time; waited for briefly, since the app
+   * writes its report on the next turn of its main queue. A gesture with no report gets nothing, and Capture judges it
+   * as before.
+   */
+  private async reportTouch(sessionId: string, deviceId: string, requestId: string, start: { x: number; y: number; at: number }): Promise<void> {
+    const watch = this.touchWatch.get(deviceId)
+    if (!watch) return
+    const bundle = this.lastBundleIds.get(deviceId)
+    const until = Date.now() + TOUCH_REPORT_WAIT_MS
+    for (;;) {
+      // Taken before it is added: a concurrent pairing replaces nothing under it (the list is changed in place only).
+      const taken = await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouchReport[])
+      // A boot that replaced the watch during the take owns what came off disk; this gesture's report went with the old.
+      const current = this.touchWatch.get(deviceId)
+      if (current !== watch) { if (current) this.keepTouchReports(current, taken); return }
+      this.keepTouchReports(watch, taken)
+      // A report is kept while it is recent, or as old as this gesture: a long press's ends past the keep window.
+      for (let k = watch.reports.length - 1; k >= 0; k--) {
+        const r = watch.reports[k]!
+        const stale = Date.now() - r.at >= TOUCH_REPORT_KEEP_MS && r.at < start.at - TOUCH_REPORT_SKEW_MS
+        if (stale || (bundle && r.bundle !== bundle)) watch.reports.splice(k, 1)
+      }
+      // The report nearest in time among those at the point: two quick taps at one spot must not trade reports.
+      let i = -1
+      watch.reports.forEach((r, k) => {
+        if (Math.abs(r.observation.point.x - start.x) >= TOUCH_REPORT_NEAR || Math.abs(r.observation.point.y - start.y) >= TOUCH_REPORT_NEAR) return
+        const d = Math.abs(r.at - start.at)
+        if (d < TOUCH_REPORT_SKEW_MS && (i < 0 || d < Math.abs(watch.reports[i]!.at - start.at))) i = k
+      })
+      if (i >= 0) {
+        const [report] = watch.reports.splice(i, 1)
+        this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: { ...report!.observation, seq: report!.seq } })
+        await this.reportTouchEnd(sessionId, deviceId, requestId, report!)
+        return
+      }
+      if (Date.now() >= until || this.touchWatch.get(deviceId) !== watch) return
+      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+    }
+  }
+
+  /**
+   * Down reports into the list the pairings read, verdicts by seq; verdicts nobody came for are kept to a few. A down
+   * report from before the watch began is a gesture of the boot it replaced, taken off disk across it: kept, a gesture
+   * of the new boot at the same spot could pair with it before its own report lands (CodeRabbit, #1168).
+   */
+  private keepTouchReports(watch: { since: number; reports: AppTouch[]; ends: Map<string, AppTouchEnd> }, taken: AppTouchReport[]): void {
+    for (const r of taken) {
+      if ('end' in r) watch.ends.set(touchKey(r), r)
+      else if (r.at >= watch.since) watch.reports.push(r)
+    }
+    for (const seq of watch.ends.keys()) {
+      if (watch.ends.size <= TOUCH_END_KEEP) break
+      watch.ends.delete(seq)
+    }
+  }
+
+  /**
+   * The app's verdict on the paired touch, matched by its seq (not by point and time: two quick taps at one spot are
+   * told apart exactly), sent as the same report with `acted` — the relay keeps the later. A verdict that says nothing
+   * (unknown) or never comes sends nothing more.
+   */
+  private async reportTouchEnd(sessionId: string, deviceId: string, requestId: string, report: AppTouch): Promise<void> {
+    const until = Date.now() + TOUCH_END_WAIT_MS
+    for (;;) {
+      const watch = this.touchWatch.get(deviceId)
+      if (!watch) return
+      // A seq starts again with each app process: the bundle and the down's time are what tell this touch from another.
+      const end = watch.ends.get(touchKey(report))
+      if (end) {
+        watch.ends.delete(touchKey(report))
+        if (end.acted !== undefined) this.sendMsg({ type: 'capture:touched', sessionId, requestId, observation: { ...report.observation, seq: report.seq, acted: end.acted } })
+        return
+      }
+      if (Date.now() >= until) return
+      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      const taken = await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouchReport[])
+      // Into the watch current now: a boot during the wait replaced it, and what was taken off disk is the new one's
+      // (CodeRabbit, #1168). With none left, they go as they would at teardown.
+      const current = this.touchWatch.get(deviceId)
+      if (current) this.keepTouchReports(current, taken)
+    }
+  }
+
+  /**
+   * App accessibility a recorded boot left on, for a device running now: the agent that marked it died before its
+   * shutdown or the next boot. A shut-down device keeps its marker until it next boots.
+   */
+  private restoreLeftoverAccessibility(devices: Device[]): void {
+    const running = new Set(devices.filter((d) => d.status === 'booted').map((d) => d.id))
+    // Touch reports an agent that died left on: the app would keep writing them with nobody to sweep them.
+    for (const udid of running) void this.appObserver.stopTouches(udid).catch(() => {})
+    for (const udid of this.appAccessibility.markedDevices()) {
+      if (!running.has(udid)) continue
+      void this.appAccessibility.restore(udid).catch((e: unknown) => {
+        logger.warn(`could not restore app accessibility left on ${udid}:`, (e as Error).message)
+      })
+    }
+  }
+
+  /**
    * A device left lean by a run that ended without shutting it down — a crash, a lost relay, a
    * tester quitting the simulator — is put back here if it is off, whatever `lean` says now: if Lean
    * mode is on, the next boot through tapflow applies it again. One still running is left alone,
@@ -1439,6 +1642,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
+    this.touchWatch.delete(deviceId)
+    void this.appObserver.stopTouches(deviceId).catch(() => { /* swept at the next boot's prepare */ })
+    // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
+    await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
+      logger.warn('could not restore app accessibility before the shutdown:', (e as Error).message)
+    })
     try {
       await this.simctl.shutdown(deviceId)
       this.revertLean(deviceId)
@@ -2099,9 +2308,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     switch (msg.type) {
       case 'device:boot': {
         // `external` and `automation` are added by the relay, never by the browser (see `DeviceBoot`).
-        const { deviceId, resetMode, acceptH264, secureContext, external, automation, recorded, serviceTier, runReset } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; recorded?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest }
+        const { deviceId, resetMode, acceptH264, secureContext, external, automation, serviceTier, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: string; acceptH264?: boolean; secureContext?: boolean; external?: boolean; automation?: boolean; serviceTier?: ServiceTier; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
         const sessionId = msg.sessionId
-        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true || recorded === true, serviceTier, runReset)
+        // `observed`: Flow Capture records this person. A relay that predates it sends none, and nobody is observed.
+        this.handleDeviceBoot(sessionId, deviceId, resetMode === 'full-erase', acceptH264 === true, { secureContext: !!secureContext, external: !!external }, msg.requestId, automation === true, serviceTier, runReset, observed === true, touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -2131,11 +2341,28 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           respond({ type: 'app:install-error', message: 'No booted device' })
           break
         }
+        const installingHere = this.installing.get(installState.deviceId) ?? new Map<string, number>()
+        if (bundleId) {
+          installingHere.set(bundleId, (installingHere.get(bundleId) ?? 0) + 1)
+          this.installing.set(installState.deviceId, installingHere)
+        }
         this.installBuild(installState.deviceId, filePath, bundleId, { buildTicket, buildName, buildBytes })
-          .then(() => {
+          .finally(() => {
+            if (!bundleId) return
+            const left = (installingHere.get(bundleId) ?? 1) - 1
+            if (left > 0) installingHere.set(bundleId, left)
+            else installingHere.delete(bundleId)
+            if (installingHere.size === 0 && this.installing.get(installState.deviceId) === installingHere) this.installing.delete(installState.deviceId)
+          })
+          .then(async () => {
             // A person may open the app from its home-screen icon rather than with Launch (measured, flow-runner
             // AGENTS.md): without this, every tree and field read on it would answer that no app was launched.
-            if (bundleId) this.lastBundleIds.set(installState.deviceId, bundleId)
+            if (bundleId) {
+              this.lastBundleIds.set(installState.deviceId, bundleId)
+              // Named for the observer now, not at Launch, for the same reason: an app opened from its icon is observed
+              // only if it was named before it started.
+              await this.observeApp(installState.deviceId, bundleId)
+            }
             respond({ type: 'app:install-done' })
           })
           .catch((e: unknown) => {
@@ -2173,6 +2400,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // this one unhooked while `available` would still say true.
         this.network.target(launchState.deviceId, bundleId)
           .catch((e: unknown) => logger.warn('could not name the network target:', (e as Error).message))
+          .then(() => this.observeApp(launchState.deviceId, bundleId))
           .then(() => this.simctl.launchApp(launchState.deviceId, bundleId, options))
           .then((pid) => {
             // **After the launch, with the pid it returned.** The network control measures how long a
@@ -2199,6 +2427,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { x, y } = msg.payload as { x: number; y: number }
         state.touchHelper?.touchStart(x, y)
+        const watch = this.touchWatch.get(state.deviceId)
+        if (watch) {
+          watch.starts.push({ x, y, at: Date.now() })
+          if (watch.starts.length > 8) watch.starts.shift()
+        }
         break
       }
       case 'input:touch:move': {
@@ -2222,6 +2455,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // `no-gesture`, where the stopped one it replaced would say the channel is gone.
         void (helper ? helper.touchEndAfterMinContact() : Promise.resolve(false))
           .then((sent) => this.ackInput(state, sent ? 'delivered' : this.refusalReason(state.touchHelper, 'continuation'), requestId))
+        // The gesture ending is the one that started last.
+        const start = this.touchWatch.get(state.deviceId)?.starts.at(-1)
+        if (start) void this.reportTouch(msg.sessionId, state.deviceId, requestId, start)
         break
       }
       // A client leaving mid-gesture (#1115). No ack: the client is leaving, and the end it sends next is answered.
@@ -2774,7 +3010,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.sendMsg({ type: 'ui:field:response', sessionId, requestId, field: null, reason: 'failed' }); break }
         // The answer is the field's whole contents, typed or filled in: sent to the relay and nowhere else, never logged.
         Promise.all([
-          this.uiTreeReader.readField(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? ''),
+          this.observerRead(state.deviceId).then(fieldOf),
           this.simctl.keyboardLanguage(state.deviceId).catch(() => undefined),
         ])
           .then(([read, language]) => this.sendMsg({
@@ -2788,8 +3024,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!sessionId || !requestId) break
         const state = this.deviceStates.get(sessionId)
         if (!state) { this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }); break }
-        this.uiTreeReader.readKeyboard(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '')
-          .then((keyboard) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard }))
+        this.observerRead(state.deviceId)
+          .then((read) => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardOf(read) }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
         break
       }

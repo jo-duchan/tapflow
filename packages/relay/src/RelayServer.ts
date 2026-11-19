@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
+import type { Duplex } from 'stream'
 import { WebSocketServer, WebSocket } from 'ws'
 import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
@@ -157,6 +158,28 @@ const BOOT_REFUSAL_MESSAGES: Record<BootRefusalReason, string> = {
 // Terminal input messages the MCP client awaits an ack for — if the agent is offline
 // the relay replies input:error so the client fails truthfully (non-terminal moves/starts
 // expect no ack and are dropped silently).
+/** How long a refused socket may stay open, unread, after its close frame and FIN, before it is destroyed. */
+const REFUSED_LINGER_MS = 1_000
+
+/**
+ * Refuses a socket at the handshake and reads it no further than one socket buffer. `close()` alone keeps reading
+ * until the peer answers or 30 s pass, buffering a message up to `maxPayload` (100 MiB) meanwhile — so a peer with
+ * no credential that never answered could make the relay hold that much per connection.
+ *
+ * Paused, the peer's close reply goes unread too, so the peer would wait for ws's 30 s timer to learn the
+ * connection is over. The FIN after the close frame tells it at once: MCP's startup waits only 1 s for the close
+ * code before calling a refusal a slow relay. The timer destroys a socket whose peer never closes its side.
+ *
+ * Only for a socket refused before it was served: one closed later (`closeForAuth`) could send messages of that
+ * size while it was open, and keeps the ordinary close.
+ */
+function refuseUnread(ws: WebSocket, socket: Duplex, reason: string): void {
+  ws.close(1008, reason)
+  ws.pause()
+  socket.end()
+  setTimeout(() => ws.terminate(), REFUSED_LINGER_MS).unref()
+}
+
 /** Why a session is not this socket's to command. One reason, two prose strings — the treatment `#492`
  *  settled for `agent offline` / `Session not found`: telling a caller the session is in use when it is
  *  idle steers it off a device it could have had. Shared so the two never drift. */
@@ -1312,7 +1335,7 @@ export class RelayServer {
       })
       if (decision.action === 'reject') {
         this.logConnectionRejection(addr, decision.reason, pat?.patId)
-        ws.close(1008, decision.reason)
+        refuseUnread(ws, request.socket, decision.reason)
         return
       }
       // Only an accepted token was used; a refused one keeps its "last used".
@@ -1682,6 +1705,7 @@ export class RelayServer {
       case 'ui:reach:response':  this.handleUIReachResponse(ws, msg); break
       case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
       case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
+      case 'capture:touched':    this.handleCaptureTouched(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -2847,16 +2871,16 @@ export class RelayServer {
     (msg.payload as Record<string, unknown>)['external'] = this.wsExternal.get(ws) ?? false
     // Whether an automation client (flow runner, MCP) is booting, so the iOS agent can start its UI-tree runner
     // now instead of inside the first selector step's timeout. Only the holder can boot (`dispatchTarget`), so the
-    // holder's kind is the booter's. A dashboard boot is warmed only for a person Flow Capture records (below): the
-    // runner costs about 520 MB per device.
+    // holder's kind is the booter's. A person's boot warms nothing: their keyboard and field reads come from inside the
+    // app (ios-agent AGENTS.md, "App observer"), and an attached runner made a busy app lag.
     ;(msg.payload as Record<string, unknown>)['automation'] = isAiClientKind(boot.session.holderKind)
-    // A person Flow Capture records gets the runner warmed too (#1135): it is what reads the field they type into, and
-    // started on their first key its ~12 s cold start (measured) would miss the first field — a login, usually.
-    ;(msg.payload as Record<string, unknown>)['recorded'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
-      && hasCapability(boot.session.agentCapabilities, 'field-value')
-      // A person's join is let past the memory check because their device is up; the runner is not, and costs
-      // 110–360 MB (measured). On a Mac over its memory line the field is not read: the steps say so instead.
-      && !this.resourceLoad(boot.session)?.memOver
+    // This relay keeps what an agent observes a recorded touch hit (`capture:touched`): an agent sends them only when
+    // told so, since an older relay logs every message type it does not know.
+    ;(msg.payload as Record<string, unknown>)['touchObservations'] = true
+    // Whether Flow Capture records the person: the iOS agent turns record-time observation and app accessibility on by
+    // it. Ungated by memory: neither starts anything on the Mac (app accessibility measured at 13–21 MB an app), and a
+    // gate here turned every touch observation off for a boot on a busy Mac.
+    ;(msg.payload as Record<string, unknown>)['observed'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
     if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
       // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
       this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })
@@ -4045,8 +4069,9 @@ export class RelayServer {
   private readField(sessionId: string): Promise<FieldRead> | null {
     const session = this.sessions.get(sessionId)
     if (!session || !hasCapability(session.agentCapabilities, 'field-value') || session.agentSocket.readyState !== WebSocket.OPEN) return null
-    // Over the memory line a read would start the runner the boot left cold (see `recorded`): the step is left unread.
-    if (this.resourceLoad(session)?.memOver) return null
+    // Not gated by the Mac's memory: no agent that names `field-value` starts anything on the Mac to answer. iOS reads
+    // from inside the app (plus one short `simctl spawn` for the keyboard language), Android through a server on the
+    // device. The gate was drawn for a runner-backed iOS read that never shipped.
     const agentSocket = session.agentSocket
     const requestId = randomUUID()
     return new Promise((resolve) => {
@@ -4080,8 +4105,7 @@ export class RelayServer {
   private readKeyboard(sessionId: string): Promise<KeyboardState> | null {
     const session = this.sessions.get(sessionId)
     if (!session || !hasCapability(session.agentCapabilities, 'keyboard-state') || session.agentSocket.readyState !== WebSocket.OPEN) return null
-    // The iOS read goes through the tree runner, which a Mac over its memory line does not start (see `readField`).
-    if (this.resourceLoad(session)?.memOver) return null
+    // Not gated by the Mac's memory, for the reason `readField` gives.
     const agentSocket = session.agentSocket
     const requestId = randomUUID()
     return new Promise((resolve) => {
@@ -4092,6 +4116,13 @@ export class RelayServer {
       })
       this.sendTo(agentSocket, { type: 'ui:keyboard:request', sessionId, requestId })
     })
+  }
+
+  /** What a recorded touch hit, from inside the app (record-time observation). Only the session's own agent says so. */
+  private handleCaptureTouched(ws: WebSocket, msg: Inbound<'capture:touched'>): void {
+    const session = this.sessions.get(msg.sessionId)
+    if (!session || session.agentSocket !== ws) return
+    this.captures.recordTouched(session.id, captureHolder(session), msg.requestId, msg.observation)
   }
 
   private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {

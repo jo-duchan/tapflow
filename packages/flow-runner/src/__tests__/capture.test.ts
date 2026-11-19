@@ -7,9 +7,13 @@ import type { KeyboardState } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
-  type MatchContext, type RawStep,
+  recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried, madeMidTransition,
+  type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
+import type { Step } from '../schema.js'
+import type { TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
+import { matchSelector } from '../selector.js'
 
 // A recording as the relay keeps it: messages stamped with its clock, acks after the inputs they answer.
 class Rec {
@@ -52,6 +56,13 @@ class Rec {
   launch(buildId = 7): this { return this.wait(100).msg({ type: 'app:launch', sessionId: 's', requestId: this.id(), buildId }, true) }
   install(buildId = 7): this { return this.wait(100).msg({ type: 'app:install', sessionId: 's', requestId: this.id(), buildId }, true) }
   steps(): RawStep[] { return segment(this.entries) }
+  /** The app's report of the last touch (record-time observation), keyed by its end as the relay keeps it. */
+  touched(touched: Omit<TouchObservation, 'point'>): this {
+    const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
+    const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
+    this.entries.push({ at: this.t + 10, kind: 'touched', requestId, touched: { point: { x: 0, y: 0 }, ...touched } })
+    return this
+  }
 }
 
 const el = (over: Partial<UIElement>): UIElement => ({
@@ -781,6 +792,47 @@ describe('defaultRange', () => {
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
     })
 
+    // Measured on iOS 26.5: a read takes about half a second, and home-screen pages turned faster than that left the
+    // second swipe with no read answered before it began. The one asked after the first ended answered before the second
+    // lifted, and a touch changes what is in front only as it lifts.
+    it('places a quick home-screen swipe by a read answered before it lifted', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.9, 0.5], [0.2, 0.5]])
+      const asked = r.t
+      r.wait(60).touch([[0.9, 0.5], [0.2, 0.5]], { stepMs: 120 })
+      r.entries.push({ at: r.t - 20, kind: 'keyboard', requestedAt: asked, keyboard: IOS_HOME, settled: false })
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 4, end: 5 })
+    })
+
+    // Review: the relay keeps reading while the home screen is in front, so a read can be asked while a touch is held.
+    // Asked about a screen the touch is already on, it does not say where the touch began.
+    it('does not place a touch by a read asked after it began', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      const start = r.t + 50
+      r.wait(50).touch([[0.5, 0.5]], { holdMs: 1000 })
+      r.entries.push({ at: start + 400, kind: 'keyboard', requestedAt: start + 100, keyboard: HOME, settled: false })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined])
+    })
+
+    // A button acts as it goes down: a read answered while it was held says what the press did.
+    it('places a button only by a read answered before it went down', () => {
+      const r = new Rec().install()
+      read(r, APP)
+      const asked = r.t
+      r.msg({ type: 'input:button', sessionId: 's', requestId: 'd', payload: { name: 'home', phase: 'down' } }, true)
+      r.entries.push({ at: r.t + 60, kind: 'keyboard', requestedAt: asked, keyboard: HOME, settled: false })
+      r.wait(120).msg({ type: 'input:button', sessionId: 's', requestId: 'u', payload: { name: 'home', phase: 'up' } }, true)
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'button'])
+      expect(steps[1]!.onHome).toBe(false)
+    })
+
     // A tap made before the next read answered: the read before it is the one the icon's tap started, still home.
     it('keeps a quick first tap in the app, which only the read after it places', () => {
       const r = new Rec().install()
@@ -807,6 +859,76 @@ describe('defaultRange', () => {
       const steps = r.steps()
       expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, undefined])
       expect(defaultRange(steps)).toEqual({ start: 3, end: 4 })
+    })
+
+    // iOS reports each touch the app takes, numbered from 1 in its process: the icon's tap is the one no app reported
+    // just before the app's first report. Measured on iOS 26.5 the range otherwise kept the icon's tap.
+    it('leaves out the icon\'s tap when the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.5, 0.75], [0.5, 0.6]])
+      read(r, IOS_HOME).touch([[0.3, 0.7]])
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.58, 0.93]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 4, end: 6 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    })
+
+    // Design review: a quick first tap whose report came too late to be paired looks like the icon's tap. Only the app's
+    // first report says which tap opened it.
+    it('keeps a first tap in the app that has no report, when the icon\'s tap was already read as home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, IOS_HOME).touch([[0.41, 0.93]])
+      read(r, APP).touch([[0.58, 0.93]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // A touch no app reported between them (a permission alert's Allow, SpringBoard's) leaves the first unknown.
+    it('does not take a tap for the icon\'s when another unreported touch comes before the app\'s first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.6]])
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBeUndefined()
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 4 })
+    })
+
+    // Pre-PR review: a launch between them is what opened the app, so the tap before it is not the icon's.
+    it('does not take a tap for the icon\'s when a launch comes before the app\'s first touch', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).launch()
+      read(r, APP).touch([[0.41, 0.93]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'tap', 'launch', 'tap'])
+      expect(steps[1]!.onHome).toBeUndefined()
+    })
+
+    it('places a touch the app reported in the app, whatever a read says', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.2, 0.3]]).touched({ moving: false, seq: 1 })
+      read(r, IOS_HOME).touch([[0.5, 0.4]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 1, end: 3 })
+    })
+
+    it('does not take a pinch for the icon\'s tap', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME)
+      r.msg({ type: 'input:pinch:start', sessionId: 's', payload: { f0: { x: 0.45, y: 0.5 }, f1: { x: 0.55, y: 0.5 } } })
+        .wait(16).msg({ type: 'input:pinch:move', sessionId: 's', payload: { f0: { x: 0.4, y: 0.5 }, f1: { x: 0.6, y: 0.5 } } })
+        .wait(300).msg({ type: 'input:pinch:end', sessionId: 's', requestId: r.id() }, true)
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.kind).toBe('pinch')
+      expect(steps[1]!.onHome).toBeUndefined()
     })
 
     it('keeps an open-url sent from the home screen: it is how the app was opened', () => {
@@ -1047,15 +1169,167 @@ describe('matchStep: the soft keyboard (#1135)', () => {
 describe('toFlowSteps', () => {
   const list = (n: number) => Array.from({ length: n }, (_, i) => el({ role: 'cell', label: `Item ${i}`, frame: { x: 0, y: i * 0.1, width: 1, height: 0.1 } }))
   const item30 = el({ role: 'cell', label: 'Item 30', frame: { x: 0, y: 0.5, width: 1, height: 0.1 } })
+  // The same list after the swipe: its rows moved up with the finger, and Item 30 came on. A scroll, as a device shows it.
+  const scrolledTo30 = [...list(8).map((e) => ({ ...e, frame: { ...e.frame, y: e.frame.y - 0.3 } })).filter((e) => e.frame.y >= 0), item30]
 
   it('turns a swipe that brought the tapped element on screen into scroll until it', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps.map((s) => s.step)).toEqual([
       { type: 'scroll', direction: 'down', until: { text: 'Item 30' } },
       { type: 'tapOn', selector: { text: 'Item 30' } },
     ])
     expect(flow.steps[0]!.auto).toBe(true)
+  })
+
+  // A drag-and-drop that completed a puzzle brought Retry on a new screen (iOS, wdio demo app). As a scroll, Verify never
+  // dragged the last piece and searched for Retry on the puzzle.
+  it('keeps a swipe after which the screen was replaced, not scrolled', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const puzzle = [el({ label: 'Drag and Drop', frame: { x: 0.2, y: 0.1, width: 0.6, height: 0.05 } }), el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })]
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(puzzle)), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A fling past a whole screen leaves nothing in common; inside a scroll container it is still a scroll.
+  it('turns a swipe inside a list into a scroll even when nothing on screen stayed', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.9 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+  })
+
+  // Review: the view a touch begins on takes the scroll, so a fling that ends in the tab bar is still one.
+  it('takes a swipe begun in a list and ended below it for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.1]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+  })
+
+  // A sideways swipe on a row of a vertical list reveals its Delete; as a scroll, the engine's swipe across the middle
+  // of the screen would reveal another row's, or none.
+  it('keeps a sideways swipe in a vertical list as a swipe', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+    const row = (x: number) => el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.3, width: 1, height: 0.1 } })
+    const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.3, width: 0.2, height: 0.1 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, row(0), ...list(3)])), matchStep(tap!, ctxOf([table, row(-0.2), del, ...list(3)]))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A carousel inside a vertical list scrolls sideways: the innermost list decides.
+  it('takes a sideways swipe in a carousel inside a vertical list for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.2, 0.35]]).touch([[0.5, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const carousel = el({ role: 'list', frame: { x: 0, y: 0.25, width: 1, height: 0.2 } })
+    const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.27, width: 0.4, height: 0.16 } })
+    const flow = toFlowSteps([
+      matchStep(swipe!, ctxOf([table, carousel, card(1, 0.05), card(2, 0.55)])),
+      matchStep(tap!, ctxOf([table, carousel, card(2, -0.05), card(3, 0.45)])),
+    ])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+  })
+
+  // The list's axis from its items where its frame would say otherwise, and from its frame (height counted twice) where
+  // the items cannot say.
+  describe('the way a list scrolls', () => {
+    it('is sideways for items side by side, though the frame is tall: a pager of cards', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, card(1, 0.05), card(2, 0.55)])), matchStep(tap!, ctxOf([pager, card(2, -0.05), card(3, 0.45)]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
+    // Review: a container around a full-screen list (a window) lies within its frame too, and as the outermost element
+    // it hid the cards; the frame then said vertical.
+    it('is sideways for a full-screen row of cards inside a window of the same size', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const window = el({ role: 'other', label: 'Window', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const pager = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([
+        matchStep(swipe!, ctxOf([window, pager, card(1, 0.05), card(2, 0.55)])),
+        matchStep(tap!, ctxOf([window, pager, card(2, -0.05), card(3, 0.45)])),
+      ])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
+    // Review: a cell the size of its list is one of its items, not a container around it; dropped, the two controls
+    // side by side inside it read as a row and the sideways swipe that showed Delete became a scroll.
+    it('keeps a list-sized cell as an item: a sideways swipe on its row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const row = (x: number) => [
+        el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: 'Mail from Ann', frame: { x: x + 0.05, y: 0.32, width: 0.4, height: 0.06 } }),
+        el({ role: 'button', label: 'Star', frame: { x: x + 0.6, y: 0.32, width: 0.1, height: 0.06 } }),
+      ]
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.1, width: 0.2, height: 0.8 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...row(0)])), matchStep(tap!, ctxOf([table, ...row(-0.2), del]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })
+      const rows = (shift: number) => [0.25, 0.35, 0.45].map((y, i) => el({ role: 'cell', label: `Mail ${i}`, frame: { x: i === 1 ? shift : 0, y, width: 1, height: 0.08 } }))
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.35, width: 0.2, height: 0.08 } })
+      // A tab outside the list is not one of its items: counted, the layout would read as a grid.
+      const tab = el({ role: 'tab', label: 'Inbox', frame: { x: 0.05, y: 0.92, width: 0.2, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([short, ...rows(0), tab])), matchStep(tap!, ctxOf([short, ...rows(-0.2), del, tab]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    // Review: trees are flat, so a row's label and switch sit beside it; only the rows count. A short list (under half
+    // the screen) read by its frame would have been sideways, and its vertical scroll would have stayed a swipe.
+    it('reads rows by their outermost frames, not the labels and switches inside them', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.75], [0.5, 0.55]]).touch([[0.5, 0.63]]).steps()
+      const sheet = el({ role: 'list', frame: { x: 0, y: 0.5, width: 1, height: 0.4 } })
+      const row = (n: number, y: number) => [
+        el({ role: 'cell', label: `Setting ${n}`, frame: { x: 0, y, width: 1, height: 0.08 } }),
+        el({ role: 'text', label: `Setting ${n}`, frame: { x: 0.05, y: y + 0.02, width: 0.4, height: 0.04 } }),
+        el({ role: 'switch', label: `Setting ${n}`, identifier: `switch.${n}`, frame: { x: 0.8, y: y + 0.02, width: 0.12, height: 0.04 } }),
+      ]
+      const scrollBar = el({ label: 'Vertical scroll bar', frame: { x: 0.99, y: 0.52, width: 0.01, height: 0.3 } })
+      const before = [sheet, ...row(1, 0.52), ...row(2, 0.62), ...row(3, 0.72), scrollBar]
+      const after = [sheet, ...row(3, 0.52), ...row(4, 0.62), ...row(5, 0.72), scrollBar]
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf(before)), matchStep(tap!, ctxOf(after))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+
+    // A pager shows one page (pages off screen are dropped from the tree), so its way cannot be read and its frame says
+    // vertical: a sideways swipe on it stays a swipe, which replayed at its points turns the same one page.
+    it('keeps a sideways swipe on a tall pager as a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.75]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const page = (n: number, x: number) => [
+        el({ label: `Page ${n}`, identifier: `page.${n}`, frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: `Title ${n}`, frame: { x: x + 0.1, y: 0.2, width: 0.8, height: 0.06 } }),
+      ]
+      const next = el({ role: 'button', label: 'Start', frame: { x: 0.3, y: 0.72, width: 0.4, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, ...page(1, 0)])), matchStep(tap!, ctxOf([pager, ...page(2, 0), next]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    it('is vertical for one item in a frame wider than tall in parts of the screen but taller in pixels', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+      const box = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+      const item = (y: number) => el({ role: 'cell', label: 'Item 1', frame: { x: 0, y, width: 1, height: 0.1 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([box, item(0.5)])), matchStep(tap!, ctxOf([box, item(0.2), item30]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+  })
+
+  // Review: a screen wrapped whole in a scroll view, where a drag opened another screen that has none.
+  it('keeps a swipe begun in a scroll view when the next screen has none there', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const page = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([page, el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })])), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
   })
 
   it('keeps a swipe whose tapped element was on screen already: a pager, not a scroll', () => {
@@ -1068,7 +1342,7 @@ describe('toFlowSteps', () => {
   // iOS E2E: a scroll made with a mouse leans; at 4:1 it stayed a swipe and the tap after it failed in Verify.
   it('takes a swipe that leans, as one made with a mouse does, as the scroll it was', () => {
     const [swipe, tap] = new Rec().touch([[0.225, 0.724], [0.41, 0.286]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Item 30' } })
   })
 
@@ -1112,7 +1386,7 @@ describe('toFlowSteps', () => {
 
   it('keeps a diagonal swipe a swipe', () => {
     const [swipe, tap] = new Rec().touch([[0.2, 0.8], [0.7, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step?.type).toBe('swipe')
   })
 
@@ -1166,6 +1440,37 @@ describe('flowToYaml', () => {
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: [ 0.4, 0.6 ]')
     expect(yaml).toContain('inputText:\n      secret: PASSWORD')
+  })
+
+  // A character a person cannot see is written as its escape, so the file says what it is, and reads back the same.
+  it('writes an icon glyph, a zero-width space and a control as escapes, and keeps a joiner and plain text as they are', () => {
+    const steps = [
+      // First, so a stand-in named the same would be found here before the escaped string it stands for.
+      { type: 'tapOn', selector: { text: 'tapflowEscaped0x' } },
+      { type: 'tapOn', selector: { text: '\u{F01F0}' } },
+      { type: 'tapOn', selector: { label: 'Save\u200B', role: 'button' } },
+      { type: 'inputText', text: 'a\u0007"b"\\' },
+      { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
+      { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
+      { type: 'tapOn', selector: { text: 'a\u2028b' } },
+      // Review (CodeRabbit): a joiner is text only beside text; alone it shows nothing.
+      { type: 'tapOn', selector: { text: '\u200D' } },
+      { type: 'tapOn', selector: { text: ' \u3000' } },
+    ] as const
+    const yaml = flowToYaml({ name: 'Login\u200B', tags: ['\u3164'], steps: steps as never })
+    expect(parseFlow(yaml, 'x.yaml').name).toBe('Login\u200B')
+    expect(yaml).toContain('name: "Login\\u200B"')
+    expect(yaml).toContain('tapOn: "a\\u2028b"')
+    expect(yaml).toContain('tapOn: "\\u200D"')
+    expect(yaml).toContain('tapOn: " \\u3000"')
+    expect(yaml).toContain('tags: [ "\\u3164" ]')
+    expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
+    expect(yaml).toContain('tapOn: "\\U000F01F0"')
+    expect(yaml).toContain('label: "Save\\u200B"')
+    expect(yaml).toContain('inputText: "a\\x07\\"b\\"\\\\"')
+    expect(yaml).toContain('tapOn: 👩\u200D💻 Dev')
+    expect(yaml).toContain('tapOn: tapflowEscaped0x')
+    expect(yaml).toContain('text: "\\uE5CD"')
   })
 
   // #1125: what a touch brings rides beside its action, in the same file.
@@ -1234,5 +1539,265 @@ describe('recorded in the dashboard', () => {
       // Recorded before the relay read fields: no read tried, so neither is marked.
       expect(runs.some((s) => s.fieldRead !== undefined || s.replace)).toBe(false)
     }
+  })
+})
+
+// Record-time observation (P2b): what the app reported of each touch decides what Match replays and how.
+describe('touch reports', () => {
+  const load = (): CaptureEntry[] =>
+    (JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'capture-ios-touched.json'), 'utf8')) as { entries: CaptureEntry[] }).entries
+
+  it('leaves out a tap that went down on a moving list, and only that: the user\'s session 76c2ee09', () => {
+    const steps = segment(load())
+    // #33 back, #34 back (same point, other element), #35 swipe, #36 stopped the glide, #37 its retry, #38–39 swipes, #40 a row.
+    expect(steps.map((s) => s.kind)).toEqual(['tap', 'tap', 'swipe', 'tap', 'tap', 'swipe', 'swipe', 'tap'])
+    expect(steps.map((s) => s.dropped ?? null)).toEqual([null, null, null, 'stopped-scroll', null, null, null, null])
+    expect(steps.every((s) => 'touched' in s && s.touched !== undefined)).toBe(true)
+    const named = (s: RawStep) => ('touched' in s ? s.touched?.element?.label : undefined)
+    expect([named(steps[0]!), named(steps[1]!)]).toEqual(['Donuts', 'Truck'])
+  })
+
+  // P2c, the user's session af948002: a menu item that took two taps; the first, replayed, chose it, and the second
+  // opened the menu again.
+  describe('retried taps', () => {
+    const blueberry = { label: 'Blueberry Dough', traits: 1 }
+    it('pairs taps one after the other on the same named element, and nothing else', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry })
+        .wait(1500).touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .wait(1500).touch([[0.1, 0.1]]).touched({ moving: false, element: { label: 'Back', traits: 1 } })
+        .touch([[0.5, 0.5]]).touched({ moving: false, element: { label: 'Plus', traits: 1 } })
+        .touch([[0.5, 0.5]])
+        .steps()
+      expect(retryCandidates(steps)).toEqual([[0, 1]])
+      const out = dropRetried(steps, [0])
+      expect(out.map((s) => s.dropped ?? null)).toEqual(['retried', null, null, null, null])
+      expect(matchStep(out[0]!, ctxOf([])).skipped).toBe('retried')
+    })
+    it('does not pair across another step, a refused tap, or one already left out', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: true, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry })
+        .steps()
+      // The first stopped a list: it is out already.
+      expect(retryCandidates(steps)).toEqual([])
+      const refused = new Rec().touch([[0.6, 0.52]], { ok: false }).touched({ moving: false, element: blueberry })
+        .touch([[0.45, 0.51]]).touched({ moving: false, element: blueberry }).steps()
+      expect(retryCandidates(refused)).toEqual([])
+    })
+    // Review of P2c: a double tap is two taps by design; a quick second tap's picture may predate the first's effect;
+    // a field's first tap may only place the caret.
+    it('does not pair a double tap, two taps under a second apart, or taps into a field', () => {
+      const pair = (b: Partial<TouchObservation>, gap = 1500, element = blueberry) => retryCandidates(new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element })
+        .wait(gap).touch([[0.6, 0.52]]).touched({ moving: false, element, ...b }).steps())
+      expect(pair({})).toEqual([[0, 1]])
+      expect(pair({ tapCount: 2 })).toEqual([])
+      expect(pair({}, 400)).toEqual([])
+      expect(pair({}, 1500, { identifier: 'form.email', traits: 0, input: true } as never)).toEqual([])
+    })
+    // An outside review of #1171: a double tap, then a single tap on the same element later.
+    it('does not take a double tap\'s second for the first of a retry', () => {
+      const steps = new Rec()
+        .touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .wait(160).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 2 })
+        .wait(3500).touch([[0.6, 0.52]]).touched({ moving: false, element: blueberry, tapCount: 1 })
+        .steps()
+      expect(retryCandidates(steps)).toEqual([])
+    })
+  })
+
+  // P2c: the taps Match's review offers to leave out, and leaving them out before the flow is made.
+  describe('no-response taps', () => {
+    const tapOn = (label: string): Step => ({ type: 'tapOn', selector: { label } })
+    const tapRaw = (touched?: Partial<TouchObservation>): RawStep =>
+      ({ ...new Rec().touch([[0.5, 0.5]]).steps()[0]!, ...(touched ? { touched: { point: { x: 0.5, y: 0.5 }, moving: false, ...touched } } : {}) }) as RawStep
+    it('offers only taps the app said it did not respond to, still in the flow, and marks a repeat', () => {
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Title') },
+        { raw: tapRaw({ acted: true }), step: tapOn('Buy') },
+        { raw: tapRaw(), step: tapOn('Unknown') },
+        { raw: tapRaw({ acted: false, tapCount: 2 }), step: { type: 'tapPoint', at: [0.5, 0.5] } },
+        // Already out of the flow (refused, or stopped a list): nothing to ask.
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'refused' },
+        { raw: { ...new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).steps()[0]!, touched: { point: { x: 0.5, y: 0.8 }, moving: false, acted: false } } as RawStep, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } },
+      ]
+      expect(noResponseTaps(matched)).toEqual([{ index: 0, repeat: false }, { index: 3, repeat: true }])
+    })
+    it('does not offer one Match saw change the screen, or one right before typing', () => {
+      const typed = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      const matched: CapturedStep[] = [
+        { raw: tapRaw({ acted: false }), step: tapOn('Menu'), observed: { appear: [{ text: 'Settings' }] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Empty'), observed: { appear: [], gone: [] } },
+        { raw: tapRaw({ acted: false }), step: tapOn('Email') },
+        { raw: tapRaw({ acted: false }), step: null, skipped: 'keyboard' },
+        { raw: typed, step: { type: 'inputText', text: 'abc' } },
+      ]
+      expect(noResponseTaps(matched).map((t) => t.index)).toEqual([1])
+    })
+    // CodeRabbit on #1171: a typed secret has no step until the flow is made, and still types into the focused field.
+    it('does not offer a tap right before a typed secret', () => {
+      const secret = { ...tapRaw(), kind: 'text' } as unknown as RawStep
+      expect(noResponseTaps([
+        { raw: tapRaw({ acted: false }), step: tapOn('Password') },
+        { raw: secret, step: null, secret: { value: 'hunter2', known: true } },
+      ])).toEqual([])
+    })
+    // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
+    // Rows 1–5 before the swipe; after it Rows 4 and 5 have moved up with the finger and Row 9 has come on: a scroll.
+    const rows = (labels: number[], top: number) => labels.map((n, i) => el({ role: 'cell', label: `Row ${n}`, frame: { x: 0, y: top + i * 0.15, width: 1, height: 0.1 } }))
+    const before = rows([1, 2, 3, 4, 5], 0.1)
+    const after = [...rows([4, 5, 6, 7, 8, 9], 0.0), el({ label: 'Title', frame: { x: 0, y: 0.92, width: 1, height: 0.05 } })]
+    it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title'), tree: after }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9'), tree: after }], [1]))
+      expect(out.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { label: 'Row 9' } })
+    })
+    it('leaves them out before the flow is made, so a swipe for one alone stays a swipe', () => {
+      // The row was not on the screen the swipe started from: the swipe brought it, so it is a scroll to the row.
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9'), tree: after }
+      expect(toFlowSteps([swipe, tap]).steps[0]!.step).toMatchObject({ type: 'scroll' })
+      const out = toFlowSteps(leaveOut([swipe, tap], [1]))
+      expect(out.steps.map((s) => s.step?.type ?? s.skipped)).toEqual(['swipe', 'no-response'])
+    })
+  })
+
+  // P2a: the agent repeats a gesture's report once the app's verdict is in; the later one is the gesture's.
+  it('takes the later of two reports for one gesture', () => {
+    const [tap] = new Rec().touch([[0.3, 0.3]]).touched({ moving: false, tapCount: 1 }).touched({ moving: false, tapCount: 1, acted: false }).steps()
+    expect(tap && 'touched' in tap ? tap.touched : undefined).toEqual({ point: { x: 0, y: 0 }, moving: false, tapCount: 1, acted: false })
+  })
+
+  it('does not leave out a moving tap the device refused (already skipped), nor a swipe that began mid-glide', () => {
+    const steps = new Rec().touch([[0.5, 0.5]], { ok: false }).touched({ moving: true })
+      .wait(500).touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).touched({ moving: true }).steps()
+    expect(steps.map((s) => s.dropped ?? null)).toEqual([null, null])
+    expect(matchStep(steps[0]!, ctxOf([])).skipped).toBe('refused')
+  })
+
+  it('skips a dropped tap in Match: not replayed, no reach asked, matched as stopped-scroll', async () => {
+    const [tap] = new Rec().touch([[0.3, 0.3]]).touched({ moving: true, element: { label: 'New Orders', traits: 1 } }).steps()
+    const ctx = ctxOf([el({ label: 'New Orders', frame: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 } })])
+    expect(reachQuestions(tap!, ctx)).toEqual([])
+    expect(matchStep(tap!, ctx)).toMatchObject({ step: null, skipped: 'stopped-scroll' })
+    let sent = 0
+    const channel = { replayInputs: async () => { sent++ } } as unknown as Parameters<typeof replayStep>[0]
+    expect(await replayStep(channel, 's', tap!)).toBe('not-replayed')
+    expect(sent).toBe(0)
+  })
+
+  it('never starts the range on a dropped tap, and does not count one before it', () => {
+    const steps = new Rec().install().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
+    expect(defaultRange(steps).start).toBe(2)
+    // A range the person started on it warns by the first step the replay sends, which the reads place in the app.
+    const withHome = steps.map((s, i) => (i === 2 ? { ...s, onHome: false } : s))
+    expect(rangeWarnings(withHome, { start: 1, end: 3 })).toEqual([])
+    const before = steps.map((s) => ({ ...s, onHome: false }))
+    expect(stepsBeforeRange(before, { start: 3, end: 3 })).toEqual([2])
+    // CodeRabbit on #1167: with no install or launch the fallback chose the first step, dropped or not.
+    const bare = new Rec().touch([[0.3, 0.3]]).touched({ moving: true }).touch([[0.3, 0.3]]).touched({ moving: false }).steps()
+    expect(defaultRange(bare).start).toBe(1)
+  })
+
+  // A doubled tap's second touch lands while the first one's screen is still coming (Food Truck 282 ms, wdio 166 and
+  // 191 ms after the first, 2026-11-16): the recording pictured the screen before the first acted, the replay waits
+  // for it, so the two never look alike.
+  describe('madeMidTransition', () => {
+    const tapAt = (at: number, touched?: Partial<TouchObservation>): RawStep => ({
+      kind: 'tap', point: [0.5, 0.5], at, endAt: at + 100, outcome: 'landed', messages: [],
+      ...(touched ? { touched: { point: { x: 0.5, y: 0.5 }, moving: false, ...touched } } : {}),
+    }) as RawStep
+    const first = tapAt(0, { element: { label: 'Active', traits: 1 }, tapCount: 1 })
+    it('is a second touch iOS counted as one', () => {
+      expect(madeMidTransition(tapAt(280, { element: { label: 'Active', traits: 1 }, tapCount: 2 }), first)).toBe(true)
+    })
+    it('is a touch the app named nothing under, or one it did not report', () => {
+      expect(madeMidTransition(tapAt(280, { tapCount: 1 }), first)).toBe(true)
+      expect(madeMidTransition(tapAt(280), first)).toBe(true)
+    })
+    it('is not a named single touch, however soon', () => {
+      expect(madeMidTransition(tapAt(280, { element: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)      // CodeRabbit on #1176: a name on the button alone is a name too, as `recordedSelector` finds it by.
+      expect(madeMidTransition(tapAt(280, { button: { label: 'OK', traits: 1 }, tapCount: 1 }), first)).toBe(false)
+      expect(madeMidTransition(tapAt(280, { button: { identifier: 'ok', traits: 1 }, tapCount: 1 }), first)).toBe(false)
+    })
+    it('is not one made after the gap, start to start', () => {
+      expect(madeMidTransition(tapAt(450, { tapCount: 2 }), first)).toBe(false)
+    })
+    it('is not an unnamed touch a key away (a keypad the app names nothing on)', () => {
+      const key2 = { ...tapAt(250, { tapCount: 1 }), point: [0.62, 0.5] } as RawStep
+      expect(madeMidTransition(key2, first)).toBe(false)
+      expect(madeMidTransition({ ...tapAt(250), point: [0.62, 0.5] } as RawStep, first)).toBe(false)
+    })
+    it('is a repeat iOS counted, wherever the point read', () => {
+      expect(madeMidTransition({ ...tapAt(250, { tapCount: 2 }), point: [0.62, 0.5] } as RawStep, first)).toBe(true)
+    })
+    it('is not one after a touch the device did not report (Android): nothing says what either did', () => {
+      expect(madeMidTransition(tapAt(280), tapAt(0))).toBe(false)
+    })
+    it('is not one after anything but a tap', () => {
+      expect(madeMidTransition(tapAt(280, { tapCount: 2 }), { ...first, kind: 'swipe' } as RawStep)).toBe(false)
+      expect(madeMidTransition(tapAt(280, { tapCount: 2 }), undefined)).toBe(false)
+    })
+  })
+
+  describe('recordedTarget', () => {
+    const at = (x: number, y: number) => ({ x, y, width: 0.2, height: 0.05 })
+    it('finds the button by identifier first, then the element by label, nearest the recorded frame among several', () => {
+      const a = el({ label: 'Glaze', frame: at(0.1, 0.2) })
+      const b = el({ label: 'Glaze', frame: at(0.1, 0.7) })
+      const cell = el({ label: 'Daytime, Salty', identifier: 'cell.3', frame: at(0.5, 0.5) })
+      expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0, frame: at(0.1, 0.68) } })).toBe(b)
+      // The cell, not its subtitle, even where the subtitle is in the tree on its own.
+      const subtitle = el({ label: 'Salty', frame: at(0.5, 0.52) })
+      expect(recordedTarget([a, subtitle, cell], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Salty', traits: 0 }, button: { identifier: 'cell.3', traits: 1 } })).toBe(cell)
+      // Several with no frame to choose by: none rather than a guess.
+      expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0 } })).toBeNull()
+    })
+    // Review of P4: an Android list's rows share a resource id, and a fling leaves another row where the tapped one was.
+    it('tells rows that share an identifier apart by label, and names none when the label is gone', () => {
+      const row = (label: string, y: number) => el({ label, identifier: 'com.app:id/title', frame: at(0, y) })
+      const rows = [row('Item 30', 0.3), row('Item 31', 0.4), row('Item 37', 0.9)]
+      const tapped: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0, frame: at(0, 0.4) } }
+      expect(recordedTarget(rows, tapped)).toBe(rows[2])
+      expect(recordedTarget(rows.slice(0, 2), tapped)).toBeNull()
+      // One row of that id left on the screen is not the tapped one either.
+      expect(recordedTarget([rows[0]!], tapped)).toBeNull()
+      expect(recordedTarget([rows[2]!], tapped)).toBe(rows[2])
+      expect(matchSelector(rows, recordedSelector(tapped)!)).toEqual([rows[2]])
+    })
+    // Review of #1187: an identifier only one element has (iOS, a Compose test tag) names it whatever its label says now.
+    it('keeps an element alone with an identifier no list shares, though its label changed', () => {
+      const counter = el({ label: 'Count: 4', identifier: 'counter', frame: at(0.4, 0.5) })
+      const recorded: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'counter', label: 'Count: 3', traits: 1 } }
+      expect(recordedTarget([counter], recorded)).toBe(counter)
+    })
+    it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {
+      const field = el({ role: 'input', label: 'hunter2', secure: true })
+      const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
+      expect(recordedTarget([el({ label: 'q' })], obs({ surface: 'keyboard', element: { label: 'q', traits: 0 } }))).toBeNull()
+      expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
+      // A field that does not hide its text is not named by it either: its label can be what was typed.
+      const plain = el({ role: 'input', label: 'a@b.co', secure: false })
+      expect(recordedTarget([plain], obs({ element: { label: 'a@b.co', traits: 0, input: true } }))).toBeNull()
+      expect(recordedTarget([field], obs({ element: { label: 'hunter2', traits: 0 } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true, role: 'button' })
+      expect(recordedSelector(obs({ element: { label: 'Truck', traits: 0 } }))).toEqual({ label: 'Truck', exact: true })
+      // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
+      const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
+      expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
+      expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0 } }))).toEqual({ id: 'com.app:id/title', label: 'Item 37', exact: true })
+      expect(recordedSelector(obs({ element: { identifier: 'form.email', traits: 0, input: true } }))).toEqual({ id: 'form.email' })
+      // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
+      expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })
+    })
+  })
+
+  it('says which way a swipe scrolls, as `scroll` does', () => {
+    const [up, slanted] = new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).wait(300).touch([[0.2, 0.8], [0.4, 0.6], [0.6, 0.4]]).steps()
+    expect(scrollDirectionOf(up!, {})).toBe('down')
+    expect(scrollDirectionOf(slanted!, {})).toBeNull()
   })
 })

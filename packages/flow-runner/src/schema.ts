@@ -13,6 +13,9 @@ export interface Selector {
   // index (0-based) picks the Nth match when role/label still resolve to several.
   role?: string
   index?: number
+  /** With `label`: the label must be all of it — no falling back to a label that contains it. A value a flow checks
+   *  (a total, a count) is wrong when it is only part of what is shown: "Total $12" is not "Total $12.50". */
+  exact?: true
   timeoutMs?: number
 }
 
@@ -113,8 +116,8 @@ export function parseSelector(v: unknown, ctx: string): Selector {
     return { text: v }
   }
   if (isRecord(v)) {
-    const { id, label, role, index, timeout, ...rest } = v as {
-      id?: unknown; label?: unknown; role?: unknown; index?: unknown; timeout?: unknown
+    const { id, label, role, index, exact, timeout, ...rest } = v as {
+      id?: unknown; label?: unknown; role?: unknown; index?: unknown; exact?: unknown; timeout?: unknown
     }
     const unknownKeys = Object.keys(rest)
     if (unknownKeys.length > 0) throw new ValidationError(`${ctx}: unknown selector keys: ${unknownKeys.join(', ')}`)
@@ -138,6 +141,11 @@ export function parseSelector(v: unknown, ctx: string): Selector {
       if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) throw new ValidationError(`${ctx}: "index" must be a non-negative integer`)
       selector.index = index
     }
+    if (exact !== undefined) {
+      if (exact !== true) throw new ValidationError(`${ctx}: "exact" must be true, or left out`)
+      if (selector.label === undefined) throw new ValidationError(`${ctx}: "exact" needs a "label" to match exactly`)
+      selector.exact = true
+    }
     if (timeout !== undefined) {
       if (typeof timeout !== 'number' || !Number.isFinite(timeout) || !(timeout > 0) || timeout > MAX_TIMEOUT_SECONDS) {
         throw new ValidationError(`${ctx}: "timeout" must be a positive number of seconds no greater than ${MAX_TIMEOUT_SECONDS}`)
@@ -150,7 +158,7 @@ export function parseSelector(v: unknown, ctx: string): Selector {
     }
     return selector
   }
-  throw new ValidationError(`${ctx}: selector must be a string or { id, label, role, index, timeout }`)
+  throw new ValidationError(`${ctx}: selector must be a string or { id, label, role, index, exact, timeout }`)
 }
 
 function parsePoint(v: unknown, ctx: string, key: string): [number, number] {

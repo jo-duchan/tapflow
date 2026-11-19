@@ -1,4 +1,4 @@
-import type { BrowserToRelay, FieldReadReason, FocusedField, KeyboardState } from '../index.js'
+import type { BrowserToRelay, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '../index.js'
 
 /**
  * Flow Capture's record (#1125), as the relay keeps it and returns it from `/api/v1/sessions/:id/capture/snapshot`.
@@ -36,6 +36,9 @@ export type CaptureEntry =
    * on the app. `settled` is a read that matched the one before it, taken once the keyboard stopped moving.
    */
   | { at: number; kind: 'keyboard'; requestedAt: number; keyboard: KeyboardState; settled: boolean }
+  /** What a gesture's touch-down hit, seen from inside the app (record-time observation): `requestId` is the gesture's
+   *  `input:touch:end`'s. Absent for a touch the agent could not observe — a reader falls back per touch. */
+  | { at: number; kind: 'touched'; requestId: string; touched: TouchObservation }
 
 export interface CaptureSnapshot {
   id: string

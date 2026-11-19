@@ -46,3 +46,14 @@ describe('matchSelector — placeholder', () => {
     expect(matchSelector([a, b], { text: 'Name', role: 'button' })).toEqual([])
   })
 })
+
+// 1b-3c: a value a flow checks is wrong when it is only part of what is shown.
+describe('matchSelector — exact', () => {
+  it('takes the whole label only, never one that contains it', () => {
+    const total = el('Total $12.50')
+    expect(matchSelector([total], { label: 'Total $12' })).toEqual([total])
+    expect(matchSelector([total], { label: 'Total $12', exact: true })).toEqual([])
+    const twelve = el('Total $12')
+    expect(matchSelector([total, twelve], { label: 'Total $12', exact: true })).toEqual([twelve])
+  })
+})

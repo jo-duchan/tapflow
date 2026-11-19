@@ -130,8 +130,8 @@ export class SocketFlowDriver implements FlowDriver {
     return this.guard(() => this.client.tap(this.sessionId, fx, fy))
   }
 
-  swipe(from: [number, number], to: [number, number], durationMs: number) {
-    return this.guard(() => this.client.swipe(this.sessionId, this.point(...from), this.point(...to), durationMs))
+  swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number) {
+    return this.guard(() => this.client.swipe(this.sessionId, this.point(...from), this.point(...to), durationMs, holdMs))
   }
 
   inputText(text: string): Promise<void> {

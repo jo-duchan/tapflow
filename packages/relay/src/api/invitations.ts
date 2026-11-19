@@ -9,6 +9,10 @@ import { normalizeEmail, EMAIL_KEY_SQL, SYNTHETIC_EMAIL_DOMAIN } from '../lib/em
 import { makePasswordHash } from './auth.js'
 import { json } from '../router.js'
 
+// token, password, display_name — with room for a client that sends one more.
+const ACCEPT_FIELDS = 8
+const ACCEPT_FIELD_BYTES = 16 * 1024
+
 export function handleVerify(req: http.IncomingMessage, res: http.ServerResponse): void {
   const token = new URL(req.url ?? '/', 'http://x').searchParams.get('token')
   if (!token) return json(res, 400, { error: 'token required' })
@@ -28,13 +32,25 @@ export function handleAccept(
   res: http.ServerResponse,
   uploadsDir: string,
 ): void {
-  const bb = busboy({ headers: req.headers, limits: { fileSize: 2 * 1024 * 1024 } })
+  // Bounded on every axis, because nothing here is checked until the whole form is read and anyone may send one:
+  // busboy's defaults are 1 MiB per field and no limit on how many, so distinct field names held memory without
+  // end. The form has three text fields and one file.
+  const bb = busboy({
+    headers: req.headers,
+    limits: { fileSize: 2 * 1024 * 1024, files: 1, fields: ACCEPT_FIELDS, fieldSize: ACCEPT_FIELD_BYTES },
+  })
   const fields: Record<string, string> = {}
   let fileBuffer: Buffer | null = null
   let fileMime = ''
   let sizeError = false
+  let formTooLarge = false
 
-  bb.on('field', (name, val) => { fields[name] = val })
+  bb.on('field', (name, val, info) => {
+    if (info.valueTruncated) { formTooLarge = true; return }
+    fields[name] = val
+  })
+  bb.on('fieldsLimit', () => { formTooLarge = true })
+  bb.on('filesLimit', () => { formTooLarge = true })
 
   bb.on('file', (_field, stream, info) => {
     // busboy destroys a file's stream with an error when the body ends inside it, and a stream with no
@@ -44,16 +60,15 @@ export function handleAccept(
     if (!allowed.includes(info.mimeType)) { stream.resume(); return }
     fileMime = info.mimeType
     const chunks: Buffer[] = []
-    let size = 0
-    stream.on('data', (c: Buffer) => {
-      size += c.length
-      if (size <= 2 * 1024 * 1024) chunks.push(c)
-      else sizeError = true
-    })
+    stream.on('data', (c: Buffer) => { chunks.push(c) })
+    // busboy stops at `fileSize` rather than passing it, so counting bytes here never saw an oversized file and
+    // kept its first 2 MB as the avatar. `'limit'` is how it says the file was cut.
+    stream.on('limit', () => { sizeError = true })
     stream.on('end', () => { if (!sizeError) fileBuffer = Buffer.concat(chunks) })
   })
 
   bb.on('finish', () => {
+    if (formTooLarge) return json(res, 413, { error: 'Body too large' })
     if (sizeError) return json(res, 400, { error: 'Max 2MB for avatar' })
 
     const { token, password } = fields

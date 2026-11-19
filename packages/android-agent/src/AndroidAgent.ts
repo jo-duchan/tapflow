@@ -56,7 +56,7 @@ import { AdbWrapper } from './AdbWrapper.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
-import { parseUiAutomatorDump } from './uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump } from './uiTree.js'
 import { fieldResponseOf, keyboardStateOf } from './keyboard.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
@@ -68,6 +68,7 @@ import { bootPostureId, parseCurrentPosture, parsePostures } from './postures.js
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 import { LEAN_MARKER_PATH, reconcileLean, type LeanDevice } from './LeanPackages.js'
 import { BootSupersededError, installReclaimingStorage, type ReclaimDevice } from './StorageReclaim.js'
+import { TouchWatch } from './TouchWatch.js'
 
 const logger = createLogger('android-agent')
 
@@ -423,6 +424,8 @@ export interface AndroidAgentOptions {
 
 /** One `pm clear` or clipboard write of a run reset. */
 const RUN_RESET_CMD_TIMEOUT_MS = 10_000
+/** A launch slower than this is logged with where it waited (Flow Capture waits 30 s for one). */
+const LAUNCH_SLOW_MS = 10_000
 
 // Everything inside the per-device clipboard section must be bounded, or one stuck call wedges
 // every later copy/paste on that device. gRPC carries its own deadline; adb does not (and a
@@ -505,6 +508,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     ws.send(JSON.stringify(msg))
   }
   private deviceStates = new Map<string, DeviceState>()
+  /** A recorded person's touches, per device (Flow Capture P4): only for a boot the relay marked `observed` and that
+   *  keeps observations (`touchObservations`), as iOS. */
+  private readonly touchWatches = new Map<string, TouchWatch>()
+  /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
+   *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
+  private readonly appPackages = new Map<string, string>()
+  /** The latest launch begun per device: an older one finishing after it does not name the app under test. */
+  private readonly launchSeq = new Map<string, number>()
   /**
    * One queue of rotation commands per device (#910). Each `setRotation` is its own `adb` process, so
    * two sent back to back can land in either order, and a held ⌘⇧O or a boot reset racing the first
@@ -878,6 +889,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.touchWatches.get(state.deviceId)?.stop()
+    this.touchWatches.delete(state.deviceId)
     if (state.screenWatch) clearInterval(state.screenWatch)
     state.screenWatch = null
     const serial = this.adb.getSerial(state.deviceId)
@@ -2187,7 +2200,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     }
   }
 
-  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest, observeTouches = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -2325,6 +2338,20 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.sendChrome(state)
       void this.sendPostures(state)
       state.booted = true
+      // What each touch hits, while this person is recorded — decided at the boot, as iOS: turning capturing on
+      // mid-session is observed from the next boot. The stream's teardown (`cleanupDeviceState`) ends it.
+      this.touchWatches.get(avdId)?.stop()
+      this.touchWatches.delete(avdId)
+      const serial = this.adb.getSerial(avdId)
+      if (observeTouches && serial) {
+        this.touchWatches.set(avdId, new TouchWatch({
+          hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
+          framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
+          ping: (sr) => this.adb.pingFocusedServer(sr),
+          hold: (sr, on) => this.adb.holdConnection(sr, on),
+          send: (m) => this.sendMsg(m),
+        }, serial, () => this.appPackages.get(avdId)))
+      }
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
       // Clear a network condition the last session left behind, then report (#607).
       //
@@ -2956,8 +2983,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, secureContext, external, runReset } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest }
-        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset)
+        const { deviceId, resetMode, secureContext, external, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
+        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset, observed === true && touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -3028,7 +3055,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }
         }
         doInstall()
-          .then(() => respond({ type: 'app:install-done' }))
+          .then(() => {
+            if (bundleId) this.appPackages.set(state.deviceId, bundleId)
+            respond({ type: 'app:install-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
@@ -3059,16 +3089,34 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const launchNo = (this.launchSeq.get(state!.deviceId) ?? 0) + 1
+        this.launchSeq.set(state!.deviceId, launchNo)
+        // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
+        // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
+        const started = Date.now()
+        let phase = 'waiting for a late pm clear'
+        const slow = setTimeout(() => logger.warn(`app:launch on ${serial} still running after ${LAUNCH_SLOW_MS / 1000}s: ${phase}`), LAUNCH_SLOW_MS)
+        slow.unref?.()
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
-          .then(() => this.adb.launchApp(serial, bundleId, options, defaultsOnly === true))
+          .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
+          .then((applied) => {
+            // The app under test once it launched: a launch that failed leaves the one before, and one overtaken by a
+            // later launch does not take it back (CodeRabbit on #1187).
+            if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.
             console.warn('[tapflow] app:launch failed:', e instanceof Error && e.cause !== undefined ? e.cause : e)
             respond({ type: 'app:launch-error', message })
+          })
+          .finally(() => {
+            clearTimeout(slow)
+            const took = Date.now() - started
+            if (took >= LAUNCH_SLOW_MS) logger.warn(`app:launch on ${serial} answered after ${took}ms (${phase})`)
           })
         break
       }
@@ -3085,6 +3133,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           state.lastTouchPx = { x: px, y: py }
           this.fire(g.owner.touchDown(0, px, py))
         }
+        // After the down is sent: what it hit is asked off the touch's path. Not on the adb fallback (`helper`), which
+        // plays the whole gesture once its end arrives, so the down's time is not when the app saw it.
+        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
         break
       }
       case 'input:touch:move': {
@@ -3095,6 +3146,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // A move with no gesture behind it — or one whose backend has since been replaced — is not the
         // gesture the tester made. Dropped, as iOS drops it.
         const g = this.gestureOwner(state, 'touch')
+        if (g) this.touchWatches.get(state.deviceId)?.move(x, y)
         if (g?.via === 'helper') {
           g.owner.touchMove(x, y)
         } else if (g?.via === 'channel') {
@@ -3110,6 +3162,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const closed = this.closeGesture(state, 'touch')
+        const watch = this.touchWatches.get(state.deviceId)
+        if (closed.via === 'none') watch?.cancel()
+        else watch?.up(msg.sessionId, requestId)
         const seq = state.bootSeq
         const { x: upX, y: upY } = state.lastTouchPx
         // terminal of a tap/swipe → ack the gesture, on what the dispatch actually reported
@@ -3128,6 +3183,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) break
         const { x, y } = state.lastTouchPx
+        this.touchWatches.get(state.deviceId)?.cancel()
         const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
         if (closed.via === 'helper') closed.owner.touchCancel()
         else if (closed.via === 'channel') {
@@ -3730,12 +3786,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.dumpUiHierarchy(serial)
-          .then((xml) => this.sendMsg({
-            type: 'ui:tree:response',
-            sessionId,
-            requestId,
-            elements: parseUiAutomatorDump(xml),
-          }))
+          .then((xml) => this.parseTree(serial, xml))
+          .then((elements) => this.sendMsg({ type: 'ui:tree:response', sessionId, requestId, elements }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
@@ -3872,6 +3924,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     throw new PlatformError(result === 'no-focus'
       ? 'No text field has focus, and text other than ASCII cannot be typed without one'
       : 'Text other than ASCII could not be set on this device')
+  }
+
+  /** A dump as elements, normalised by the screen when a dialog's window is its root (`dumpRootFloats`): the screen's
+   *  size is asked only then, so a dump of the app's own window costs nothing more. */
+  private async parseTree(serial: string, xml: string): Promise<UIElement[]> {
+    return parseUiAutomatorDump(xml, dumpRootFloats(xml) ? await this.screenSize(serial) : null)
   }
 
   /** The screen Android draws, in device pixels: what a tree's and a keyboard's bounds are fractions of. */
@@ -4057,7 +4115,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   async queryUITree(): Promise<UIElement[]> {
-    return parseUiAutomatorDump(await this.adb.dumpUiHierarchy(this.soleLive().serial))
+    const serial = this.soleLive().serial
+    return this.parseTree(serial, await this.adb.dumpUiHierarchy(serial))
   }
 
   stream(): ReadableStream<Buffer> {

@@ -43,6 +43,7 @@ export async function replayStep(channel: ReplayChannel, sessionId: string, raw:
   // Checked first: a launch, an install or a clear-state after a cancel would wipe the app the person left.
   signal?.throwIfAborted()
   if (raw.outcome === 'refused') return 'refused-before'
+  if (raw.dropped) return 'not-replayed'
   switch (raw.kind) {
     // Typed as the flow types it, not as keys: a key becomes a character by the device's IME and the keyboard language
     // the device was left in, which nothing resets between replays. Measured: two Matches of one recording, replayed

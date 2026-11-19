@@ -258,6 +258,11 @@ pnpm install
 pnpm dev
 ```
 
+## Recognition
+
+- Gold Prize (NIPA President's Award), Open Track — [2026 Open Source Developer Contest (Korea)](https://osscontest.kr/notice/48)
+- Self-certified compliant with ISO/IEC 21031:2024 (SCI), verified by GSF — [certificate GSF-SCI-2026-00003](https://badges.greensoftware.foundation/awards/sci/gsf-sci-2026-00003) · [disclosure](https://github.com/Green-Software-Foundation/certification/blob/main/submissions/gsf-sci-2026-00003/disclosure.md)
+
 ## License
 
 [MIT](LICENSE) — Copyright © 2026-present tapflow contributors

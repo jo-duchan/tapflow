@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { isSecretName, toFlowSteps, type RawStep } from '@tapflowio/flow-runner/browser'
+import { isSecretName, type CapturedStep, type RawStep } from '@tapflowio/flow-runner/browser'
 import type { CaptureSnapshot } from '@tapflowio/protocol/capture'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Stepper } from '@/components/ui/stepper'
@@ -9,9 +9,10 @@ import { useFocusAfterSwap } from '@/hooks/useFocusAfterSwap'
 import { DashboardSessionChannel } from '@/lib/flowCapture/channel'
 import { copy } from '@/lib/flowCapture/copy'
 import { editedCapture, exportedFlow, flowOf, secretRename } from '@/lib/flowCapture/flow'
-import { canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { canGoTo, initialState, reachedStep, matchEnded, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, verifyFlow } from '@/lib/flowCapture/runner'
-import { compareWithRecording } from '@/lib/flowCapture/screenCompare'
+import { compareWithRecording, recordedAlike, tapDidNothing } from '@/lib/flowCapture/screenCompare'
+import { Remembered } from '@/lib/flowCapture/remembered'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { addMark, type StepMark } from '@/lib/flowCapture/marks'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
@@ -83,6 +84,9 @@ export default function FlowCaptureDialog({ tap, returnFocusRef, onClose }: {
         className="h-[min(calc(100dvh-4rem),56rem)] max-h-[min(calc(100dvh-4rem),56rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden [--picture-max:calc(min(100dvh-4rem,56rem)-16rem)]"
         // A click beside a running replay would end it by accident; Escape and Stop still do, on purpose.
         onInteractOutside={(e) => { if (busy) e.preventDefault() }}
+        // Escape closes the innermost thing open: Edit's offer of an element (`data-escape-local`) before the dialog.
+        // Radix hears it first, on the document, so the offer's own handler alone would close everything.
+        onEscapeKeyDown={(e) => { if ((e.target as Element | null)?.closest?.('[data-escape-local]')) e.preventDefault() }}
         onCloseAutoFocus={(e) => { e.preventDefault(); returnFocusRef.current?.focus() }}
       >
         <DialogHeader>
@@ -130,9 +134,11 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   close: () => void
 }) {
   const [state, dispatch] = useReducer(reduce, snapshot, initFrom)
+  // What Continue anyway accepted, for every Match of this capture (R6).
+  const [remembered] = useState(() => new Remembered(recordedAlike))
   const fallback = useRef<HTMLButtonElement>(null)
   // A stop at a step that looked different is a view of its own: its buttons replace Stop, and the focus on Stop with them.
-  const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase, fallback)
+  const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase === 'matching' && state.review ? 'review' : state.phase, fallback)
   // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
   const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
   const markId = useRef(0)
@@ -150,11 +156,16 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   // The keyboard language the range was recorded in, which both replays start from (#1135).
   const keyboard = keyboardOf(snapshot, state.steps, state.range)
 
+  // Match's end: to Edit, unless some taps the app did not respond to wait for the person's review there (P2c).
+  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
+  const continueToEdit = () => dispatch({ type: 'review-continued' })
+
   const startMatch = () => {
     const opened = session.current
     if (!opened) return
     const { channel, lease, run } = opened
     const signal = run.begin()
+    remembered.begin(state.range.start)
     dispatch({ type: 'match-started', total: state.range.end - state.range.start })
     setMarks(NO_MARKS)
     setBusy(true)
@@ -170,7 +181,16 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         const recorded = thumbnailUrl(tap.sessionId, snapshot, step)
         return recorded ? compareWithRecording(recorded, tap.surface(), masks, signal) : Promise.resolve(null)
       },
-      onDiverged: (index, divergence) => {
+      onObserved: (index, observed) => { if (run.isCurrent(signal)) dispatch({ type: 'step-observed', index, observed }) },
+      onAfter: (index, after) => {
+        if (!run.isCurrent(signal)) return
+        if (after.screenshot) run.keep(after.screenshot)
+        dispatch({ type: 'step-after', index, after })
+      },
+      tapDidNothing: (prev, next, before, now, masks, stop) =>
+        tapDidNothing(thumbnailUrl(tap.sessionId, snapshot, prev), thumbnailUrl(tap.sessionId, snapshot, next), before, now, masks, stop),
+      carried: (index, step, masks, turn) => remembered.carried(index, step, thumbnailUrl(tap.sessionId, snapshot, step), masks, turn, signal),
+      onDiverged: (index, { cells: _, ...divergence }) => {
         run.keep(divergence.nowUrl)
         const step = state.steps[index]
         dispatch({ type: 'diverged', index, ...divergence, recordedUrl: step ? thumbnailUrl(tap.sessionId, snapshot, step) : null })
@@ -178,7 +198,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       },
     }, keyboard)
       // A run a later one replaced answers into nothing: its failure would be shown on the new one, its end would end it.
-      .then((matched) => { if (run.isCurrent(signal)) dispatch({ type: 'match-finished', captured: toFlowSteps(matched) }) })
+      .then((matched) => { if (run.isCurrent(signal)) finishMatch(matched) })
       .catch((e: unknown) => { if (run.isCurrent(signal)) dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }) })
       .finally(() => { if (run.isCurrent(signal)) setBusy(false) })
   }
@@ -187,9 +207,12 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   // they are a flow nobody made. Stops the run first when it is waiting at a step that looked different.
   const takeWhatMatched = () => {
     if (state.diverged) session.current?.run.abort()
-    dispatch({ type: 'match-finished', captured: toFlowSteps(state.matched.slice(0, state.matched.length - state.insertedTail)) })
+    finishMatch(state.matched.slice(0, state.matched.length - state.insertedTail))
   }
   const continueAnyway = () => {
+    // Remembered for every Match of this capture: the next one does not stop on what the person said does not matter.
+    const d = state.diverged
+    if (d?.recordedUrl) remembered.accept({ index: d.index, recordedUrl: d.recordedUrl, areas: d.areas, mostly: d.mostly })
     dispatch({ type: 'went-on' })
     session.current?.run.goOn()
   }
@@ -247,6 +270,8 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
             state={state} tap={tap} marks={marks}
             onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched}
             onBackToRange={backToRange} onContinueAnyway={continueAnyway} stopRef={fallback}
+            onContinueToEdit={continueToEdit} onKeep={(step, kept) => dispatch({ type: 'set-kept', step, kept })}
+            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)}
           />
         )}
         {state.phase === 'edit' && (

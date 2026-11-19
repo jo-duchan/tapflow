@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build `bin/libtapflow-nethook.dylib` from `src/network-hook.m` + `src/inline-hook.c`.
+# Build `bin/libtapflow-nethook.dylib` from `src/network-hook.m` + `src/inline-hook.c`, and the app observer
+# (`src/app-observer.m`), which rides on the same injection (packages/ios-agent/AGENTS.md, "App observer").
 #
 # **This file exists because the recipe was nowhere.** The dylib is committed as a prebuilt binary,
 # like `ios-netfilter`'s app — but unlike that one it had no build script, so the flags lived only in
@@ -27,7 +28,7 @@ xcrun --sdk iphonesimulator clang \
   -framework Network \
   -framework SystemConfiguration \
   -o "$out" \
-  src/network-hook.m src/inline-hook.c
+  src/network-hook.m src/inline-hook.c src/app-observer.m
 
 # The tarball flattens the executable bit (measured on the netfilter app, same cause), and
 # `postinstall` puts it back on everything in `bin/`. Set it here so a local build matches.

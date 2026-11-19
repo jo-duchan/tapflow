@@ -2001,7 +2001,7 @@ export interface UiFieldResponse {
 }
 
 /** Where the soft keyboard is, for Flow Capture to tell a tap on it from a tap on the app (#1135). Cheap: ~30 ms on
- *  Android (`dumpsys window`), one runner read on iOS. Sent only to an agent naming `keyboard-state`. */
+ *  Android (`dumpsys window`), one file round-trip with the app on iOS (the app observer). Sent only to an agent naming `keyboard-state`. */
 export interface UiKeyboardRequest {
   type: 'ui:keyboard:request'
   sessionId: string
@@ -2015,6 +2015,65 @@ export interface UiKeyboardResponse {
   keyboard: KeyboardState
 }
 
+/**
+ * What one touch-down hit while a person was recorded (record-time observation): on iOS the app observer reports it from
+ * inside the app; on Android the agent reads it from outside (the accessibility tree at the point, the app's frames;
+ * android-agent AGENTS.md). Named by the gesture's `requestId` (its `input:touch:end`'s). Facts only — what Capture
+ * makes of them is flow-runner's. Only touches on the app under test are reported.
+ */
+export interface TouchObservation {
+  /** Where the touch went down, normalised, in the device's portrait space (the touch path's). */
+  point: { x: number; y: number }
+  /** A list under the touch was still gliding or bouncing: on iOS such a touch stops the list and activates nothing. */
+  moving: boolean
+  /** Where the touch landed when it was not on the app's own views: the soft keyboard, a web view, Flutter. Nothing
+   *  else is said about such a touch. */
+  surface?: 'keyboard' | 'web' | 'flutter'
+  /** The accessibility element at the point, and its nearest container marked a button (a grid cell over its
+   *  subtitle). Absent when the app built none there (app accessibility off, a touch mid-scroll). */
+  element?: ObservedElement
+  button?: ObservedElement
+  /** The platform's count for a quick repeat at one spot — iOS's `UITouch.tapCount`, Android's double-tap timeout
+   *  counted by the agent: 2 for a double tap's second touch. Android leaves it out on a drag. */
+  tapCount?: number
+  /**
+   * Whether the app acted on this touch: a control it listens to fired, an action was sent, a list selected a row, or
+   * a gesture of the app's own was recognised, from the touch-down until shortly after the lift. Absent is unknown —
+   * never "no": an older agent, a touch on a `surface`, a drag, on iOS a view that handles touches itself or React
+   * Native, or a verdict that could not be reached in time (Android's own unknowns: android-agent AGENTS.md). On iOS it
+   * arrives later than the rest, as a second `capture:touched` for the same gesture; Android sends one report with it.
+   */
+  acted?: boolean
+  /**
+   * This touch-down's number in the app's process, from 1, counting only touches made while someone was recorded:
+   * a new process starts again at 1. What says a report is the first touch in an app just opened, which a home-screen
+   * tap before it (the icon's, which no app reports) can be told from. Absent from an older agent.
+   */
+  seq?: number
+}
+
+/** An element as the app's accessibility names it. `label` is absent for a text input, whose label can be its text. */
+export interface ObservedElement {
+  identifier?: string
+  label?: string
+  /** `UIAccessibilityTraits` on iOS; Android sets only the button bit (1), where the UI tree's role is `button`. */
+  traits: number
+  /** A text input: named by its identifier only. */
+  input?: boolean
+  /** In the app as drawn, normalised, as the UI tree's frames are. */
+  frame?: UIElementFrame
+}
+
+/** Agent → relay: a `TouchObservation` for the gesture `requestId` ended. Sent only to a relay that asked for them
+ *  (`touchObservations` on the boot), since an older one logs every message type it does not know. A gesture can get
+ *  two: the second, once the app's verdict (`acted`) is in, repeats the first with it, and replaces it. */
+export interface CaptureTouched {
+  type: 'capture:touched'
+  sessionId: string
+  requestId: string
+  observation: TouchObservation
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -2026,6 +2085,7 @@ export type AgentToRelay =
   | UiTreeError
   | UiFieldResponse
   | UiKeyboardResponse
+  | CaptureTouched
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
@@ -2255,9 +2315,10 @@ export interface SessionLeave {
   sessionId: string
 }
 
-// `external`, `automation` and `recorded` are added by the relay on the way through — the browser never sets them.
+// `external`, `automation`, `observed` and `touchObservations` are added by the relay on the way through — the browser never sets them.
 // Undeclared on purpose: the parser strips them from what a browser sends, and the relay sets them after it.
-// `recorded`: the booting person is one Flow Capture records, on an agent that reads fields (#1135).
+// `observed`: the booting person is one Flow Capture records — what the iOS agent turns touch observation and app
+// accessibility on by. Not gated by the Mac's memory: neither starts anything on the Mac.
 export interface DeviceBoot {
   type: 'device:boot'
   sessionId: string

@@ -304,9 +304,12 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   `SNAPSHOT_READ_WAIT_MS` for reads in flight (`settleReads`).
   `ui:field:response` is consumed here and **never forwarded**: it is the field's whole contents — what the person
   typed, and any text the app or AutoFill put there — which only the capture keeps. It is accepted only from the
-  session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. On a Mac over its
-  memory line no field is read and a recorded boot warms nothing: a person's join is let past the memory check because
-  their device is up, and the runner a read needs is not (`recorded` on `device:boot`).
+  session's own agent socket, and a secure field's `value` is dropped here whatever the agent sent. **Neither read,
+  nor watching the person, is gated by the Mac's memory.** No agent that names `field-value` or `keyboard-state` starts
+  anything on the Mac to answer: iOS reads from inside the app (ios-agent AGENTS.md, "App observer"), Android through a
+  server on the device. A gate was drawn for an iOS read through the XCUITest runner (110–360 MB), which never shipped,
+  and it left every typed step unread and every touch unobserved on a busy Mac. The boot carries `observed` (the person
+  is recorded, no other check), which the iOS agent turns touch observation and app accessibility on by.
 - **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
   switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
   person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone
@@ -383,7 +386,7 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
   keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
   character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
-  a Mac over its memory line, iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
+  iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
   none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
   field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
   Android).

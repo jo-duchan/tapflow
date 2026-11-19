@@ -1,0 +1,902 @@
+{
+"note": "Food Truck on iOS 26.5, session 76c2ee09, steps #33-#40: two back taps at one point (different elements), a swipe, a tap that stopped the glide (moving) and its retry, swipes, a row.",
+"entries": [
+{
+"at": 1794650567071,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.09176649603619234,
+"y": 0.09080237814465408
+}
+}
+},
+{
+"at": 1794650567154,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "0a6b86ab72240a9f709b2484ca90e968"
+}
+},
+{
+"at": 1794650567154,
+"kind": "ack",
+"requestId": "0a6b86ab72240a9f709b2484ca90e968",
+"ok": true
+},
+{
+"at": 1794650567155,
+"kind": "touched",
+"requestId": "0a6b86ab72240a9f709b2484ca90e968",
+"touched": {
+"point": {
+"x": 0.09206349206349206,
+"y": 0.09064327485380116
+},
+"moving": false,
+"element": {
+"identifier": "BackButton",
+"label": "Donuts",
+"traits": 134217729,
+"frame": {
+"x": 0.047619047619047616,
+"y": 0.07456140350877193,
+"width": 0.10476190476190476,
+"height": 0.04824561403508772
+}
+}
+}
+},
+{
+"at": 1794650567808,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.09176649603619234,
+"y": 0.09080237814465408
+}
+}
+},
+{
+"at": 1794650567904,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "35f7f01a95df34150b7b432985dc48fc"
+}
+},
+{
+"at": 1794650567904,
+"kind": "ack",
+"requestId": "35f7f01a95df34150b7b432985dc48fc",
+"ok": true
+},
+{
+"at": 1794650567917,
+"kind": "touched",
+"requestId": "35f7f01a95df34150b7b432985dc48fc",
+"touched": {
+"point": {
+"x": 0.09206349206349206,
+"y": 0.09064327485380116
+},
+"moving": false,
+"element": {
+"identifier": "BackButton",
+"label": "Truck",
+"traits": 134217729,
+"frame": {
+"x": 0.047619047619047616,
+"y": 0.07456140350877193,
+"width": 0.10476190476190476,
+"height": 0.04824561403508772
+}
+}
+}
+},
+{
+"at": 1794650568871,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.31312106918238997
+}
+}
+},
+{
+"at": 1794650569002,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.3350486438679246
+}
+}
+},
+{
+"at": 1794650569021,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.36327289701257864
+}
+}
+},
+{
+"at": 1794650569043,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.3996368907232704
+}
+}
+},
+{
+"at": 1794650569067,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.4563664504716981
+}
+}
+},
+{
+"at": 1794650569085,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.49140084512578613
+}
+}
+},
+{
+"at": 1794650569109,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.5410986635220125
+}
+}
+},
+{
+"at": 1794650569125,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.5653719536163522
+}
+}
+},
+{
+"at": 1794650569149,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.5948825668238994
+}
+}
+},
+{
+"at": 1794650569167,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.606659787735849
+}
+}
+},
+{
+"at": 1794650569183,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.6163291077044025
+}
+}
+},
+{
+"at": 1794650569201,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.36851862101059024,
+"y": 0.6254741548742139
+}
+}
+},
+{
+"at": 1794650569204,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "e4350525a680a92a6a26c21dc3733ec6"
+}
+},
+{
+"at": 1794650569204,
+"kind": "ack",
+"requestId": "e4350525a680a92a6a26c21dc3733ec6",
+"ok": true
+},
+{
+"at": 1794650569205,
+"kind": "touched",
+"requestId": "e4350525a680a92a6a26c21dc3733ec6",
+"touched": {
+"point": {
+"x": 0.3682539682539682,
+"y": 0.31323099415204675
+},
+"moving": false,
+"element": {
+"traits": 0,
+"frame": {
+"x": 0,
+"y": 0,
+"width": 1,
+"height": 1
+}
+}
+}
+},
+{
+"at": 1794650570762,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.2968539159166757,
+"y": 0.33097336871069183
+}
+}
+},
+{
+"at": 1794650570871,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "324e2140947c06e4b9128ca3428e38ff"
+}
+},
+{
+"at": 1794650570871,
+"kind": "ack",
+"requestId": "324e2140947c06e4b9128ca3428e38ff",
+"ok": true
+},
+{
+"at": 1794650570872,
+"kind": "touched",
+"requestId": "324e2140947c06e4b9128ca3428e38ff",
+"touched": {
+"point": {
+"x": 0.2968253968253968,
+"y": 0.33114035087719296
+},
+"moving": true,
+"element": {
+"label": "New Orders",
+"traits": 1,
+"frame": {
+"x": 0.06190476190476191,
+"y": 0.3300438596491228,
+"width": 0.3380952380952381,
+"height": 0.03070175438596491
+}
+}
+}
+},
+{
+"at": 1794650571747,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.30548991879615905,
+"y": 0.34564219732704404
+}
+}
+},
+{
+"at": 1794650571854,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "222736007f33855626beaa417c7a1d9e"
+}
+},
+{
+"at": 1794650571854,
+"kind": "ack",
+"requestId": "222736007f33855626beaa417c7a1d9e",
+"ok": true
+},
+{
+"at": 1794650571855,
+"kind": "touched",
+"requestId": "222736007f33855626beaa417c7a1d9e",
+"touched": {
+"point": {
+"x": 0.3055555555555555,
+"y": 0.34576023391812866
+},
+"moving": false,
+"element": {
+"label": "New Orders",
+"traits": 1,
+"frame": {
+"x": 0.06190476190476191,
+"y": 0.3300438596491228,
+"width": 0.3380952380952381,
+"height": 0.03070175438596491
+}
+}
+}
+},
+{
+"at": 1794650572779,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.6915055031446542
+}
+}
+},
+{
+"at": 1794650572892,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.665891804245283
+}
+}
+},
+{
+"at": 1794650572909,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.6404780856918239
+}
+}
+},
+{
+"at": 1794650572925,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.6193828616352202
+}
+}
+},
+{
+"at": 1794650572942,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.5752196344339623
+}
+}
+},
+{
+"at": 1794650572959,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.5348560338050314
+}
+}
+},
+{
+"at": 1794650572975,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.49113600628930815
+}
+}
+},
+{
+"at": 1794650572992,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.4538964229559748
+}
+}
+},
+{
+"at": 1794650573009,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.4244614779874214
+}
+}
+},
+{
+"at": 1794650573026,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.39377260220125787
+}
+}
+},
+{
+"at": 1794650573043,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.37228282232704407
+}
+}
+},
+{
+"at": 1794650573066,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.35366843553459115
+}
+}
+},
+{
+"at": 1794650573084,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5098125700292767,
+"y": 0.34370725235849053
+}
+}
+},
+{
+"at": 1794650573100,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5142599938554957,
+"y": 0.32755748820754715
+}
+}
+},
+{
+"at": 1794650573117,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.51810736843532,
+"y": 0.31609375
+}
+}
+},
+{
+"at": 1794650573134,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5219782743581403,
+"y": 0.3048570165094339
+}
+}
+},
+{
+"at": 1794650573154,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "e6e034c6c2d683c3ff8edfa956c20bb3"
+}
+},
+{
+"at": 1794650573155,
+"kind": "ack",
+"requestId": "e6e034c6c2d683c3ff8edfa956c20bb3",
+"ok": true
+},
+{
+"at": 1794650573156,
+"kind": "touched",
+"requestId": "e6e034c6c2d683c3ff8edfa956c20bb3",
+"touched": {
+"point": {
+"x": 0.5095238095238095,
+"y": 0.6915204678362573
+},
+"moving": false,
+"element": {
+"label": "Order#1219",
+"traits": 1,
+"frame": {
+"x": 0.047619047619047616,
+"y": 0.6228070175438597,
+"width": 0.9047619047619048,
+"height": 0.07675438596491228
+}
+}
+}
+},
+{
+"at": 1794650573654,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.5318849697594005,
+"y": 0.723734768081761
+}
+}
+},
+{
+"at": 1794650573809,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.7020179834905661
+}
+}
+},
+{
+"at": 1794650573834,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.6692049921383647
+}
+}
+},
+{
+"at": 1794650573850,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.6428400157232704
+}
+}
+},
+{
+"at": 1794650573867,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.60781643081761
+}
+}
+},
+{
+"at": 1794650573891,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.5757222877358491
+}
+}
+},
+{
+"at": 1794650573909,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.5536271619496855
+}
+}
+},
+{
+"at": 1794650573925,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.5314239386792453
+}
+}
+},
+{
+"at": 1794650573942,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.516857802672956
+}
+}
+},
+{
+"at": 1794650573959,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.502118710691824
+}
+}
+},
+{
+"at": 1794650573975,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4928223270440251
+}
+}
+},
+{
+"at": 1794650573992,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4852392885220126
+}
+}
+},
+{
+"at": 1794650574016,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.47553213443396225
+}
+}
+},
+{
+"at": 1794650574033,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4710731132075472
+}
+}
+},
+{
+"at": 1794650574050,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4680301690251572
+}
+}
+},
+{
+"at": 1794650574067,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4663276336477987
+}
+}
+},
+{
+"at": 1794650574092,
+"kind": "input",
+"msg": {
+"type": "input:touch:move",
+"sessionId": "s",
+"payload": {
+"x": 0.5325438473632848,
+"y": 0.4655979756289308
+}
+}
+},
+{
+"at": 1794650574238,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "351acbbb0b88d39cdfebeccbe29ff88e"
+}
+},
+{
+"at": 1794650574238,
+"kind": "ack",
+"requestId": "351acbbb0b88d39cdfebeccbe29ff88e",
+"ok": true
+},
+{
+"at": 1794650574245,
+"kind": "touched",
+"requestId": "351acbbb0b88d39cdfebeccbe29ff88e",
+"touched": {
+"point": {
+"x": 0.5317460317460317,
+"y": 0.7236842105263158
+},
+"moving": true,
+"element": {
+"label": "Order#1230",
+"traits": 1,
+"frame": {
+"x": 0.047619047619047616,
+"y": 0.6758040935672514,
+"width": 0.9047619047619048,
+"height": 0.07675438596491228
+}
+}
+}
+},
+{
+"at": 1794650574862,
+"kind": "input",
+"msg": {
+"type": "input:touch:start",
+"sessionId": "s",
+"payload": {
+"x": 0.49664678362308884,
+"y": 0.6068435534591196
+}
+}
+},
+{
+"at": 1794650574963,
+"kind": "input",
+"msg": {
+"type": "input:touch:end",
+"sessionId": "s",
+"requestId": "06ac9d81db99010ab09620a86ef5f23d"
+}
+},
+{
+"at": 1794650574963,
+"kind": "ack",
+"requestId": "06ac9d81db99010ab09620a86ef5f23d",
+"ok": true
+},
+{
+"at": 1794650574964,
+"kind": "touched",
+"requestId": "06ac9d81db99010ab09620a86ef5f23d",
+"touched": {
+"point": {
+"x": 0.4968253968253968,
+"y": 0.6067251461988303
+},
+"moving": false,
+"element": {
+"label": "Order#1215",
+"traits": 1,
+"frame": {
+"x": 0.047619047619047616,
+"y": 0.5730994152046784,
+"width": 0.9047619047619048,
+"height": 0.07675438596491228
+}
+}
+}
+}
+]
+}
