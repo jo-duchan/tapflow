@@ -346,6 +346,7 @@ function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
   if (reads.length === 0) return steps
+  let i = 0
   let previousEnd = -Infinity
   return steps.map((s, n) => {
     const sinceLast = previousEnd
@@ -358,11 +359,16 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
     // tap's would place the first tap in the app on the home screen. A touch changes what is in front only once it lifts
     // (an icon opens its app, a swipe up goes home), so a read answered before it lifted still tells where it began: a
     // read takes about half a second, and a person turning home-screen pages faster than that left a swipe with none
-    // answered before it began (iOS 26.5). A button acts as it goes down, so for one only a read before it counts. What
-    // this cannot tell: a swipe home made within a read of opening the app reads as made on the home screen.
+    // answered before it began (iOS 26.5). Still one asked before it began: that is the read the measured case had, and
+    // a later one is asked about a screen the touch is already on. A button acts as it goes down, so for one only a read
+    // before it counts. What this cannot tell: a swipe home made within a read of opening the app reads as made on the
+    // home screen.
     const until = TOUCH_KINDS.has(s.kind) ? s.endAt : s.at
-    let lastRead: (typeof reads)[number] | undefined
-    for (const r of reads) if (r.at <= until) lastRead = r
+    // Reads are asked one at a time, so in answer order they are in asking order too.
+    while (i < reads.length && reads[i]!.at <= until) i++
+    let k = i - 1
+    while (k >= 0 && reads[k]!.requestedAt > s.at) k--
+    const lastRead = k >= 0 ? reads[k] : undefined
     const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
     if (last === undefined) return s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined

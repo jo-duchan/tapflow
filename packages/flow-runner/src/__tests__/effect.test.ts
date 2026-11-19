@@ -52,6 +52,9 @@ describe('observeEffect', () => {
       el({ label: '\u200B', frame: at(0.15) }),
       el({ label: '\u200D', frame: at(0.25) }),
       el({ label: '  ', frame: at(0.3) }),
+      // Letters by their category that draw nothing: apps put them where a label may not be empty.
+      el({ label: '\u3164', frame: at(0.35) }),
+      el({ label: '\u2800', frame: at(0.4) }),
       el({ label: 'Login', frame: at(0.2) }),
     ]
     expect(observeEffect(before, [], [])).toEqual({ gone: [{ text: 'Login', role: 'text' }] })

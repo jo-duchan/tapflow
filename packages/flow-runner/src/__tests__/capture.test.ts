@@ -808,6 +808,18 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 4, end: 5 })
     })
 
+    // Review: the relay keeps reading while the home screen is in front, so a read can be asked while a touch is held.
+    // Asked about a screen the touch is already on, it does not say where the touch began.
+    it('does not place a touch by a read asked after it began', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      const start = r.t + 50
+      r.wait(50).touch([[0.5, 0.5]], { holdMs: 1000 })
+      r.entries.push({ at: start + 400, kind: 'keyboard', requestedAt: start + 100, keyboard: HOME, settled: false })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined])
+    })
+
     // A button acts as it goes down: a read answered while it was held says what the press did.
     it('places a button only by a read answered before it went down', () => {
       const r = new Rec().install()
@@ -1440,8 +1452,13 @@ describe('flowToYaml', () => {
       { type: 'inputText', text: 'a\u0007"b"\\' },
       { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
       { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
+      { type: 'tapOn', selector: { text: 'a\u2028b' } },
     ] as const
-    const yaml = flowToYaml({ name: 'x', steps: steps as never })
+    const yaml = flowToYaml({ name: 'Login\u200B', tags: ['\u3164'], steps: steps as never })
+    expect(parseFlow(yaml, 'x.yaml').name).toBe('Login\u200B')
+    expect(yaml).toContain('name: "Login\\u200B"')
+    expect(yaml).toContain('tapOn: "a\\u2028b"')
+    expect(yaml).toContain('tags: [ "\\u3164" ]')
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: "\\U000F01F0"')
     expect(yaml).toContain('label: "Save\\u200B"')

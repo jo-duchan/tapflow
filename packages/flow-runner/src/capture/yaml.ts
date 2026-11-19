@@ -104,7 +104,8 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
   let text = doc.toString({ lineWidth: 0 })
   escaped.forEach((q, i) => { text = text.replace(placeholder(i), () => q) })
   const back = parseFlow(text, 'captured.yaml')
-  if (canonical(back.steps) !== canonical(flow.steps) || canonical(back.viewport) !== canonical(flow.viewport)) {
+  if (canonical(back.steps) !== canonical(flow.steps) || canonical(back.viewport) !== canonical(flow.viewport)
+    || (flow.name !== undefined && back.name !== flow.name) || canonical(back.tags ?? []) !== canonical(flow.tags ?? [])) {
     throw new Error('the captured flow does not read back as the same steps — this is a bug in Flow Capture')
   }
   return text
