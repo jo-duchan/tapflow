@@ -64,10 +64,16 @@ describe('a refused WebSocket', () => {
     socket.on('error', () => {})
     socket.write(frameHeader(SENT))
     socket.write(Buffer.alloc(SENT))
+    // Sampled until the socket goes, not read once at the end: under load the relay's close can reach the client
+    // first, and the EPIPE that follows destroys the socket and empties its buffer, which reads as all sent.
+    let pending = socket.writableLength
+    const sample = setInterval(() => { if (!socket.destroyed) pending = socket.writableLength }, 10)
     await new Promise((r) => setTimeout(r, 1_000))
+    clearInterval(sample)
+    if (!socket.destroyed) pending = socket.writableLength
     // Read by the relay, the whole payload would have left the client by now. Unread, the kernel's buffers take
     // a few MiB at most and the rest waits on the client.
-    expect(socket.writableLength).toBeGreaterThan(SENT / 2)
+    expect(pending).toBeGreaterThan(SENT / 2)
     socket.destroy()
   })
 
