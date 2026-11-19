@@ -1433,11 +1433,12 @@ describe('flowToYaml', () => {
   // A character a person cannot see is written as its escape, so the file says what it is, and reads back the same.
   it('writes an icon glyph, a zero-width space and a control as escapes, and keeps a joiner and plain text as they are', () => {
     const steps = [
+      // First, so a stand-in named the same would be found here before the escaped string it stands for.
+      { type: 'tapOn', selector: { text: 'tapflowEscaped0x' } },
       { type: 'tapOn', selector: { text: '\u{F01F0}' } },
       { type: 'tapOn', selector: { label: 'Save\u200B', role: 'button' } },
       { type: 'inputText', text: 'a\u0007"b"\\' },
       { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
-      { type: 'tapOn', selector: { text: 'tapflowEscaped0x' } },
       { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
     ] as const
     const yaml = flowToYaml({ name: 'x', steps: steps as never })
