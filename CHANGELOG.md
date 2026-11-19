@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **iOS: Safari and web views load while Flow Capture records you.** With **Capture my steps** on, Safari stayed white and an app's WebView kept loading until the simulator was erased. The library tapflow injects into the simulator to observe the app under test also ran in two system daemons, which crashed on it in a loop, and web pages wait on those daemons. It now stops in every process that is not an app before doing anything, and the app under test is observed and taken offline as before.
+
 - **Flow Capture keeps a drag that changed the screen as a drag.** A swipe is turned into "scroll until the next tapped element" only when it actually scrolled. A drag-and-drop that finished a puzzle and opened a new screen was turned into a scroll, and Verify failed on it. A sideways swipe that reveals a list row's Delete also stays a swipe.
 - **Flow Capture leaves out home-screen pages turned quickly before you opened the app.** A swipe made less than half a second after the one before it could not be placed on the home screen, and the flow's range started there instead of at your first step in the app (iOS).
 - **A captured flow no longer checks for, or shows, text no one can read.** An icon drawn by an icon font (a box in any other font) or a zero-width space is not written as an expected effect; an element with only that is named by its identifier if it has one. Where such a character still appears in the file, as in a selector for an icon-only button, it is written as its escape (`"\U000F01F0"`) rather than as a box; a zero-width joiner or non-joiner inside text, part of an emoji or a word, stays as it is.
