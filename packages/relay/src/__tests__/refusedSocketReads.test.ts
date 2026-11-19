@@ -60,20 +60,19 @@ describe('a refused WebSocket', () => {
   })
 
   it('is not read after the relay refuses it', async () => {
+    // Measured on the relay's side of the connection. The client's unsent bytes said the same thing on macOS and
+    // Linux but not elsewhere: under load the relay's close empties the client's buffer through an EPIPE, and on
+    // Windows the buffer emptied with the socket open. What the relay read is the fact itself.
+    const tunnel = (server as unknown as { tunnelServer: net.Server }).tunnelServer
+    const relaySide = new Promise<net.Socket>((resolve) => tunnel.once('connection', resolve))
     const socket = await upgradeWithoutCredential(tunnelPort)
     socket.on('error', () => {})
     socket.write(frameHeader(SENT))
     socket.write(Buffer.alloc(SENT))
-    // Sampled until the socket goes, not read once at the end: under load the relay's close can reach the client
-    // first, and the EPIPE that follows destroys the socket and empties its buffer, which reads as all sent.
-    let pending = socket.writableLength
-    const sample = setInterval(() => { if (!socket.destroyed) pending = socket.writableLength }, 10)
     await new Promise((r) => setTimeout(r, 1_000))
-    clearInterval(sample)
-    if (!socket.destroyed) pending = socket.writableLength
-    // Read by the relay, the whole payload would have left the client by now. Unread, the kernel's buffers take
-    // a few MiB at most and the rest waits on the client.
-    expect(pending).toBeGreaterThan(SENT / 2)
+    // Read by the relay, the whole payload would have arrived by now. Unread, the relay takes one socket buffer at
+    // most and the rest never leaves the kernel.
+    expect((await relaySide).bytesRead).toBeLessThan(SENT / 2)
     socket.destroy()
   })
 
