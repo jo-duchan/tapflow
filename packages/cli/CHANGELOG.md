@@ -1,5 +1,77 @@
 # tapflow
 
+## 0.33.0
+
+### Minor Changes
+
+- 61560fd: Flow Capture, second part (#1125). Flows gain `tapOn: [x, y]`, `longPressOn` with a point, and `inputText: { secret: NAME }`, typed from a value `tapflow flow run --secret NAME` reads from the environment and never logged. `@tapflowio/flow-runner/browser` adds the capture module the dashboard uses to turn a person's recorded steps into a flow, and `SessionChannel` gains `replayInputs` and `pasteText` for replaying them. `@tapflowio/protocol/capture` holds the record's types, and the relay keeps each gesture's last move when it thins a long record. A run missing a secret stops before a device is chosen (`run_flow` before its install), and Android's `inputText` no longer puts the typed text in an error.
+- fcc3c9b: Flows can press hardware buttons (`pressButton`), hold an element (`longPressOn`) and pinch (`pinch`). A flow pressing a button the device lacks fails before its first step, as an environment failure. A button the platform never has (`back` on iOS) fails before a device is chosen when `--build` or `--parallel --platform` names the platform; one that depends on the device (`lock` on iOS) is checked against the device before the first step. `@tapflowio/protocol/buttons` holds which buttons each platform can press, read by both agents and by flow-runner. MCP `tap` takes `holdMs` for a long press. On Android's adb fallback a held touch is now a long press rather than a tap, and `flow run` ends a gesture in progress when it leaves a session.
+- e741247: Flows can turn the device (`setOrientation: portrait|landscape`) and fold it (`setPosture: folded|unfolded`). Both wait until the device reports the new state; a step the device cannot do ends as an environment failure, and a `--parallel` worker keeps the device. android-agent takes down the "Swipe up to continue" lock screen a fold puts up, unless the device was locked before or has a secure lock. The UI tree response carries `interfaceTurn` on iOS, read from the app by the tree runner, and `@tapflowio/protocol/screen` turns a point from the app's interface onto the device's portrait screen, so flow steps on an iOS app drawn in landscape land where the tree says.
+- bee37cc: A touch lands where the device says it reaches its element, and a flow checks what the touch brings (#1125). protocol: `ui:reach:request`/`ui:reach:response`, `ReachTarget`, `ReachResult`, `UIElement.checked`/`selected`, `fromFramePoint`. agent-core: the `reach` capability. ios-agent: the UI-tree runner's `/reach` (`isHittable` and the hit point), and switch and selection state in the tree. android-agent: the uidump jar's `reach` mode (window layer and drawing order), and `checked`/`selected`. relay: `POST /api/v1/sessions/:sessionId/reach`, run records keep a step's `reach`, `reachNote` and `effect`, and the dashboard's Verify and Flow Runs show unchecked touches and touches that changed nothing. flow-runner: `tapOn`, `longPressOn` and `pinch` press the reached point, `scroll { until }` stops only at a reachable center, steps take `expect` and flows `viewport` (a flow carrying either cannot be read by an older flow-runner), `observeEffects`, and Flow Capture's swipe and point rules use reach. mcp-server: `run_flow` presses the reached point. cli: `flow run` says which touches were not checked.
+
+### Patch Changes
+
+- Updated dependencies [77fccad]
+- Updated dependencies [d5b62f1]
+- Updated dependencies [88b037a]
+- Updated dependencies [91c4443]
+- Updated dependencies [9960307]
+- Updated dependencies [d015a87]
+- Updated dependencies [864f0dd]
+- Updated dependencies [1161c17]
+- Updated dependencies [3eff705]
+- Updated dependencies [7f3b9f6]
+- Updated dependencies [63c4d83]
+- Updated dependencies [7c1e378]
+- Updated dependencies [76a50f6]
+- Updated dependencies [259a91f]
+- Updated dependencies [9a0ac35]
+- Updated dependencies [62aed39]
+- Updated dependencies [0d0b9c5]
+- Updated dependencies [4f315a8]
+- Updated dependencies [d20f495]
+- Updated dependencies [3b600c8]
+- Updated dependencies [ee33923]
+- Updated dependencies [9dc02e5]
+- Updated dependencies [f4f59a5]
+- Updated dependencies [41b8494]
+- Updated dependencies [563aac1]
+- Updated dependencies [44c6b4a]
+- Updated dependencies [37e6c44]
+- Updated dependencies [61560fd]
+- Updated dependencies [ae37d23]
+- Updated dependencies [6b8bb08]
+- Updated dependencies [2d45442]
+- Updated dependencies [5bb81f5]
+- Updated dependencies [fcc3c9b]
+- Updated dependencies [e741247]
+- Updated dependencies [347f4c9]
+- Updated dependencies [dca8ae8]
+- Updated dependencies [e80f7e4]
+- Updated dependencies [e1fb844]
+- Updated dependencies [322ef3d]
+- Updated dependencies [9a62f3f]
+- Updated dependencies [ec351a7]
+- Updated dependencies [19fd18e]
+- Updated dependencies [1ebd418]
+- Updated dependencies [843b720]
+- Updated dependencies [e09397f]
+- Updated dependencies [bee37cc]
+- Updated dependencies [34d060d]
+- Updated dependencies [dc61724]
+- Updated dependencies [43cfda0]
+- Updated dependencies [29e3627]
+- Updated dependencies [87b4212]
+- Updated dependencies [562a193]
+- Updated dependencies [c3b3092]
+- Updated dependencies [24a5629]
+- Updated dependencies [a0cbc41]
+  - @tapflowio/relay@0.33.0
+  - @tapflowio/android-agent@0.33.0
+  - @tapflowio/flow-runner@0.33.0
+  - @tapflowio/ios-agent@0.33.0
+  - @tapflowio/agent-core@0.33.0
+
 ## 0.32.0
 
 ### Patch Changes
