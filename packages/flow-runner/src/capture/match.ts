@@ -2,6 +2,7 @@ import type { DevicePosture, ObservedElement, PointSpace, ReachResult, TouchObse
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { ScrollDirection, Selector, Step } from '../schema.js'
 import type { StepExpect } from '../effect.js'
+import { progress } from '../scrollProgress.js'
 import { matchSelector } from '../selector.js'
 import { selectorFor } from '../suggest.js'
 import { modifierNames } from './keys.js'
@@ -558,9 +559,66 @@ export interface CapturedFlow {
 }
 
 /**
+ * Whether a swipe began inside a scroll container the tree names, and the screen after it still has one there: the view
+ * a touch begins on takes the scroll, wherever the finger ends (a fling into the tab bar). The second half narrows a
+ * screen wrapped whole in a scroll view, where a drag that opens another screen began "inside" one too; a new screen
+ * with a list in the same place is not told apart.
+ */
+/** The smallest scroll container the tree names at a point: a carousel inside a vertical list is the carousel. */
+function innermostList(tree: readonly UIElement[], point: Point): UIElement | undefined {
+  const holds = (f: UIElement['frame']) => point[0] >= f.x && point[0] <= f.x + f.width && point[1] >= f.y && point[1] <= f.y + f.height
+  let best: UIElement | undefined
+  for (const e of tree) {
+    if (e.role !== 'list' || !holds(e.frame)) continue
+    if (!best || e.frame.width * e.frame.height < best.frame.width * best.frame.height) best = e
+  }
+  return best
+}
+
+/**
+ * The way a list scrolls, which the tree does not say: the way its items are laid out — stacked (one column) is
+ * vertical, side by side (one row) horizontal. A grid, or a list with one item, by its frame, with the height counted
+ * twice: frames are in parts of the screen, and a phone held upright is about twice as tall as it is wide.
+ */
+function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
+  const f = list.frame
+  // Its items: what lies within it, not a container around it whose centre happens to fall inside.
+  const within = (g: UIElement['frame']) => g.x >= f.x - 0.01 && g.y >= f.y - 0.01 && g.x + g.width <= f.x + f.width + 0.01
+    && g.y + g.height <= f.y + f.height + 0.01
+  // Trees are flat: a row's label and switch are its siblings, and counted as items they make every list a grid. Only
+  // the outermost count, and nothing thinner than a fiftieth of the screen (a scroll bar at the list's edge).
+  const inside = (a: UIElement['frame'], b: UIElement['frame']) => a !== b && a.x >= b.x - 0.001 && a.y >= b.y - 0.001
+    && a.x + a.width <= b.x + b.width + 0.001 && a.y + a.height <= b.y + b.height + 0.001
+  // Nothing around the list is one of its items: a window around a full-screen list lies within its frame too, and as
+  // the outermost element it would hide every card. A frame cannot tell what is around the list from a cell the list's
+  // size inside it, the order can: both agents flatten a parent before its children (Android's dump in document order,
+  // iOS's debugDescription line by line), so what holds the list and comes before it is around it.
+  const at = tree.indexOf(list)
+  const candidates = tree.filter((e, i) => e !== list && e.role !== 'list' && !(i < at && inside(f, e.frame))
+    && within(e.frame) && e.frame.width >= 0.02 && e.frame.height >= 0.02)
+  const centres = candidates.filter((e) => !candidates.some((o) => o !== e && inside(e.frame, o.frame)))
+    .map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
+  const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
+  if (centres.length >= 2) {
+    const sx = spread(centres.map((c) => c[0]))
+    const sy = spread(centres.map((c) => c[1]))
+    if (sx < 0.02 && sy >= 0.02) return 'y'
+    if (sy < 0.02 && sx >= 0.02) return 'x'
+  }
+  return f.height * 2 >= f.width ? 'y' : 'x'
+}
+
+function insideList(before: readonly UIElement[], after: readonly UIElement[] | undefined, from: Point): boolean {
+  const holds = (f: UIElement['frame'], p: Point) => p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height
+  const same = (a: UIElement['frame'], b: UIElement['frame']) => Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01
+    && Math.abs(a.width - b.width) < 0.01 && Math.abs(a.height - b.height) < 0.01
+  return before.some((e) => e.role === 'list' && holds(e.frame, from) && !!after?.some((n) => n.role === 'list' && same(n.frame, e.frame)))
+}
+
+/**
  * The matched steps of a range as the flow's steps, with two decisions that need a neighbour:
  *
- * - **A swipe that brought a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
+ * - **A swipe that scrolled a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
  *   distance does not replay (a fling's length depends on its release). Only when the element was not wholly in view on
  *   the screen the swipe started from (absent, or there but in `notInView`: an iOS tree carries the rows under a tab
  *   bar, #1125), and the swipe could be the engine's own (straight, across the middle): a pager swiped to a page whose
@@ -579,6 +637,20 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     const hidden = new Set(swipe.notInView ?? [])
     const inView = matchSelector(swipe.tree, next.step.selector).some((e) => !hidden.has(swipe.tree!.indexOf(e)))
     if (!direction || inView) continue
+    // Only a swipe that scrolled. A drag-and-drop that completed a puzzle brought a Retry on a new screen, and as a
+    // scroll its piece was never dragged and Verify searched the puzzle for Retry (iOS, wdio demo app). Scrolled is what
+    // was on screen before it travelling with the finger by the tap after it, or — a fling past a whole screen leaves
+    // nothing in common — the swipe begun inside a scroll container (`list`: a table, collection or scroll view on iOS,
+    // a RecyclerView or ScrollView on Android; the puzzle has none). A Compose list is not a `list` in the tree, so a
+    // fling past a whole screen of one stays a swipe, replayed as it was made.
+    const axis = direction === 'up' || direction === 'down' ? 'y' : 'x'
+    const sign = Math.sign(axis === 'y' ? swipe.step.to[1] - swipe.step.from[1] : swipe.step.to[0] - swipe.step.from[0])
+    // Across the list it began in (sideways in a vertical list) is a row's own gesture — revealing its Delete — which the
+    // engine's swipe across the middle of the screen would make on another row, or none: it stays a swipe.
+    const list = innermostList(swipe.tree, swipe.step.from)
+    if (list && listAxis(swipe.tree, list) !== axis) continue
+    const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
+    if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
     steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
   }
 
