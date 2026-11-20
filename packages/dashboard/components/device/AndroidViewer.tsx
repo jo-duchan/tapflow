@@ -134,7 +134,7 @@ export function AndroidViewer({
     binaryFrameHandlerRef, perfHookRef, frameCount,
     screenWidth, screenHeight, streamRotation, cornerRadius, userWantsLandscape, rotatePending, bodyRotation, turnsAsked,
   })
-  const { surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, screenTurnRef, screenTurn, decoderUnsupported, totalTurn, spinning } = screen
+  const { surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, needsCSSRotation, screenTurnRef, screenTurn, decoderUnsupported, totalTurn, spinning } = screen
   useLayoutEffect(() => {
     if (!captureSurfaceRef) return
     captureSurfaceRef.current = () => decoderRef.current?.surface ?? null
@@ -381,7 +381,7 @@ export function AndroidViewer({
     if (!host) return null
     return toNormPure({ x: e.clientX, y: e.clientY }, host.getBoundingClientRect(), needsCSSRotationRef.current)
   }, [surfaceHostRef, needsCSSRotationRef])
-  /** Where the pointer is in the screen Android draws — for the cursor, the pinch hint and the recording's overlay,
+  /** Where the pointer is in the screen Android draws — for the pointer's touch marks, on the page and in the recording,
    *  which are drawn in that screen. Body mode turns the frame there by the description's correction. */
   const toShownNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const p = toPictureNorm(e)
@@ -447,10 +447,12 @@ export function AndroidViewer({
     if (!touchStartPos.current) return
     const pos = toNorm(e)
     if (!pos) return
-    const shownAt = toShownNorm(e)
-    if (shownAt) pointerMarks.drag(shownAt)
     const dx = pos.x - touchStartPos.current.x; const dy = pos.y - touchStartPos.current.y
     if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+    // Drawn as a drag only once it is sent as one: under the threshold the device takes a tap (review). On every move
+    // past it; only what is sent is throttled.
+    const shownAt = toShownNorm(e)
+    if (shownAt) pointerMarks.drag(shownAt)
     const now = performance.now()
     if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
     lastMoveSentAt.current = now
@@ -593,8 +595,12 @@ export function AndroidViewer({
             onPointerCancel: handlePointerCancel,
             onPointerLeave: handlePointerLeave,
           }}
-          // The pointer's marks are in the screen Android draws; the overlay is the picture, turned back by its correction.
+          // The pointer's marks are in the screen Android draws, and the overlay is the box the picture sits in. Body mode
+          // turns the picture back by its correction; portrait content held landscape is turned a quarter by CSS inside
+          // a landscape box, undone here as `androidToNorm` does it (portrait x = yv, y = 1 − xv). Missing that, a point
+          // at the box's top right was drawn at its top left (review).
           overlay={<TouchMarksLayer tone="person" store={pointerMarks.store} place={(x, y) => {
+            if (needsCSSRotation) return { left: 1 - y, top: x }
             const p = turnPoint({ x, y }, ((360 - screenTurn) % 360) as Turn)
             return { left: p.x, top: p.y }
           }} />}

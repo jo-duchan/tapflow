@@ -17,6 +17,7 @@ vi.mock('@/hooks/useDecoderStream', () => ({ useDecoderStream: () => {} }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 
 import { IOSViewer } from '@/components/device/IOSViewer'
+import { PointerTouchMarks } from '@/lib/touchMarks'
 
 const chrome = {
   framePng: '', bezelWidth: 600, bezelHeight: 1200,
@@ -79,5 +80,22 @@ describe('IOSViewer — the pointer\'s touch marks', () => {
     fireEvent.pointerLeave(device, { pointerId: 1 })
     // Still drawn: a press plays out after the pointer leaves.
     expect(discs()).toBe(1)
+  })
+
+  // The mark splits into a drag only when the device is sent one: under the input's threshold (2 % of the screen) the
+  // device takes a tap, and a swipe drawn there showed something that did not happen (review). Mutation: draw the
+  // drag before the threshold check.
+  it('draws a drag only once the press has moved far enough to be sent as one', () => {
+    laidOut()
+    const drag = vi.spyOn(PointerTouchMarks.prototype, 'drag')
+    const { container } = renderViewer()
+    const device = container.querySelector<HTMLElement>('[style*="rotate("]')!
+    fireEvent.pointerDown(device, { clientX: 160, clientY: 310, pointerId: 1, buttons: 1 })
+    // 3 px across a 280 px screen is about 1 %: still a tap.
+    fireEvent.pointerMove(device, { clientX: 163, clientY: 310, pointerId: 1, buttons: 1 })
+    expect(drag).not.toHaveBeenCalled()
+    // 30 px is over 10 %: a drag, drawn and sent.
+    fireEvent.pointerMove(device, { clientX: 190, clientY: 310, pointerId: 1, buttons: 1 })
+    expect(drag).toHaveBeenCalledTimes(1)
   })
 })

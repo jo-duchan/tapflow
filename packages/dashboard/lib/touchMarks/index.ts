@@ -6,3 +6,4 @@ export {
 export { drawTouchParts, drawTouchState, prefersReducedMotion } from './draw'
 export { TouchMarkStore } from './store'
 export { PointerTouchMarks } from './pointer'
+export { BLEED, layerPoint, type PlaceOnLayer } from './layer'

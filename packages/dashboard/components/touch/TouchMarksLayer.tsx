@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  TouchMarkStore, drawTouchParts, prefersReducedMotion, stillParts, touchDone, touchParts,
-  type MachineTouch, type NormPoint, type StillTouch, type TouchState, type TouchTone,
+  BLEED, TouchMarkStore, drawTouchParts, layerPoint, prefersReducedMotion, stillParts, touchDone, touchParts,
+  type MachineTouch, type NormPoint, type PlaceOnLayer, type StillTouch, type TouchState, type TouchTone,
 } from '@/lib/touchMarks'
-
-/** Where a point on the device's screen (0–1) sits in the layer's box, as fractions of it. */
-export type PlaceOnLayer = (x: number, y: number) => { left: number; top: number }
 
 /** What the layer draws: a person's live pointer, a machine's latest touch, or a still picture's mark. */
 export type TouchMarksSource =
@@ -24,11 +21,6 @@ function anchorsOf(points: NormPoint[], place: PlaceOnLayer): string | undefined
   return points.map((p) => { const q = place(p.x, p.y); return `${pct(q.left)},${pct(q.top)}` }).join(';')
 }
 const shownPoints = (s: TouchState): NormPoint[] => (s.touch ? s.touch.fingers.map((f) => f.start) : s.hover)
-/**
- * How far the canvas reaches past the box on each side, in CSS px: a mark near an edge — a tap's widening ring, the
- * glow — is drawn past it, as an SVG with visible overflow was. More than the ripple's widest radius (37 px).
- */
-const BLEED = 40
 
 /**
  * The one place a touch is drawn over a device or a picture of one: the QA viewer's pointer (`store`), an agent's or a
@@ -66,17 +58,14 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
       frame = 0
       if (!ctx) return
       const dpr = window.devicePixelRatio || 1
-      // The box is the canvas less its bleed: placement is in the box, drawing anywhere on the canvas.
       const cssW = c.clientWidth
       const cssH = c.clientHeight
-      const w = cssW - 2 * BLEED
-      const h = cssH - 2 * BLEED
       const cw = Math.round(cssW * dpr)
       const ch = Math.round(cssH * dpr)
       if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, cssW, cssH)
-      const toPx = (p: NormPoint) => { const q = placeRef.current(p.x, p.y); return { x: BLEED + q.left * w, y: BLEED + q.top * h } }
+      const toPx = layerPoint(placeRef.current, cssW, cssH)
       if (isStill) {
         if (mark) drawTouchParts(ctx, stillParts(mark, toPx), tone, dpr)
         return

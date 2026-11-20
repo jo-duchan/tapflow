@@ -13,7 +13,7 @@ interface AndroidDeviceScreenProps {
   /** A fold is in flight — the waiting label says so. A viewer that cannot fold passes `false`. */
   posturePending: boolean;
   surfaceHandlers?: SurfaceHandlers;
-  /** Drawn over the screen — the live cursor and the pinch hints. */
+  /** Drawn over the screen — the touch marks (`TouchMarksLayer`). */
   overlay?: ReactNode;
 }
 

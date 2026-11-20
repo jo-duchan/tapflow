@@ -1,4 +1,4 @@
-import { NO_TOUCH, machineState, machineTouchEnd, type MachineTouch, type NormPoint, type TouchState } from './model'
+import { NO_TOUCH, TOUCH_MARK, machineState, machineTouchEnd, type MachineTouch, type NormPoint, type TouchState } from './model'
 
 const now = () => performance.now()
 /** Distance in the screen's own fractions: only compares which of two points is farther, so the aspect is moot. */
@@ -22,10 +22,15 @@ export class TouchMarkStore {
     return this.script ? machineState(this.script, t) : this.state
   }
 
-  /** Whether something still moves on its own at `t` — a press, a release, a machine's touch — and needs frames. */
+  /**
+   * Whether something still moves on its own at `t` and needs frames: a press tightening, a release playing out, a
+   * machine's touch. A press held still does not — a move wakes the layer itself.
+   */
   animating(t: number): boolean {
     if (this.script) return t < machineTouchEnd(this.script)
-    return this.state.touch !== null
+    const touch = this.state.touch
+    if (!touch) return false
+    return touch.upAt !== null || t - touch.downAt < TOUCH_MARK.growMs
   }
 
   /** Called when the state changes; the layer then draws, and keeps drawing while `animating`. */

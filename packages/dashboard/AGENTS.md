@@ -81,7 +81,7 @@ posture…", and framing by a lagging description stretched a landscape frame in
 **Input does not wait either: a pointer goes out as the frame's own point, marked `space: 'frame'`**, and the
 agent turns it by the frame it holds. The second version turned it here into the screen Android draws, by the
 description's correction, and so had to drop every touch until the description caught up — felt as input
-stalling after each turn. The cursor, the pinch hint and the recording's overlay are still drawn in the screen
+stalling after each turn. The pointer's touch marks, the recording's included, are still drawn in the screen
 Android draws (`toShownNorm`, `turnPoint` by `streamRotation`); they move with the description, which is only
 a picture of where the pointer is. Every other sender of a touch — MCP's screenshot, the UI tree, older
 dashboards — sends no `space` and means that screen, and `bodyRotation` is the marker that the agent reads the
@@ -155,12 +155,14 @@ on it. A watch that ended or was refused stays so across a reconnect (`AISession
 
 **What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's latest tap or swipe through the screens' `overlay` (`TouchMarksLayer` with a `touch`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space) — see "Touches are drawn by one model" below. The run video's replay passes no `touch`, so it draws none. Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
 
-### Touches are drawn by one model, and the colour says who touched
+### Touches are drawn by one model, and the colour says which surface
 
 Every touch on a device or a picture of one is drawn by `lib/touchMarks` and nothing else: the QA viewer's own
 pointer (live, and burned into its recording), the watch view's agent, Flow Capture's Match and Verify replays, and
-its step pictures. **The motion is the same for everyone; only the colour differs — white for a person, blue for a
-machine** (user, 2026-11-21). Before it, the QA viewer had a white cursor in a DOM div plus a second copy in each
+its step pictures. **The motion is the same everywhere; only the colour differs, and it follows the surface — white on
+Manual QA, where a person drives the device, blue in Flow Capture and on the watch page** (user, 2026-11-21). By
+surface and not by who made each touch: Flow Capture's step pictures show a person's recorded touches and are blue,
+so one dialog never mixes the two. Before it, the QA viewer had a white cursor in a DOM div plus a second copy in each
 recording composer, and the machine side had a blue gliding cursor with a dashed trail: three looks for one gesture.
 
 Three layers, each used everywhere: `model.ts` (pure — a state and a time in, the parts to draw out), `draw.ts`
@@ -175,11 +177,17 @@ Two things that look optional and are not:
 - **The layer's canvas bleeds 40 px past its box.** A mark near an edge (a tap's widening ring, the glow) was drawn
   past it when this was SVG with visible overflow; a canvas clips at its edge.
 - **The layer keeps where its marks start on `data-anchor`.** A canvas has no DOM a test can read, and that a mark
-  sits under the pointer — through iOS's frame and Android's turn — is the thing placement is for. The Android pinch
-  guide's placement test reads it.
+  sits under the pointer — through iOS's frame and Android's turns — is the thing placement is for. The anchor checks
+  `place`; what the drawing does with it (the bleed) is `layerPoint`, tested on its own, and each viewer's recording
+  composer has a test reading the canvas calls it makes.
 
-A machine's touch arrives as one event with no pointer to follow, so the model plays it: the hover disc where it will
-land, then the press, then for a swipe the finger moving over the swipe's own length. Only the latest is drawn.
+A machine's touch arrives as one event with no pointer to follow, so the model plays it: the press, then for a swipe
+the finger moving to its end — over the swipe's own length in Flow Capture, and over 400 ms on the watch page, whose
+`watch:action` carries none. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
+it arrives once it has already reached the device, so a hover drew the press 300 ms late, over the screen it brought.
+
+**A person's press is drawn as a drag only once it is sent as one** (`DRAG_THRESHOLD`, 2 % of the screen). Under that
+the device takes a tap, and a swipe drawn there showed something that did not happen.
 Machine pinches carry no coordinates on the wire yet, so none is drawn; Automation run videos carry no touch points,
 so they draw none either. Both are follow-ups.
 

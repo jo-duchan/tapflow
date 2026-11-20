@@ -492,9 +492,11 @@ export function IOSViewer({
     if (pressedButton.current?.pointerId === e.pointerId) return
     if (!touchStartPos.current) return
     const pos = toNormScreen(e); if (!pos) return
-    pointerMarks.drag(pos)
     const dx = pos.x - touchStartPos.current.x; const dy = pos.y - touchStartPos.current.y
     if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+    // Drawn as a drag only once it is sent as one: under the threshold the device takes a tap, and a swipe drawn there
+    // showed something that did not happen (review). On every move past it; only what is sent is throttled.
+    pointerMarks.drag(pos)
     const now = performance.now(); if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
     lastMoveSentAt.current = now
     send({ type: 'input:touch:move', sessionId, payload: pos })

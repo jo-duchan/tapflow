@@ -620,6 +620,18 @@ describe('AndroidViewer — a device that reports its body', () => {
     expect(at).toEqual([[80, 80], [20, 20]])
   })
 
+  // Portrait content held landscape with no body to turn (scrcpy, a real device): the picture is turned a quarter by CSS
+  // inside a landscape box, and the mark must be put back in that box. Review: the box's top right was drawn at its
+  // top left. Mutation: drop the quarter from the overlay's placement.
+  it('draws the pointer under it when portrait content is held landscape', async () => {
+    const { container } = renderViewer(0)
+    await userEvent.click(screen.getByRole('button', { name: /rotate the device/i }))
+    const host = container.querySelector('div[style*="cursor: none"]') as Element
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 240, height: 100, right: 240, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
+    act(() => { host.dispatchEvent(new PointerEvent('pointermove', { clientX: 216, clientY: 10, bubbles: true, pointerId: 1 })) })
+    expect(screen.getByTestId('touch-marks').dataset.anchor).toBe('90,10')
+  })
+
   // The user: Option alone shows the pinch guide where the pointer already is, no move needed; letting go shows one
   // disc again. Mutation: drop the viewer's `pointerMarks.option(true)` on the key.
   it('shows a pinch guide\'s two discs as soon as Option is held, and one when it is let go', () => {

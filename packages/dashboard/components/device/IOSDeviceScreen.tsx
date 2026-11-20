@@ -35,9 +35,9 @@ interface IOSDeviceScreenProps {
   fps: number;
   containerHandlers?: ContainerHandlers;
   buttons?: IOSFrameButtonControls;
-  /** Drawn inside the device, in its (possibly rotated) space — the pinch hints. */
+  /** Drawn inside the device, in its (possibly rotated) space — the touch marks (`TouchMarksLayer`). */
   overlay?: ReactNode;
-  /** Drawn beside the device in the unrotated screen area — the live cursor. */
+  /** Drawn beside the device in the unrotated screen area. Nothing passes one since the touch marks moved to `overlay`. */
   areaOverlay?: ReactNode;
   /** A fold this viewer asked for, still in flight — `usePostureControl().folding`. The screen says so. */
   folding?: FoldDirection | null;

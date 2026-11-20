@@ -1,10 +1,11 @@
 import type { Point } from '@tapflowio/protocol'
 
 /**
- * What a touch looks like on the device, as one model for every place one is drawn: a person's own pointer in the QA
- * viewer (live and in its recording), and a machine's touches — an AI agent's in the watch view, Flow Capture's Match
- * and Verify, and their step pictures. **Colour says who touched; the motion is the same for both** (user, 2026-11-21;
- * the agreed mockup's numbers are the constants below).
+ * What a touch looks like on the device, as one model for every place one is drawn: the QA viewer's own pointer (live
+ * and in its recording), an AI agent's touches in the watch view, and Flow Capture's — its Match and Verify replays and
+ * its step pictures. **The motion is the same everywhere; the colour says which surface it is on**: white on Manual QA,
+ * where a person drives the device, blue in Flow Capture and on an AI agent's watch page (user, 2026-11-21; the
+ * agreed mockup's numbers are the constants below).
  *
  * Pure: a state and a time in, the parts to draw out, in the caller's pixels (`toPx`). Points stay in the device
  * screen's own space (0–1, the input's space) until then, so one state serves an overlay and a recording alike.
@@ -15,7 +16,11 @@ export type NormPoint = Point
 /** A point in the pixels the caller draws in: the same shape, named apart so the two spaces read apart. */
 export type PxPoint = Point
 
-/** Who touched: a person (Manual QA) or a machine (AI agent, Automation, Flow Capture's replays). */
+/**
+ * The surface's colour: `person` on Manual QA (white), `machine` in Flow Capture and on an AI agent's watch page (blue).
+ * Chosen by the surface, not by who made each touch: Flow Capture's step pictures show a person's recorded touches and
+ * are blue, so one dialog never mixes the two (user, 2026-11-21).
+ */
 export type TouchTone = 'person' | 'machine'
 
 export const TOUCH_MARK = {
@@ -40,8 +45,6 @@ export const TOUCH_MARK = {
   rippleGrowPx: 26,
   /** A swipe or a pinch is held whole this long after the lift, then goes at once — no fade (user: a fade read as lag). */
   holdMs: 200,
-  /** A machine's touch shows where it will land this long before it presses, as a person's pointer does. */
-  approachMs: 300,
   /** A machine's tap is held this long. */
   tapMs: 110,
   /** A machine's swipe starts moving this long after its press. */
@@ -147,8 +150,12 @@ export function stillParts(mark: StillTouch, toPx: (p: NormPoint) => PxPoint): T
 
 /**
  * A machine's touch, to be played from `at` (the caller's clock when it learned of it). It has no pointer to follow,
- * so the motion is made here: the hover disc where it will land, the press, and for a swipe the finger moving from one
- * end to the other.
+ * so the motion is made here: the press, and for a swipe the finger moving from one end to the other.
+ *
+ * **Pressed the moment it arrives, with no hover first.** A touch reaches the page once it has already gone to the
+ * device — the relay tells watchers after passing the input on, and Flow Capture's replay sends the tap on the next
+ * line — so a hover before the press drew the press 300 ms after the device had reacted, over the screen it brought
+ * (pre-PR review; user, 2026-11-21).
  */
 export type MachineTouch = { id: number; at: number } & (
   | { kind: 'tap'; point: NormPoint }
@@ -161,20 +168,21 @@ function swipeMs(m: Extract<MachineTouch, { kind: 'swipe' }>): number {
   return Math.min(1000, Math.max(150, m.durationMs ?? TOUCH_MARK.swipeMs))
 }
 
-/** When a machine's touch has nothing left to draw — a moved one's hold, else a tap's ripple. */
+/**
+ * When a machine's touch has nothing left to draw. A swipe allows for a ripple too: one that moves no more than the
+ * split in the layer's pixels is drawn as a tap, and stopping at its hold left the ring frozen mid-widening.
+ */
 export function machineTouchEnd(m: MachineTouch): number {
-  const press = m.at + TOUCH_MARK.approachMs
   return m.kind === 'tap'
-    ? press + TOUCH_MARK.tapMs + TOUCH_MARK.rippleMs
-    : press + TOUCH_MARK.swipeLeadMs + swipeMs(m) + TOUCH_MARK.holdMs
+    ? m.at + TOUCH_MARK.tapMs + TOUCH_MARK.rippleMs
+    : m.at + TOUCH_MARK.swipeLeadMs + swipeMs(m) + Math.max(TOUCH_MARK.holdMs, TOUCH_MARK.rippleMs)
 }
 
 /** What a machine's touch shows at `now`. */
 export function machineState(m: MachineTouch, now: number): TouchState {
-  const press = m.at + TOUCH_MARK.approachMs
+  const press = m.at
   const start = m.kind === 'tap' ? m.point : m.from
-  if (now < m.at) return NO_TOUCH
-  if (now < press) return { hover: [start], touch: null }
+  if (now < press) return NO_TOUCH
   if (m.kind === 'tap') {
     const up = press + TOUCH_MARK.tapMs
     return { hover: [], touch: { fingers: [{ start, cur: start, far: start }], downAt: press, upAt: now >= up ? up : null } }

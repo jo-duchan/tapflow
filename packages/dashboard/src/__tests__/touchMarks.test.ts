@@ -82,27 +82,37 @@ describe('touch marks — a machine\'s touch, played', () => {
   const tap = { id: 1, at: 1000, kind: 'tap' as const, point: { x: 0.5, y: 0.5 } }
   const swipe = { id: 2, at: 1000, kind: 'swipe' as const, from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 }, durationMs: 400 }
 
-  // Decision 2026-11-21: a machine shows where it will land before it presses, as a person's pointer does.
-  it('shows the hover disc where it will land before it presses', () => {
+  // Review of this change: a machine's touch arrives after the device already took it, so a hover before the press drew
+  // the press 300 ms late, over the screen the touch brought. Mutation: wait before pressing.
+  it('presses the moment it arrives, with no hover first', () => {
     expect(machineState(tap, 999)).toEqual(NO_TOUCH)
-    expect(machineState(tap, 1000 + M.approachMs - 1)).toEqual({ hover: [tap.point], touch: null })
-    expect(machineState(tap, 1000 + M.approachMs).touch?.downAt).toBe(1000 + M.approachMs)
+    const at = machineState(tap, 1000)
+    expect(at.hover).toEqual([])
+    expect(at.touch?.downAt).toBe(1000)
   })
 
   it('lifts a tap after its hold, and is done once the ripple is', () => {
-    const lift = 1000 + M.approachMs + M.tapMs
+    const lift = 1000 + M.tapMs
     expect(machineState(tap, lift - 1).touch?.upAt).toBeNull()
     expect(machineState(tap, lift).touch?.upAt).toBe(lift)
     expect(machineTouchEnd(tap)).toBe(lift + M.rippleMs)
   })
 
   it('moves a swipe\'s finger from one end to the other over its own length', () => {
-    const moveAt = 1000 + M.approachMs + M.swipeLeadMs
+    const moveAt = 1000 + M.swipeLeadMs
     expect(machineState(swipe, moveAt).touch?.fingers[0]!.cur).toEqual(swipe.from)
     const end = machineState(swipe, moveAt + 400).touch!
     expect(end.fingers[0]!.cur).toEqual(swipe.to)
     expect(end.upAt).toBe(moveAt + 400)
-    expect(machineTouchEnd(swipe)).toBe(moveAt + 400 + M.holdMs)
+  })
+
+  // A swipe that moves no further than the split is drawn as a tap, whose ripple outlasts a swipe's hold: ended at the
+  // hold, the last frame left the ring half-widened on the screen (review). Mutation: end a swipe at its hold.
+  it('keeps a swipe that barely moved going until its ripple is done', () => {
+    const still = { id: 3, at: 1000, kind: 'swipe' as const, from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.5 }, durationMs: 400 }
+    const end = machineTouchEnd(still)
+    expect(touchParts(machineState(still, end - 1), end - 1, toPx)).not.toEqual([])
+    expect(touchParts(machineState(still, end), end, toPx)).toEqual([])
   })
 })
 
@@ -111,7 +121,7 @@ describe('touch marks — the store and a person\'s pointer', () => {
     const store = new TouchMarkStore()
     store.play({ id: 1, at: 0, kind: 'tap', point: { x: 0.1, y: 0.1 } })
     store.play({ id: 2, at: 0, kind: 'tap', point: { x: 0.9, y: 0.9 } })
-    expect(store.stateAt(10).hover).toEqual([{ x: 0.9, y: 0.9 }])
+    expect(store.stateAt(10).touch?.fingers[0]!.start).toEqual({ x: 0.9, y: 0.9 })
     expect(store.animating(10)).toBe(true)
     expect(store.animating(10_000)).toBe(false)
   })
@@ -125,6 +135,27 @@ describe('touch marks — the store and a person\'s pointer', () => {
     expect(store.animating(11)).toBe(true)
     store.dropFinished()
     expect(store.animating(12)).toBe(false)
+  })
+
+  // A press held still has nothing moving on its own: the layer stops drawing until a move wakes it (review).
+  it('asks for frames while a press tightens and after a lift, not while it is held still', () => {
+    const store = new TouchMarkStore()
+    store.down([{ x: 0.5, y: 0.5 }], 0)
+    expect(store.animating(M.growMs - 1)).toBe(true)
+    expect(store.animating(M.growMs)).toBe(false)
+    store.up(5000)
+    expect(store.animating(5001)).toBe(true)
+  })
+
+  // A drag out and back is still a swipe: the store keeps the farthest point, not the latest (review: the model test
+  // built `far` by hand). Mutation: `far: p`.
+  it('remembers the farthest a finger went, so a drag that came back stays a swipe', () => {
+    const store = new TouchMarkStore()
+    store.down([{ x: 0.5, y: 0.5 }], 0)
+    store.move([{ x: 0.5, y: 0.7 }])
+    store.move([{ x: 0.5, y: 0.5 }])
+    expect(store.stateAt(0).touch?.fingers[0]!.far).toEqual({ x: 0.5, y: 0.7 })
+    expect(kinds(touchParts(store.stateAt(500), 500, toPx))).toEqual(['ring', 'disc'])
   })
 
   // The user: Option alone shows the pinch guide, with no move needed.
