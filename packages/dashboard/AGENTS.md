@@ -153,7 +153,35 @@ fifth is refused with the reason (`watchRefusalText`).
 is in the middle of. The relay refuses those from a watching socket too; this is the half that does not depend
 on it. A watch that ended or was refused stays so across a reconnect (`AISession.test.tsx`).
 
-**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's pointer — a cursor that stays at the last tap and glides to the next, with a fading trail — through the screens' `overlay` (`TapMarks`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space). The run video's replay passes no `marks`, so it draws none. Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
+**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's latest tap or swipe through the screens' `overlay` (`TouchMarksLayer` with a `touch`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space) — see "Touches are drawn by one model" below. The run video's replay passes no `touch`, so it draws none. Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
+
+### Touches are drawn by one model, and the colour says who touched
+
+Every touch on a device or a picture of one is drawn by `lib/touchMarks` and nothing else: the QA viewer's own
+pointer (live, and burned into its recording), the watch view's agent, Flow Capture's Match and Verify replays, and
+its step pictures. **The motion is the same for everyone; only the colour differs — white for a person, blue for a
+machine** (user, 2026-11-21). Before it, the QA viewer had a white cursor in a DOM div plus a second copy in each
+recording composer, and the machine side had a blue gliding cursor with a dashed trail: three looks for one gesture.
+
+Three layers, each used everywhere: `model.ts` (pure — a state and a time in, the parts to draw out), `draw.ts`
+(the only renderer, a canvas — the overlay and a recording call the same function, so a video shows what the page
+did), and `store.ts` (what is touching now, outside React, since a pointer moves at the display's rate).
+`PointerTouchMarks` turns pointer events into it for both viewers, and `TouchMarksLayer` puts it over a screen,
+fed by a `store`, a machine's `touch`, or a picture's `still` mark. **A new place that shows a touch uses the layer;
+it does not draw its own.** The numbers are the agreed mockup's (`TOUCH_MARK`); change them there.
+
+Two things that look optional and are not:
+
+- **The layer's canvas bleeds 40 px past its box.** A mark near an edge (a tap's widening ring, the glow) was drawn
+  past it when this was SVG with visible overflow; a canvas clips at its edge.
+- **The layer keeps where its marks start on `data-anchor`.** A canvas has no DOM a test can read, and that a mark
+  sits under the pointer — through iOS's frame and Android's turn — is the thing placement is for. The Android pinch
+  guide's placement test reads it.
+
+A machine's touch arrives as one event with no pointer to follow, so the model plays it: the hover disc where it will
+land, then the press, then for a swipe the finger moving over the swipe's own length. Only the latest is drawn.
+Machine pinches carry no coordinates on the wire yet, so none is drawn; Automation run videos carry no touch points,
+so they draw none either. Both are follow-ups.
 
 ### The React Compiler is on
 

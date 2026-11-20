@@ -437,8 +437,8 @@ describe('AndroidViewer — a device that reports its body', () => {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 240, height: 100, right: 240, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
     const host = container.querySelector('div[style*="cursor: none"]') as Element
     act(() => { host.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 10, bubbles: true, pointerId: 1 })) })
-    const cursor = container.querySelector('div[style*="z-index: 20"]') as HTMLElement
-    expect(cursor.style.display).toBe('block')
+    // The hover disc is drawn: the layer says where. Mutation: drop the point while the description lags.
+    expect(screen.getByTestId('touch-marks').dataset.anchor).toBeTruthy()
   })
 
   // A touch goes out in the frame's space and the agent turns it by the frame it holds, so nothing waits on the
@@ -616,9 +616,23 @@ describe('AndroidViewer — a device that reports its body', () => {
     expect(pinch?.payload).toEqual({ f0: { x: 0.8, y: 0.8 }, f1: { x: 0.2, y: 0.2 }, space: 'frame' })
     // The hint is kept in the screen and turned back onto the picture: the second finger sits under the pointer.
     // Mutation: turn it by the correction instead of its inverse — every test at correction 0 passes that.
-    const hints = [...container.querySelectorAll<HTMLElement>('div[style*="border-radius: 50%"][style*="z-index: 10"]')]
-    const at = hints.map((h) => [parseFloat(h.style.left), parseFloat(h.style.top)].map((n) => Math.round(n)))
+    const at = screen.getByTestId('touch-marks').dataset.anchor!.split(';').map((p) => p.split(',').map((n) => Math.round(Number(n))))
     expect(at).toEqual([[80, 80], [20, 20]])
+  })
+
+  // The user: Option alone shows the pinch guide where the pointer already is, no move needed; letting go shows one
+  // disc again. Mutation: drop the viewer's `pointerMarks.option(true)` on the key.
+  it('shows a pinch guide\'s two discs as soon as Option is held, and one when it is let go', () => {
+    const { container } = renderViewer(0)
+    const host = container.querySelector('div[style*="cursor: none"]') as Element
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 100, height: 240, right: 100, bottom: 240, x: 0, y: 0, toJSON: () => ({}) })
+    const discs = () => screen.getByTestId('touch-marks').dataset.anchor?.split(';').length ?? 0
+    act(() => { host.dispatchEvent(new PointerEvent('pointermove', { clientX: 20, clientY: 48, bubbles: true, pointerId: 1 })) })
+    expect(discs()).toBe(1)
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'AltLeft' })) })
+    expect(discs()).toBe(2)
+    act(() => { window.dispatchEvent(new KeyboardEvent('keyup', { code: 'AltLeft' })) })
+    expect(discs()).toBe(1)
   })
 
   // The recording's overlay is drawn in the screen Android draws, so the cursor is kept there: a tap at the frame's

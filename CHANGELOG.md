@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Touches look the same everywhere the dashboard draws them, and the colour says who touched.** Your own pointer in a QA Session, an AI agent's taps and swipes on the session watch page, and Flow Capture's Match and Verify replays and step pictures now share one look: white for a person, blue for an AI agent or a replay. A disc sits where the pointer is, a press tightens it, and a swipe splits into a ring where it started and a dot under the finger, joined by a line, held for a moment after the lift. Holding Option shows a pinch's two fingers before you press. The watch page's blue cursor no longer stays at the last tap or glides to the next; each touch shows where it lands just before it presses. A QA Session recording shows the same marks as the page.
+
 ## [0.33.0] - 2026-11-19
 
 Flow Capture: save the steps you took in a QA session as a flow, replayed on the device to check it before you export it, with Android brought level with iOS along the way.

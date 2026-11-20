@@ -217,7 +217,7 @@ describe('matchRange', () => {
     const at = { ...base, kind: 'tap', point: [0.25, 0.75] } as unknown as RawStep
     await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
     await lease.stop()
-    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', x: 0.25, y: 0.75 }]])
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 } }]])
   })
 
   // #1125: the tree cannot say what covers an element on the device, so the device is asked about the screen the step is
@@ -681,7 +681,7 @@ describe('verifyFlow', () => {
     const lease = new PauseLease(tap)
     await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {}, undefined, onTouch)
     await lease.stop()
-    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', x: 0.5, y: 0.5 }]])
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.5, y: 0.5 } }]])
   })
 })
 

@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
 import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
-import { addMark, markOf } from '@/lib/flowCapture/marks'
-import { NO_MARKS } from '@/lib/watchActions'
+import { markOf, touchOfMark } from '@/lib/flowCapture/marks'
 
 // Flow Capture's dialog (#1125), the parts with no screen: the order of its states, and what Edit makes of the flow.
 const raw = {} as CapturedStep['raw']
@@ -235,10 +234,10 @@ describe('the touches drawn', () => {
   const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
 
   it('marks a tap, a key, a long press and a swipe, and nothing else', () => {
-    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.2, y: 0.3 })
-    expect(markOf({ ...base, kind: 'keyboardKey', point: [0.5, 0.9] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.5, y: 0.9 })
+    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+    expect(markOf({ ...base, kind: 'keyboardKey', point: [0.5, 0.9] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.5, y: 0.9 } })
     expect(markOf({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200 } as unknown as RawStep))
-      .toEqual({ kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2] })
+      .toEqual({ kind: 'swipe', from: { x: 0.1, y: 0.8 }, to: { x: 0.1, y: 0.2 }, durationMs: 200 })
     expect(markOf({ ...base, kind: 'text', text: 'a' } as unknown as RawStep)).toBeNull()
   })
 
@@ -247,12 +246,10 @@ describe('the touches drawn', () => {
     expect(markOf(turned as unknown as RawStep)).toBeNull()
   })
 
-  // User, session ff5d3d3c: the last few strokes left on the replay read as a swipe made again and again.
-  it('moves the cursor to each touch and keeps only that touch\'s trail', () => {
-    let m = NO_MARKS
-    for (let i = 1; i <= 6; i++) m = addMark(m, i, { kind: 'tap', x: i / 10, y: 0.5 })
-    expect(m.cursor).toEqual({ x: 0.6, y: 0.5 })
-    expect(m.trails.map((t) => t.id)).toEqual([6])
-    expect(addMark(m, 7, { kind: 'swipe', from: [0, 0], to: [1, 1] }).cursor).toEqual({ x: 1, y: 1 })
+  // A swipe's own length is what the replay draws it over, so a quick fling is not drawn as a slow drag.
+  it('plays a replayed step\'s touch from when it was sent, with the swipe\'s own length', () => {
+    const swipe = { kind: 'swipe' as const, from: { x: 0, y: 0 }, to: { x: 1, y: 1 }, durationMs: 250 }
+    expect(touchOfMark(7, swipe, 1000)).toEqual({ id: 7, at: 1000, ...swipe })
+    expect(touchOfMark(8, { kind: 'tap', point: { x: 0.2, y: 0.3 } }, 5)).toEqual({ id: 8, at: 5, kind: 'tap', point: { x: 0.2, y: 0.3 } })
   })
 })
