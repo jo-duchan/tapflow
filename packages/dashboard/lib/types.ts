@@ -221,9 +221,14 @@ export type RunFlow =
       durationMs: number
       steps: RunStep[]
       hasScreenshot: boolean
+      /** Why a flow that ran has no screenshot; null when there is one or nothing is known. Absent from an older relay. */
+      screenshotNote?: ScreenshotNote | null
       /** Absent from a relay older than flow videos; null when this flow has none. */
       video?: VideoSummary | null
     }
+
+/** Why a flow's screenshot was not kept: refused by the relay (too large, not an image, no disk room), or never taken. */
+export type ScreenshotNote = 'too-large' | 'not-image' | 'storage-full' | 'not-taken'
 
 /** `GET /api/v1/runs/:id`. `watchSessionId` is the session the runner holds now, while it runs; `watchSessionIds`
  *  is every one it holds, one per device of a parallel run, and absent from a relay older than those. */

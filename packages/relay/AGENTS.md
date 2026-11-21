@@ -328,6 +328,11 @@ What `tapflow flow run` did, for the dashboard's runs page (A3). The CLI writes 
 - **A run is live while its runner's socket is open.** The flow runner does not reconnect, so the close handler ends its running runs (`holder-lost`). The client id is matched in two key forms, `<userId>:<client>` and `anon:<client>`, because the handshake does not read a PAT on loopback and a runner on the relay's own Mac holds its sessions anonymously. A relay restart closes sockets without that handler; reads and the daily purge close what is left after a minute of quiet. No timer exists for it.
 - **The watch link opens the session the runner holds now**, never a stored one: session ids outlive runs, so a stored id would open whoever took the device next.
 - A run with a build expires with the build; a run with none expires after 7 days.
+- **Why a flow has no screenshot is written where the relay refuses one** (`screenshot_note`, migration 024): `too-large`
+  (413), `not-image` (415), `storage-full` (507), so the page says it whatever the runner's version; `not-taken` comes
+  from the report's `screenshotMissed`. Only while no screenshot is stored, never by the report's upsert (a retried
+  report would clear a refusal), and cleared by a stored one. A note call of the runner's own was not used: an older
+  relay answers an unknown `/api/` POST with `index.html` and 200.
 - **A flow the runner did not replay is a `skipped` row with a `skip_reason`** (`app-mismatch`, `tag-filter`; migration 017), its reason in words in `failure_message`. The table's CHECK ties the two together — a reason only with a skip, and a skip only with one — and a skipped flow takes no screenshot. The list counts it as `flowsSkipped`.
 
 ### Flow run videos (`/api/v1/runs/:id/flows/:idx/video`)

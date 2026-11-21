@@ -121,7 +121,7 @@ export class SocketFlowDriver implements FlowDriver {
     return toFramePoint(this.turn, [x, y])
   }
 
-  private async guard<T>(fn: () => Promise<T>): Promise<T> {
+  protected async guard<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn()
     } catch (e) {

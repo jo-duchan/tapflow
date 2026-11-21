@@ -182,9 +182,12 @@ exemption rather than pattern-matching it, so the next exemption has to be a dec
 
 ### A screenshot reply names what was produced, never what was asked for
 
-`screencap -p` produces PNG and takes no format argument, so `screenshot:done` answers `format: 'png'`
-unconditionally — including for a JPEG request. The request's `format` is a **preference** and this
-platform cannot honour it; only the reply describes an outcome (see `ScreenshotRequest` in protocol).
+`screencap -p` produces PNG and takes no format argument. A JPEG request is converted here with macOS's own
+`sips` (`screenshotJpeg.ts`, quality 85; a run asks for JPEG since a large screen's PNG went past the relay's 5 MB
+cap), in a temp directory of its own, under a 3 s timeout; anything that fails — no `sips` off macOS, a timeout,
+output that is not a JPEG — answers the PNG, as `png`. A warning `screencap` writes ahead of the image on a
+multi-display device (#1118) is cut first. The request's `format` stays a **preference**; only the reply
+describes an outcome (see `ScreenshotRequest` in protocol).
 
 Echoing the request is #508: the relay writes that field into the HTTP `Content-Type`, so PNG bytes went
 out as `image/jpeg`, and `mcp-server` picked a JPEG parser for the dimensions it hands the LLM as

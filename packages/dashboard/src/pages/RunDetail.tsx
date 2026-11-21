@@ -13,7 +13,7 @@ import {
   SKIP_REASON_LABEL, UNREPORTED_FLOW_LABEL, failureBadge, formatAgo, formatDuration, runBuildLabel,
   pollWhileRunning, runDuration, runOutcomeText, runSourceLabel, shortCommit,
 } from '@/lib/runs'
-import type { RunDetail as Run, RunDevice, RunFlow, RunStep, ServiceTier } from '@/lib/types'
+import type { RunDetail as Run, RunDevice, RunFlow, RunStep, ScreenshotNote, ServiceTier } from '@/lib/types'
 import { RunVideo } from '@/components/runs/RunVideo'
 
 /**
@@ -205,12 +205,12 @@ function FlowItem({ runId, flow }: { runId: string; flow: RunFlow }) {
               ))}
             </ol>
           )}
-          {flow.hasScreenshot && <LastScreen runId={runId} flow={flow} />}
+          {flow.hasScreenshot ? <LastScreen runId={runId} flow={flow} /> : <ScreenshotMissing note={flow.screenshotNote} />}
         </>
       )}
       {isReported(flow) && <UncheckedTouches steps={flow.steps} />}
       {/* A passed flow's last screen is the evidence that it passed — what the login landed on. */}
-      {isReported(flow) && flow.status === 'passed' && flow.hasScreenshot && <LastScreen runId={runId} flow={flow} />}
+      {isReported(flow) && flow.status === 'passed' && (flow.hasScreenshot ? <LastScreen runId={runId} flow={flow} /> : <ScreenshotMissing note={flow.screenshotNote} />)}
       {/* The whole flow, passed or failed: the screenshot shows where it ended, the video how it got there. */}
       {flow.video && (
         <RunVideo runId={runId} idx={flow.idx} flowName={flow.name} summary={flow.video} running={!flow.video.ended} />
@@ -219,6 +219,21 @@ function FlowItem({ runId, flow }: { runId: string; flow: RunFlow }) {
   )
 }
 
+
+const SCREENSHOT_NOTE_TEXT: Record<ScreenshotNote, string> = {
+  'too-large': 'Screenshot not kept: it was larger than the relay\'s 5 MB limit.',
+  'not-image': 'Screenshot not kept: what the device sent was not an image.',
+  'storage-full': 'Screenshot not kept: the relay\'s disk was full.',
+  'not-taken': 'No screenshot: the device did not return one in time.',
+}
+
+/**
+ * Where a flow's screenshot would be, the reason it is not (2026-11-22): the runner's warning reached only its terminal,
+ * and the card showed nothing. Nothing when no reason is known — a run recorded without screenshots, or an older relay.
+ */
+function ScreenshotMissing({ note }: { note: ScreenshotNote | null | undefined }) {
+  return note ? <p className="text-sm text-muted-foreground">{SCREENSHOT_NOTE_TEXT[note]}</p> : null
+}
 
 /**
  * Touches the device could not judge (#1125), for a flow that passed as well as one that failed: such a step touched its

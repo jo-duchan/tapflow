@@ -34,7 +34,7 @@ interface Body {
   serviceTier: unknown
   deviceReset: unknown
   build: unknown
-  flows: { name: string; status: string; hasScreenshot?: boolean; steps?: object[]; skipReason?: string; device?: unknown }[]
+  flows: { name: string; status: string; hasScreenshot?: boolean; screenshotNote?: string | null; steps?: object[]; skipReason?: string; device?: unknown }[]
   watchSessionId: string | null
   watchSessionIds: string[]
   items: { id: string; flowsSkipped?: number }[]
@@ -539,6 +539,48 @@ describe('flow run records', () => {
     }
     expect(fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir) : []).toHaveLength(0)
     expect((await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)).status).toBe(200)
+  })
+
+  // Why a flow has no screenshot is written where the relay refuses it, so the page can say so whatever the runner's
+  // version, and a stored screenshot clears it. Mutations: skip a refusal's note, keep the note after a store, or let
+  // a refusal overwrite a screenshot an earlier try kept.
+  it('says why a flow has no screenshot, and stops saying it once one is stored', async () => {
+    const note = async (id: string) => (await call('GET', `/api/v1/runs/${id}`, cookie())).body.flows[0].screenshotNote
+    const id = await create()
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
+    expect(await note(id)).toBeNull()
+    await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024)]))
+    expect(await note(id)).toBe('too-large')
+    await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), Buffer.from('[Warning] Multiple displays'))
+    expect(await note(id)).toBe('not-image')
+    // A retried report does not clear a refusal the upload left.
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), passed)
+    expect(await note(id)).toBe('not-image')
+    process.env.TAPFLOW_MIN_FREE_DISK_BYTES = String(Number.MAX_SAFE_INTEGER)
+    try {
+      await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)
+    } finally {
+      delete process.env.TAPFLOW_MIN_FREE_DISK_BYTES
+    }
+    expect(await note(id)).toBe('storage-full')
+    expect((await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)).status).toBe(200)
+    expect(await note(id)).toBeNull()
+    // A later refusal does not hide the screenshot already kept.
+    await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), Buffer.from('<script>'))
+    const flow = (await call('GET', `/api/v1/runs/${id}`, cookie())).body.flows[0]
+    expect([flow.hasScreenshot, flow.screenshotNote]).toEqual([true, null])
+  })
+
+  // The runner tried and got nothing: said from its report, only while no screenshot is stored. Mutations: ignore the
+  // field, or say it over a stored screenshot.
+  it('says a screenshot was not taken when the runner reports it missed one', async () => {
+    const id = await create()
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), { ...passed, screenshotMissed: true })
+    expect((await call('GET', `/api/v1/runs/${id}`, cookie())).body.flows[0].screenshotNote).toBe('not-taken')
+    await call('POST', `/api/v1/runs/${id}/flows/0/screenshot`, bearer(PAT_CI), PNG)
+    await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), { ...passed, screenshotMissed: true })
+    const flow = (await call('GET', `/api/v1/runs/${id}`, cookie())).body.flows[0]
+    expect([flow.hasScreenshot, flow.screenshotNote]).toEqual([true, null])
   })
 
   // ── liveness ──────────────────────────────────────────────────────────────

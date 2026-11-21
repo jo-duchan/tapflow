@@ -2196,3 +2196,18 @@ describe('RelayClient.setOrientation / setPosture — wait for the state, not th
     expect(err).not.toBeInstanceOf(DeviceLacksError)
   })
 })
+
+describe('RelayClient.screenshot — the format it asks for', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  // A run asks for JPEG; everyone else asks as before, with no parameter an older relay could misread. Mutations:
+  // always add it, or never.
+  it('adds format=jpeg only when asked', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(2) } as unknown as Response)
+    const c = client()
+    await c.screenshot('s1', undefined, 'jpeg')
+    await c.screenshot('s1')
+    const urls = fetchMock.mock.calls.map(([u]) => String(u))
+    expect(urls[0]).toMatch(/\/api\/v1\/sessions\/s1\/screenshot\?format=jpeg$/)
+    expect(urls[1]).toMatch(/\/api\/v1\/sessions\/s1\/screenshot$/)
+  })
+})

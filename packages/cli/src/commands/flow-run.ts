@@ -221,7 +221,9 @@ function printFailure(result: FlowResult, flow: Flow, flowIndex: number, opts: F
     // from overwriting each other's evidence.
     const dir = opts.artifacts ?? path.join('.tapflow', 'artifacts')
     fs.mkdirSync(dir, { recursive: true })
-    const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.png`)
+    // Named by what the bytes are: a run asks the device for JPEG, and an older agent answers PNG.
+    const ext = result.failureScreenshot[0] === 0xff && result.failureScreenshot[1] === 0xd8 ? 'jpg' : 'png'
+    const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.${ext}`)
     fs.writeFileSync(shot, result.failureScreenshot)
     console.error(`${prefix}  screenshot: ${shot}`)
   }
@@ -264,6 +266,7 @@ function flowReport(result: FlowResult, device?: DeviceInfo): FlowReport {
     })),
     // A flow refused before a device was chosen ran on none.
     ...(device ? { device: { id: device.id, name: device.name, platform: device.platform } } : {}),
+    ...(result.screenshotMissed ? { screenshotMissed: true as const } : {}),
   }
 }
 
