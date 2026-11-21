@@ -199,7 +199,8 @@ Three things that look optional and are not:
 A machine's touch arrives as one event with no pointer to follow, so the model plays it: the press, then for a swipe
 the finger moving to its end, and for a pinch both fingers each to its own — over the gesture's own length (Flow
 Capture's step, or the `durationMs` the relay now puts on `watch:action`), else over 400 ms. A tap is held for its
-`holdMs` when longer, so a long press reads as one (user, 2026-11-21), capped at 3 s. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
+`holdMs` when longer, so a long press reads as one (user, 2026-11-21). **One cap for all three, 3 s**
+(`maxGestureMs`): a separate 1 s cap on strokes drew a 2 s pinch in half its time. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
 it arrives once it has already reached the device, so a hover drew the press 300 ms late, over the screen it brought.
 
 **A person's press is drawn as a drag only once it is sent as one** (`DRAG_THRESHOLD`, 2 % of the screen). Under that

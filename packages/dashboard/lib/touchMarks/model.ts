@@ -47,9 +47,16 @@ export const TOUCH_MARK = {
   rippleGrowPx: 26,
   /** A swipe or a pinch is held whole this long after the lift, then goes at once — no fade (user: a fade read as lag). */
   holdMs: 200,
-  /** A machine's tap is held this long, or for its own `holdMs` when longer — a long press — up to `maxHoldMs`. */
+  /** A machine's tap is held this long, or for its own `holdMs` when longer — a long press — up to `maxGestureMs`. */
   tapMs: 110,
-  maxHoldMs: 3000,
+  /**
+   * The longest a machine's gesture is drawn — a long press's hold, a swipe's or a pinch's own length — so a finger
+   * stuck down does not hold a mark for minutes. One cap for all three (user, 2026-11-21): a 1 s cap on swipes and
+   * pinches drew a 2 s pinch in half its time once the relay told the length (review of #1205).
+   */
+  maxGestureMs: 3000,
+  /** The shortest a machine's swipe or pinch is drawn, so a fling is not over in a frame. */
+  minStrokeMs: 150,
   /** A machine's swipe starts moving this long after its press. */
   swipeLeadMs: 60,
   /** A machine's swipe with no duration of its own is drawn over this. */
@@ -188,7 +195,7 @@ export type MachineTouch = {
 const ease = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2)
 
 function swipeMs(m: Extract<MachineTouch, { kind: 'swipe' | 'pinch' }>): number {
-  return Math.min(1000, Math.max(150, m.durationMs ?? TOUCH_MARK.swipeMs))
+  return Math.min(TOUCH_MARK.maxGestureMs, Math.max(TOUCH_MARK.minStrokeMs, m.durationMs ?? TOUCH_MARK.swipeMs))
 }
 
 /**
@@ -203,7 +210,7 @@ export function machineTouchEnd(m: MachineTouch): number {
 
 /** How long a machine's tap is held: the usual press, or a long press's own hold (user: a tap, held for its duration). */
 function holdOf(m: Extract<MachineTouch, { kind: 'tap' }>): number {
-  return Math.max(TOUCH_MARK.tapMs, Math.min(TOUCH_MARK.maxHoldMs, m.holdMs ?? 0))
+  return Math.max(TOUCH_MARK.tapMs, Math.min(TOUCH_MARK.maxGestureMs, m.holdMs ?? 0))
 }
 
 /** What a machine's touch shows at `now`. A pinch is two fingers, each moving as a swipe does. */

@@ -127,6 +127,15 @@ describe('touch marks — a machine\'s pinch and long press', () => {
     expect(machineTouchEnd(pinch)).toBe(M.swipeLeadMs + 400 + Math.max(M.holdMs, M.rippleMs))
   })
 
+  // Its own length, up to the one cap a long press has too: a 2 s pinch moves for 2 s, a stuck one stops at 3 s (review
+  // of #1205: a 1 s cap drew a 2 s pinch in half its time). Mutations: the old 1 s cap, or no cap.
+  it('moves a pinch over its own length, up to the gesture cap', () => {
+    const slow = { ...pinch, durationMs: 2000 }
+    expect(machineState(slow, M.swipeLeadMs + 1999).touch?.upAt).toBeNull()
+    expect(machineState(slow, M.swipeLeadMs + 2000).touch?.upAt).toBe(M.swipeLeadMs + 2000)
+    expect(machineTouchEnd({ ...pinch, durationMs: 60_000 })).toBe(M.swipeLeadMs + M.maxGestureMs + Math.max(M.holdMs, M.rippleMs))
+  })
+
   it('draws a still pinch as both fingers\' lines', () => {
     expect(kinds(stillParts({ kind: 'pinch', from: pinch.from, to: pinch.to }, toPx))).toEqual(['line', 'disc', 'disc', 'line', 'disc', 'disc'])
   })
@@ -137,7 +146,7 @@ describe('touch marks — a machine\'s pinch and long press', () => {
     const press = { id: 2, at: 0, kind: 'tap' as const, point: { x: 0.5, y: 0.5 }, holdMs: 900 }
     expect(machineState(press, 899).touch?.upAt).toBeNull()
     expect(machineState(press, 900).touch?.upAt).toBe(900)
-    expect(machineState({ ...press, holdMs: 60_000 }, M.maxHoldMs).touch?.upAt).toBe(M.maxHoldMs)
+    expect(machineState({ ...press, holdMs: 60_000 }, M.maxGestureMs).touch?.upAt).toBe(M.maxGestureMs)
     expect(machineState({ ...press, holdMs: undefined }, M.tapMs).touch?.upAt).toBe(M.tapMs)
   })
 })
