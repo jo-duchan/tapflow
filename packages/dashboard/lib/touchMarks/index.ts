@@ -1,7 +1,7 @@
 export {
   TOUCH_MARK, NO_TOUCH, touchParts, touchDone, stillParts, machineState, machineTouchEnd,
   type NormPoint, type PxPoint, type TouchTone, type Finger, type Touch, type TouchState, type TouchPart,
-  type TouchOptions, type StillTouch, type MachineTouch,
+  type TouchOptions, type StillTouch, type MachineTouch, type Pair,
 } from './model'
 export { GLASS_BLUR, TOUCH_BORDER, drawTouchParts, drawTouchState, prefersReducedMotion, type DrawOptions } from './draw'
 export { TouchMarkStore } from './store'

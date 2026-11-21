@@ -18,7 +18,7 @@ const matchedWith: unknown[] = []
 // Settle reads and replays in the order they happened: one test needs reads it does not log above.
 const seq: string[] = []
 // The options the engine was last run with, the flows it was given, and what it answers next (else a pass).
-const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void; probe?: Record<string, string> } = { flows: [], answers: [] }
+const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void; probe?: Record<string, string>; drive?: (d: Record<string, (...a: unknown[]) => Promise<unknown>>) => Promise<void> } = { flows: [], answers: [] }
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
@@ -41,6 +41,7 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
     }
     const answer = ran.answers.shift()
     if (answer) return answer
+    if (ran.drive) { await ran.drive(driver as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>); return { status: 'passed' } }
     await driver.tap(0.5, 0.5)
     await driver.inputText('안녕')
     await driver.pressKey('ImeAction')
@@ -74,6 +75,7 @@ const channel = {
   swipe: async (_s: string, from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
     log.push(`swipe ${from} ${to} ${durationMs} ${holdMs}`)
   },
+  pinch: async () => { log.push('pinch') },
   typeText: async () => { log.push('type') },
   pressKey: async (_s: string, code: string) => { log.push(`key ${code}`) },
   screenshot: async () => { if (trackShots.on) seq.push('shot'); throw new Error('no screenshot here') },
@@ -109,6 +111,7 @@ beforeEach(() => {
   ran.flows = []
   ran.answers = []
   ran.beforeRun = undefined
+  ran.drive = undefined
   ran.probe = undefined
   trackShots.on = false
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -682,6 +685,18 @@ describe('verifyFlow', () => {
     await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {}, undefined, onTouch)
     await lease.stop()
     expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.5, y: 0.5 } }]])
+  })
+
+  // A flow's pinch step draws its two fingers as a replay goes (it drew nothing). Mutation: drop the override.
+  it('says where a pinch\'s two fingers go, for drawing on the device', async () => {
+    const onTouch = vi.fn()
+    ran.drive = async (d) => { await d['pinch']!([[0.4, 0.45], [0.6, 0.55]], [[0.2, 0.35], [0.8, 0.65]], 400) }
+    const lease = new PauseLease(tap)
+    await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {}, undefined, onTouch)
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{
+      kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 400,
+    }]])
   })
 })
 

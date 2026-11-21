@@ -47,8 +47,16 @@ export const TOUCH_MARK = {
   rippleGrowPx: 26,
   /** A swipe or a pinch is held whole this long after the lift, then goes at once — no fade (user: a fade read as lag). */
   holdMs: 200,
-  /** A machine's tap is held this long. */
+  /** A machine's tap is held this long, or for its own `holdMs` when longer — a long press — up to `maxGestureMs`. */
   tapMs: 110,
+  /**
+   * The longest a machine's gesture is drawn — a long press's hold, a swipe's or a pinch's own length — so a finger
+   * stuck down does not hold a mark for minutes. One cap for all three (user, 2026-11-21): a 1 s cap on swipes and
+   * pinches drew a 2 s pinch in half its time once the relay told the length (review of #1205).
+   */
+  maxGestureMs: 3000,
+  /** The shortest a machine's swipe or pinch is drawn, so a fling is not over in a frame. */
+  minStrokeMs: 150,
   /** A machine's swipe starts moving this long after its press. */
   swipeLeadMs: 60,
   /** A machine's swipe with no duration of its own is drawn over this. */
@@ -141,15 +149,26 @@ export function touchParts(state: TouchState, now: number, toPx: (p: NormPoint) 
   return state.hover.map((p) => ({ kind: 'disc' as const, at: toPx(p), r: TOUCH_MARK.hoverR }))
 }
 
-/** A touch to draw on a still picture: a tap's point, or a swipe's two ends. */
-export type StillTouch = { kind: 'tap'; point: NormPoint } | { kind: 'swipe'; from: NormPoint; to: NormPoint }
+/** A touch to draw on a still picture: a tap's point, a swipe's two ends, or a pinch's two fingers' ends. */
+export type StillTouch =
+  | { kind: 'tap'; point: NormPoint }
+  | { kind: 'swipe'; from: NormPoint; to: NormPoint }
+  | { kind: 'pinch'; from: Pair; to: Pair }
 
-/** A still picture's mark: the frame just before the finger lifted — a pressed dot, or a swipe's whole line. */
+/** A pinch's two fingers. */
+export type Pair = [NormPoint, NormPoint]
+
+/** A still picture's mark: the frame just before the finger lifted — a pressed dot, or a swipe's (or a pinch's two) whole lines. */
 export function stillParts(mark: StillTouch, toPx: (p: NormPoint) => PxPoint): TouchPart[] {
-  const finger: Finger = mark.kind === 'tap'
-    ? { start: mark.point, cur: mark.point, far: mark.point }
-    : { start: mark.from, cur: mark.to, far: mark.to }
-  return touchParts({ hover: [], touch: { fingers: [finger], downAt: 0, upAt: null } }, 0, toPx, { reduced: true })
+  const fingers: Finger[] = mark.kind === 'tap'
+    ? [{ start: mark.point, cur: mark.point, far: mark.point }]
+    : strokes(mark).map(([from, to]) => ({ start: from, cur: to, far: to }))
+  return touchParts({ hover: [], touch: { fingers, downAt: 0, upAt: null } }, 0, toPx, { reduced: true })
+}
+
+/** A swipe's one stroke, or a pinch's two: each finger from where it went down to where it lifted. */
+function strokes(m: { kind: 'swipe'; from: NormPoint; to: NormPoint } | { kind: 'pinch'; from: Pair; to: Pair }): [NormPoint, NormPoint][] {
+  return m.kind === 'swipe' ? [[m.from, m.to]] : [[m.from[0], m.to[0]], [m.from[1], m.to[1]]]
 }
 
 /**
@@ -161,15 +180,22 @@ export function stillParts(mark: StillTouch, toPx: (p: NormPoint) => PxPoint): T
  * line — so a hover before the press drew the press 300 ms after the device had reacted, over the screen it brought
  * (pre-PR review; user, 2026-11-21).
  */
-export type MachineTouch = { id: number; at: number } & (
-  | { kind: 'tap'; point: NormPoint }
+export type MachineTouch = {
+  id: number
+  at: number
+  /** `'frame'`: the points are of the video frame as it arrives, not the screen — a body-mode holder's (protocol
+   *  `PointSpace`). The surface places them; the motion is the same. */
+  space?: 'frame'
+} & (
+  | { kind: 'tap'; point: NormPoint; holdMs?: number }
   | { kind: 'swipe'; from: NormPoint; to: NormPoint; durationMs?: number }
+  | { kind: 'pinch'; from: Pair; to: Pair; durationMs?: number }
 )
 
 const ease = (u: number) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2)
 
-function swipeMs(m: Extract<MachineTouch, { kind: 'swipe' }>): number {
-  return Math.min(1000, Math.max(150, m.durationMs ?? TOUCH_MARK.swipeMs))
+function swipeMs(m: Extract<MachineTouch, { kind: 'swipe' | 'pinch' }>): number {
+  return Math.min(TOUCH_MARK.maxGestureMs, Math.max(TOUCH_MARK.minStrokeMs, m.durationMs ?? TOUCH_MARK.swipeMs))
 }
 
 /**
@@ -178,24 +204,32 @@ function swipeMs(m: Extract<MachineTouch, { kind: 'swipe' }>): number {
  */
 export function machineTouchEnd(m: MachineTouch): number {
   return m.kind === 'tap'
-    ? m.at + TOUCH_MARK.tapMs + TOUCH_MARK.rippleMs
+    ? m.at + holdOf(m) + TOUCH_MARK.rippleMs
     : m.at + TOUCH_MARK.swipeLeadMs + swipeMs(m) + Math.max(TOUCH_MARK.holdMs, TOUCH_MARK.rippleMs)
 }
 
-/** What a machine's touch shows at `now`. */
+/** How long a machine's tap is held: the usual press, or a long press's own hold (user: a tap, held for its duration). */
+function holdOf(m: Extract<MachineTouch, { kind: 'tap' }>): number {
+  return Math.max(TOUCH_MARK.tapMs, Math.min(TOUCH_MARK.maxGestureMs, m.holdMs ?? 0))
+}
+
+/** What a machine's touch shows at `now`. A pinch is two fingers, each moving as a swipe does. */
 export function machineState(m: MachineTouch, now: number): TouchState {
   const press = m.at
-  const start = m.kind === 'tap' ? m.point : m.from
   if (now < press) return NO_TOUCH
   if (m.kind === 'tap') {
-    const up = press + TOUCH_MARK.tapMs
-    return { hover: [], touch: { fingers: [{ start, cur: start, far: start }], downAt: press, upAt: now >= up ? up : null } }
+    const up = press + holdOf(m)
+    const p = m.point
+    return { hover: [], touch: { fingers: [{ start: p, cur: p, far: p }], downAt: press, upAt: now >= up ? up : null } }
   }
   const moveAt = press + TOUCH_MARK.swipeLeadMs
   const ms = swipeMs(m)
   const u = ease(clamp01((now - moveAt) / ms))
-  // At the end it is the end itself, not the arithmetic's nearest: the mark sits where the swipe really lifted.
-  const cur = u >= 1 ? m.to : { x: m.from.x + (m.to.x - m.from.x) * u, y: m.from.y + (m.to.y - m.from.y) * u }
+  // At the end it is the end itself, not the arithmetic's nearest: the mark sits where the stroke really lifted.
+  const fingers = strokes(m).map(([from, to]) => {
+    const cur = u >= 1 ? to : { x: from.x + (to.x - from.x) * u, y: from.y + (to.y - from.y) * u }
+    return { start: from, cur, far: cur }
+  })
   const up = moveAt + ms
-  return { hover: [], touch: { fingers: [{ start, cur, far: cur }], downAt: press, upAt: now >= up ? up : null } }
+  return { hover: [], touch: { fingers, downAt: press, upAt: now >= up ? up : null } }
 }

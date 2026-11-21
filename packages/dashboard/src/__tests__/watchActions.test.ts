@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { actionText, placeOnIosFrame, touchOfAction } from '@/lib/watchActions'
+import { actionText, isMark, placeOnIosFrame, touchOfAction } from '@/lib/watchActions'
 
 describe('actionText', () => {
   it('says what happened without what was typed or opened', () => {
@@ -16,6 +16,28 @@ describe('touchOfAction', () => {
     expect(touchOfAction(3, { kind: 'tap', x: 0.2, y: 0.4 }, 500)).toEqual({ id: 3, at: 500, kind: 'tap', point: { x: 0.2, y: 0.4 } })
     expect(touchOfAction(4, { kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2] }, 600))
       .toEqual({ id: 4, at: 600, kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } })
+  })
+})
+
+describe('a pinch, a long press, and the frame\'s points', () => {
+  const pinch = { kind: 'pinch' as const, from: [[0.4, 0.45], [0.6, 0.55]] as [[number, number], [number, number]], to: [[0.2, 0.35], [0.8, 0.65]] as [[number, number], [number, number]], durationMs: 300, space: 'frame' as const }
+
+  // An older relay's pinch has no fingers: a row, not a mark. Mutation: accept every pinch.
+  it('draws a pinch only when its fingers came with it', () => {
+    expect(isMark(pinch)).toBe(true)
+    expect(isMark({ kind: 'pinch' })).toBe(false)
+    expect(isMark({ kind: 'pinch', from: pinch.from })).toBe(false)
+  })
+
+  // Mutations: swap a finger, drop the hold, drop the space.
+  it('turns them into a touch with both fingers, the hold and the space kept', () => {
+    expect(touchOfAction(5, pinch, 700)).toEqual({
+      id: 5, at: 700, space: 'frame', kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300,
+    })
+    expect(touchOfAction(7, { kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 950 }, 0))
+      .toEqual({ id: 7, at: 0, kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 }, durationMs: 950 })
+    expect(touchOfAction(6, { kind: 'tap', x: 0.2, y: 0.4, holdMs: 900, space: 'frame' }, 0))
+      .toEqual({ id: 6, at: 0, kind: 'tap', point: { x: 0.2, y: 0.4 }, holdMs: 900, space: 'frame' })
   })
 })
 

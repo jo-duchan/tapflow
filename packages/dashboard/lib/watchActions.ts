@@ -16,11 +16,23 @@ export const MAX_ACTIONS = 100
  * the motion is the same one a person's pointer makes (`lib/touchMarks`), so a touch the page has not drawn yet is
  * not queued behind one it is drawing.
  */
-export function touchOfAction(id: number, a: Extract<WatchActionKind, { kind: 'tap' | 'swipe' }>, at: number): MachineTouch {
-  return a.kind === 'tap'
-    ? { id, at, kind: 'tap', point: { x: a.x, y: a.y } }
-    : { id, at, kind: 'swipe', from: { x: a.from[0], y: a.from[1] }, to: { x: a.to[0], y: a.to[1] } }
+export function touchOfAction(id: number, a: DrawnAction, at: number): MachineTouch {
+  const pt = ([x, y]: [number, number]) => ({ x, y })
+  const space = a.space ? { space: a.space } : {}
+  switch (a.kind) {
+    case 'tap': return { id, at, ...space, kind: 'tap', point: { x: a.x, y: a.y }, ...(a.holdMs !== undefined ? { holdMs: a.holdMs } : {}) }
+    case 'swipe': return { id, at, ...space, kind: 'swipe', from: pt(a.from), to: pt(a.to), ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}) }
+    case 'pinch': return {
+      id, at, ...space, kind: 'pinch', from: [pt(a.from[0]), pt(a.from[1])], to: [pt(a.to[0]), pt(a.to[1])],
+      ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
+    }
+  }
 }
+
+/** An action the page can draw: a tap, a swipe, or a pinch whose relay told its fingers. */
+export type DrawnAction =
+  | Extract<WatchActionKind, { kind: 'tap' | 'swipe' }>
+  | (Extract<WatchActionKind, { kind: 'pinch' }> & Required<Pick<Extract<WatchActionKind, { kind: 'pinch' }>, 'from' | 'to'>>)
 
 /** A line for the Actions list. Positions as percentages of the screen, which is what they are on the wire. */
 export function actionText(a: WatchActionKind): string {
@@ -47,9 +59,9 @@ function direction(from: [number, number], to: [number, number]): string {
   return dy > 0 ? 'down' : 'up'
 }
 
-/** Whether an action is drawn on the device. */
-export function isMark(a: WatchActionKind): a is Extract<WatchActionKind, { kind: 'tap' | 'swipe' }> {
-  return a.kind === 'tap' || a.kind === 'swipe'
+/** Whether an action is drawn on the device. A pinch from an older relay carries no fingers: it is a row only. */
+export function isMark(a: WatchActionKind): a is DrawnAction {
+  return a.kind === 'tap' || a.kind === 'swipe' || (a.kind === 'pinch' && a.from !== undefined && a.to !== undefined)
 }
 
 /**

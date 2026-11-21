@@ -3,7 +3,7 @@ import {
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
   diffAreas, SCREEN_DIFF_THRESHOLD, withoutAreas, type ScreenCells,
   toFlowSteps, waitForStableScreen, madeMidTransition, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
-  type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
+  type PinchFingers, type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
@@ -803,6 +803,13 @@ class AligningDriver extends SocketFlowDriver {
     this.signal?.throwIfAborted()
     this.onTouch?.({ kind: 'swipe', from: { x: from[0], y: from[1] }, to: { x: to[0], y: to[1] }, durationMs })
     return super.swipe(from, to, durationMs, holdMs)
+  }
+
+  override pinch(start: PinchFingers, end: PinchFingers, durationMs: number) {
+    this.signal?.throwIfAborted()
+    const pt = ([x, y]: [number, number]) => ({ x, y })
+    this.onTouch?.({ kind: 'pinch', from: [pt(start[0]), pt(start[1])], to: [pt(end[0]), pt(end[1])], durationMs })
+    return super.pinch(start, end, durationMs)
   }
 
   override async inputText(text: string): Promise<void> {

@@ -24,4 +24,29 @@ describe('WatchedDevice — marks on a turned body', () => {
     )
     expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('0,0')
   })
+
+  // A body-mode holder sends the frame's own points: the shell is that frame, so they sit as they are — turned like a
+  // screen point they landed a quarter off (design review). Asymmetric, so a turn shows. Mutation: turn every point.
+  it('puts a point in the frame\'s own space where it is', () => {
+    const chrome = { screenWidth: 1080, screenHeight: 2400, streamRotation: 270, bodyRotation: 90 } as AndroidChrome
+    render(
+      <WatchedDevice
+        chrome={chrome} deviceReady platform="android" binaryFrameHandlerRef={{ current: undefined }}
+        touch={{ id: 1, at: 0, kind: 'tap', point: { x: 0.2, y: 0.7 }, space: 'frame' }}
+      />,
+    )
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('20,70')
+  })
+
+  // A pinch is anchored at both fingers' starts. Mutation: anchor one.
+  it('anchors a pinch at both fingers', () => {
+    const chrome = { screenWidth: 1080, screenHeight: 2400, streamRotation: 0 } as AndroidChrome
+    render(
+      <WatchedDevice
+        chrome={chrome} deviceReady platform="android" binaryFrameHandlerRef={{ current: undefined }}
+        touch={{ id: 1, at: 0, kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }] }}
+      />,
+    )
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('40,45;60,55')
+  })
 })

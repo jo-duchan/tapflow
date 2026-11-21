@@ -1592,12 +1592,18 @@ export interface WatchEnded {
  * happens after it joins.
  */
 export type WatchActionKind =
-  | { kind: 'tap'; x: number; y: number }
-  | { kind: 'swipe'; from: [number, number]; to: [number, number] }
+  /** `holdMs`: how long the finger stayed down, so a long press is drawn held (absent from an older relay). */
+  | { kind: 'tap'; x: number; y: number; holdMs?: number; space?: PointSpace }
+  /** `durationMs`: from the press to the lift. `space` as on the input — `'frame'` from a body-mode holder. */
+  | { kind: 'swipe'; from: [number, number]; to: [number, number]; durationMs?: number; space?: PointSpace }
   | { kind: 'key'; key: string }
   | { kind: 'button'; button: string }
   | { kind: 'type'; chars: number }
-  | { kind: 'pinch' }
+  /**
+   * A pinch's two fingers, where they went down and where they last were, as the swipe's ends. **Absent from an older
+   * relay**: then there is nothing to draw, only the row — the fields are additive, and missing means exactly that.
+   */
+  | { kind: 'pinch'; from?: [[number, number], [number, number]]; to?: [[number, number], [number, number]]; durationMs?: number; space?: PointSpace }
   | { kind: 'launch' }
   | { kind: 'install' }
   | { kind: 'clear-state' }

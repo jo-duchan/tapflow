@@ -14,10 +14,17 @@ export type StepMark = StillTouch & { durationMs?: number }
 export function markOf(raw: RawStep): StepMark | null {
   const orientation = typeof raw.chrome === 'object' && raw.chrome !== null ? chromeOrientation(raw.chrome as ChromePayload) : undefined
   if (orientation !== undefined && orientation !== 'portrait') return null
+  // A body-mode holder's step is in the frame's points, not the picture's — a folded foldable reads as upright here
+  // while its frame is turned (review): none, rather than one a quarter off.
+  if ('space' in raw && raw.space === 'frame') return null
   switch (raw.kind) {
     case 'tap': case 'longPress': case 'keyboardKey': return { kind: 'tap', point: { x: raw.point[0], y: raw.point[1] } }
     case 'swipe': case 'holdDrag':
       return { kind: 'swipe', from: { x: raw.from[0], y: raw.from[1] }, to: { x: raw.to[0], y: raw.to[1] }, durationMs: raw.durationMs }
+    case 'pinch': {
+      const pt = ([x, y]: [number, number]) => ({ x, y })
+      return { kind: 'pinch', from: [pt(raw.start[0]), pt(raw.start[1])], to: [pt(raw.end[0]), pt(raw.end[1])], durationMs: raw.durationMs }
+    }
     default: return null
   }
 }
@@ -27,7 +34,9 @@ export function markOf(raw: RawStep): StepMark | null {
  * it is on, and an earlier stroke left on the picture read as that swipe made again (user, session ff5d3d3c).
  */
 export function touchOfMark(id: number, mark: StepMark, at: number): MachineTouch {
-  return mark.kind === 'tap'
-    ? { id, at, kind: 'tap', point: mark.point }
-    : { id, at, kind: 'swipe', from: mark.from, to: mark.to, durationMs: mark.durationMs }
+  switch (mark.kind) {
+    case 'tap': return { id, at, kind: 'tap', point: mark.point }
+    case 'swipe': return { id, at, kind: 'swipe', from: mark.from, to: mark.to, durationMs: mark.durationMs }
+    case 'pinch': return { id, at, kind: 'pinch', from: mark.from, to: mark.to, durationMs: mark.durationMs }
+  }
 }

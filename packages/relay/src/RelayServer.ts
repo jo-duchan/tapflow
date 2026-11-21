@@ -12,7 +12,7 @@ import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
 import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
 import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
-import { gestureAction, keyForWatchers } from './lib/watchActions.js'
+import { gestureAction, keyForWatchers, pinchAction } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
 import { defaultCap, idleToFree, planCapacity, type CapacityDevice, type CapacityPlan } from './admission/capacity.js'
 import { classifyBoot } from './admission/classifyBoot.js'
@@ -3285,10 +3285,15 @@ export class RelayServer {
         // device: where that agent can only lift with an up (a Duo's guest helper, iOS's mouse path, an Android 10
         // or older image), the cancel was a tap the watcher is not shown — the device does what it did before.
         if (session.touchCancelled) { session.touchCancelled = false; break }
-        action = gestureAction(g?.start ?? null, msg.payload ?? g?.last ?? null)
+        action = gestureAction(g?.start ?? null, msg.payload ?? g?.last ?? null, g ? { ms: Date.now() - g.at, space: g.space } : {})
         break
       }
-      case 'input:pinch:end': action = { kind: 'pinch' }; break
+      case 'input:pinch:end': {
+        const p = session.pinch
+        session.pinch = null
+        action = pinchAction(p, Date.now())
+        break
+      }
       case 'input:key': action = { kind: 'key', key: keyForWatchers(msg.payload.code) }; break
       // One press is a down and an up from a client that sends both; told once, on the up.
       case 'input:button': action = msg.payload.phase === 'down' ? null : { kind: 'button', button: msg.payload.name }; break
@@ -3604,9 +3609,13 @@ export class RelayServer {
       // Where a touch began and last was, for its end to be told to watchers (A2). Moves are not sent on: one
       // action per gesture, at its end.
       if (msg.type === 'input:touch:start') {
-        session.gesture = { start: msg.payload, last: msg.payload }
+        session.gesture = { start: msg.payload, last: msg.payload, at: Date.now(), ...(msg.payload.space ? { space: msg.payload.space } : {}) }
         session.touchCancelled = false
       } else if (msg.type === 'input:touch:move' && session.gesture) session.gesture.last = msg.payload
+      else if (msg.type === 'input:pinch:start') {
+        const { f0, f1, space } = msg.payload
+        session.pinch = { start: [f0, f1], last: [f0, f1], at: Date.now(), ...(space ? { space } : {}) }
+      } else if (msg.type === 'input:pinch:move' && session.pinch) session.pinch.last = [msg.payload.f0, msg.payload.f1]
       else if (msg.type === 'input:touch:cancel') {
         // An agent without the capability ignores the cancel and completes the touch with the end that follows, so
         // the gesture is kept for that end to describe.
