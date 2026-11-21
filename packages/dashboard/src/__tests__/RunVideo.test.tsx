@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RunVideo } from '@/components/runs/RunVideo'
 
@@ -69,11 +69,13 @@ describe('runVideo', () => {
   it('reads the runner\'s touches as touches on the video\'s clock', () => {
     const file = concat([record(1, 0, frame(true)),
       event(100, { type: 'touch', kind: 'tap', point: [0.25, 0.75], holdMs: 900 }),
-      event(300, { type: 'touch', kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: 500 })])
+      event(300, { type: 'touch', kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: 500 }),
+      event(700, { type: 'touch', kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 350 })])
     const index: VideoIndex = { ...fixture().index, bytes: file.length, chunks: [{ seq: 0, offset: 0, length: file.length, startMs: 0, keyframe: true }], gaps: [] }
     expect(loadVideo(index, file.buffer).touches).toEqual([
       { id: 1, at: 100, kind: 'tap', point: { x: 0.25, y: 0.75 }, holdMs: 900 },
       { id: 2, at: 300, kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 500 },
+      { id: 3, at: 700, kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 }, durationMs: 350 },
     ])
   })
 
@@ -193,6 +195,29 @@ describe('RunVideo', () => {
     fireEvent.keyDown(slider, { key: 'ArrowRight' })
     expect(slider.getAttribute('aria-valuenow')).toBe('550')
     expect(anchor()).toBe('25,75')
+  })
+
+  // Playing moves the marks without remounting the screen: only the clock the player ticks reaches the layer. A seek
+  // remounts, so the test above passes with no clock at all (review). Mutations: drop the tick's clock update, or
+  // have the layer listen to its own store instead of the clock.
+  it('moves the runner\'s touch in as the video plays, with no seek', async () => {
+    const { index } = fixture()
+    const c0 = concat([record(1, 0, frame(true)), event(520, { type: 'touch', kind: 'tap', point: [0.25, 0.75] }), record(1, 900, frame(false))])
+    const one: VideoIndex = { ...index, meta: { ...index.meta, flowStartMs: 0 }, bytes: c0.length, chunks: [{ seq: 0, offset: 0, length: c0.length, startMs: 0, keyframe: true }], gaps: [] }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.endsWith('/video/index') ? Response.json(one) : new Response(c0.buffer))))
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (f: FrameRequestCallback) => { frames.push(f); return frames.length })
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    render(withQuery(<RunVideo runId="r1" idx={0} flowName="login" summary={summary} running={false} />))
+    await userEvent.click(screen.getByRole('button', { name: /Play the video/ }))
+    await screen.findByRole('slider', { name: 'Position in the video of login' })
+    await userEvent.click(screen.getByRole('button', { name: /^Play$/ }))
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBeNull()
+    const t0 = performance.now()
+    // Two ticks: the first sets the loop's start, the second is 600 ms of video later — past the touch at 520.
+    act(() => { for (const f of frames.splice(0)) f(t0) })
+    act(() => { for (const f of frames.splice(0)) f(t0 + 600) })
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('25,75')
   })
 
   it('moves focus to Play when the button that loaded the video had it', async () => {
