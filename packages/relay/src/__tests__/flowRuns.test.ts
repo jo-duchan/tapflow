@@ -581,6 +581,11 @@ describe('flow run records', () => {
     await call('POST', `/api/v1/runs/${id}/flows/0`, bearer(PAT_CI), { ...passed, screenshotMissed: true })
     const flow = (await call('GET', `/api/v1/runs/${id}`, cookie())).body.flows[0]
     expect([flow.hasScreenshot, flow.screenshotNote]).toEqual([true, null])
+    // A skipped flow never ran: nothing was tried, whatever a report says. Mutation: drop the skip check.
+    const id2 = await create()
+    await call('POST', `/api/v1/runs/${id2}/flows/0`, bearer(PAT_CI), { status: 'skipped', skipReason: 'tag-filter', durationMs: 0, steps: [], screenshotMissed: true })
+    const skippedNote = (getDb().prepare('SELECT screenshot_note FROM flow_run_flows f JOIN flow_runs r ON r.seq = f.run_seq WHERE r.id = ?').get(id2) as { screenshot_note: string | null }).screenshot_note
+    expect(skippedNote).toBeNull()
   })
 
   // ── liveness ──────────────────────────────────────────────────────────────

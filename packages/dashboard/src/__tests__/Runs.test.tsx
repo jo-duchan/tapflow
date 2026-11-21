@@ -414,7 +414,7 @@ describe('Run detail', () => {
     }))))
     renderAt('/automation/runs/r1')
     expect(await screen.findByText('Screenshot not kept: it was larger than the relay\'s 5 MB limit.')).toBeTruthy()
-    expect(screen.getByText('No screenshot: the device did not return one in time.')).toBeTruthy()
+    expect(screen.getByText('No screenshot: the device did not return one.')).toBeTruthy()
     expect(screen.getAllByText(/^(Screenshot not kept|No screenshot)/)).toHaveLength(2)
   })
 

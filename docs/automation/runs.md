@@ -27,7 +27,7 @@ The filters are part of the address, so a filtered list is a link you can share.
 
 A run's page lists its flows in the order they ran.
 
-- A failed flow shows its failure message, each step's result and a screenshot from the moment it failed. A passed flow shows the screen it ended on, as the evidence that it passed: a login flow shows the screen it logged in to. Select a screenshot to open it full size. A flow whose screenshot was not kept says why in its place: it was over the relay's 5 MB limit, what the device sent was not an image, the relay's disk was full, or the device did not return one in time.
+- A failed flow shows its failure message, each step's result and a screenshot from the moment it failed. A passed flow shows the screen it ended on, as the evidence that it passed: a login flow shows the screen it logged in to. Select a screenshot to open it full size. A flow whose screenshot was not kept says why in its place: it was over the relay's 5 MB limit, what the device sent was not an image, the relay's disk was full, or the device did not return one.
 - A `tapOn` step that failed because it found no element, or several, lists lines to try instead under **Try instead**, from the screen at the moment it failed. Each line has a **Copy** button. [Flows](/automation/flows#selectors) explains how they are chosen.
 - A flow the run never reached is marked **Not run**.
 - A flow the runner chose not to run is marked **Skipped: another app** (a flow for a different app than the build) or **Skipped: tags** (left out by the tag options), with the reason beside it. The list shows how many were skipped next to the passed count. See [Choosing flows](/automation/flows#choosing-flows).

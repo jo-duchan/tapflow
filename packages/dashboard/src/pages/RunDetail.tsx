@@ -224,7 +224,7 @@ const SCREENSHOT_NOTE_TEXT: Record<ScreenshotNote, string> = {
   'too-large': 'Screenshot not kept: it was larger than the relay\'s 5 MB limit.',
   'not-image': 'Screenshot not kept: what the device sent was not an image.',
   'storage-full': 'Screenshot not kept: the relay\'s disk was full.',
-  'not-taken': 'No screenshot: the device did not return one in time.',
+  'not-taken': 'No screenshot: the device did not return one.',
 }
 
 /**

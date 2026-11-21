@@ -3468,8 +3468,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.screenshot(serial)
-          .then(async (raw) => {
-            const png = withoutLeadingText(raw)
+          .then(async (shot) => {
+            const png = withoutLeadingText(shot)
             // `screencap -p` writes PNG and takes no format; JPEG is converted here, and when that cannot be done the
             // PNG goes out labelled as what it is.
             const jpeg = format === 'jpeg' ? await toJpeg(png) : null
