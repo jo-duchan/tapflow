@@ -27,7 +27,7 @@ const GLASS_A = 0.4
 /** The border, inside a disc's radius. */
 export const TOUCH_BORDER = 1
 const BORDER = TOUCH_BORDER
-/** CSS `blur(2px)` is a Gaussian of σ 1; a canvas `shadowBlur` of 2 is the same. */
+/** A box-shadow's 2 px blur is a Gaussian of σ 1; a canvas `shadowBlur` of 2 is the same. */
 const SHADOW_BLUR = 2
 const LINE_W = 1.5
 /** The glass dot's backdrop blur, in the same units as the parts. */
@@ -74,37 +74,36 @@ function clipOut(ctx: CanvasRenderingContext2D, a: PxPoint, b: PxPoint, discs: {
   const y = Math.min(a.y, b.y, ...discs.map((d) => d.at.y)) - pad
   const w = Math.max(a.x, b.x, ...discs.map((d) => d.at.x)) + pad - x
   const h = Math.max(a.y, b.y, ...discs.map((d) => d.at.y)) + pad - y
-  ctx.beginPath(); ctx.rect(x, y, w, h)
-  for (const d of discs) { ctx.moveTo(d.at.x + d.r, d.at.y); ctx.arc(d.at.x, d.at.y, d.r, 0, Math.PI * 2) }
-  ctx.clip('evenodd')
+  // One clip per disc: a single even-odd path over two overlapping discs — a pinch's fingers close together — counts
+  // their overlap three times and lets the line back in there (review).
+  for (const d of discs) {
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.arc(d.at.x, d.at.y, d.r, 0, Math.PI * 2)
+    ctx.clip('evenodd')
+  }
 }
-
-let scratch: HTMLCanvasElement | null = null
 
 /**
  * Blurs what the canvas already holds under a disc: a recording draws the device's frame first, so the glass dot's
  * backdrop is right there. A live layer has nothing under it on its own canvas — it blurs with CSS instead
  * (`TouchMarksLayer`). Positions go through the context's transform, which a recording rotates.
+ *
+ * The canvas is drawn onto itself, which the platform does from a snapshot: a copy through a second, small canvas read
+ * the frame back from the GPU on every recorded frame (review). Where canvas `filter` is unsupported the copy lands on
+ * the same pixels unblurred — the glass is then a lighter dot, and nothing worse.
  */
 function blurUnder(ctx: CanvasRenderingContext2D, at: PxPoint, r: number, pxScale: number): void {
-  if (typeof ctx.getTransform !== 'function' || typeof document === 'undefined') return
+  if (typeof ctx.getTransform !== 'function') return
   const m = ctx.getTransform()
   const k = Math.hypot(m.a, m.b)
   const cx = m.a * at.x + m.c * at.y + m.e
   const cy = m.b * at.x + m.d * at.y + m.f
   const pad = Math.ceil(r * k + 4 * GLASS_BLUR * pxScale)
   const sx = Math.floor(cx - pad); const sy = Math.floor(cy - pad); const size = 2 * pad
-  scratch ??= document.createElement('canvas')
-  if (scratch.width !== size || scratch.height !== size) { scratch.width = size; scratch.height = size }
-  const s = scratch.getContext('2d')
-  if (!s) return
-  s.clearRect(0, 0, size, size)
-  s.drawImage(ctx.canvas, sx, sy, size, size, 0, 0, size, size)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.beginPath(); ctx.arc(cx, cy, (r - BORDER) * k, 0, Math.PI * 2); ctx.clip()
   ctx.filter = `blur(${GLASS_BLUR * pxScale}px)`
-  ctx.drawImage(scratch, sx, sy)
+  ctx.drawImage(ctx.canvas, sx, sy, size, size, sx, sy, size, size)
   ctx.restore()
 }
 

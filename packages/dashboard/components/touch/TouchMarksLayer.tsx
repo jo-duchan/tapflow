@@ -29,6 +29,8 @@ const GLASSES = 2
 /**
  * Puts the CSS backdrop under each glass dot the canvas draws: the canvas cannot read the screen under it, so the blur
  * is the browser's, on an element sitting just under the canvas, where the dot's fill and border are then drawn.
+ * It blurs the screen alone: where the dot passes over a swipe's own start, early in the swipe, the start stays sharp
+ * here and is blurred in a recording, which blurs its canvas. Kept — the start is a mark, not the screen.
  */
 function placeGlass(glass: (HTMLDivElement | null)[], parts: TouchPart[]): void {
   const dots = parts.filter((p) => p.kind === 'disc' && p.glass)
