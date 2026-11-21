@@ -14,8 +14,9 @@ import type { BinaryFrameHandler } from '@/lib/envelope';
 import type { AndroidChrome, ChromeData, ChromePayload } from '@/lib/types';
 import { iosScreenLayout } from '@/lib/iosScreenLayout';
 import { iosTurn, turnPoint, type Turn } from '@/lib/coordinate-transform';
-import { TapMarks } from '@/components/watch/TapMarks';
-import { placeOnIosFrame, type WatchMarks } from '@/lib/watchActions';
+import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer';
+import { placeOnIosFrame } from '@/lib/watchActions';
+import type { MachineTouch } from '@/lib/touchMarks';
 
 interface WatchedDeviceProps {
   chrome: ChromePayload | null;
@@ -30,8 +31,9 @@ interface WatchedDeviceProps {
   /** Remounts the screen (a new decoder) when it changes, keeping what this component learned — the stream's size
    *  for a frameless device — so a replay's seek does not redraw the frame at a guessed size first. */
   screenKey?: string | number;
-  /** The holder's pointer to draw on the device (A2). The live watch page passes it; a replay does not. */
-  marks?: WatchMarks;
+  /** The holder's latest touch to draw on the device (A2), in the machine's colour. The live watch page passes it
+   *  (null before the first); a replay does not. */
+  touch?: MachineTouch | null;
 }
 
 /**
@@ -40,7 +42,7 @@ interface WatchedDeviceProps {
  * recording. A device that reports its own turn (iOS `streamRotation`, Android `bodyRotation`) is drawn as
  * reported; one that does not is drawn upright, since the holder's toggle is its own state and not on the wire.
  */
-export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binaryFrameHandlerRef, replay = false, screenKey, marks }: WatchedDeviceProps) {
+export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binaryFrameHandlerRef, replay = false, screenKey, touch }: WatchedDeviceProps) {
   const [streamSize, setStreamSize] = useState<{ width: number; height: number } | null>(null);
   // Choosing which screen to mount is routing, not drawing — the same split `DeviceViewer` makes, and for
   // the same reason: an iOS agent that could not build a frame sends none, and the stream must still show.
@@ -52,10 +54,10 @@ export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binar
     : null);
 
   if (ios) {
-    return <WatchedIOS key={screenKey} chrome={ios} formFactor={formFactor} binaryFrameHandlerRef={binaryFrameHandlerRef} onStreamSize={setStreamSize} replay={replay} marks={marks} />;
+    return <WatchedIOS key={screenKey} chrome={ios} formFactor={formFactor} binaryFrameHandlerRef={binaryFrameHandlerRef} onStreamSize={setStreamSize} replay={replay} touch={touch} />;
   }
   if (android) {
-    return <WatchedAndroid key={screenKey} chrome={android} deviceReady={deviceReady} binaryFrameHandlerRef={binaryFrameHandlerRef} marks={marks} />;
+    return <WatchedAndroid key={screenKey} chrome={android} deviceReady={deviceReady} binaryFrameHandlerRef={binaryFrameHandlerRef} touch={touch} />;
   }
   return (
     <div aria-hidden="true" style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px' }}>
@@ -64,13 +66,13 @@ export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binar
   );
 }
 
-function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, replay, marks }: {
+function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, replay, touch }: {
   chrome: ChromeData;
   formFactor?: FormFactor;
   binaryFrameHandlerRef: MutableRefObject<BinaryFrameHandler | undefined>;
   onStreamSize: (size: { width: number; height: number }) => void;
   replay: boolean;
-  marks?: WatchMarks;
+  touch?: MachineTouch | null;
 }) {
   const { fps, frameCount } = useFps();
   const screen = useIOSScreen({ chrome, binaryFrameHandlerRef, fps, frameCount, onCanvasResize: onStreamSize });
@@ -81,18 +83,18 @@ function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, r
       {/* `joined` is what lets the screen say a live stream stalled; a replay is never waiting on one. */}
       <IOSDeviceScreen
         screen={screen} chrome={chrome} formFactor={formFactor} turn={iosTurn(chrome.streamRotation, false)} joined={!replay} fps={fps}
-        overlay={marks ? <TapMarks marks={marks} place={place} /> : undefined}
+        overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={place} /> : undefined}
       />
       {screen.decoderUnsupported && <UnsupportedDecoder />}
     </>
   );
 }
 
-function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, marks }: {
+function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch }: {
   chrome: AndroidChrome;
   deviceReady: boolean;
   binaryFrameHandlerRef: MutableRefObject<BinaryFrameHandler | undefined>;
-  marks?: WatchMarks;
+  touch?: MachineTouch | null;
 }) {
   const { frameCount } = useFps();
   const screen = useAndroidScreen({
@@ -106,7 +108,7 @@ function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, marks }: {
       {/* The overlay is the screen itself on Android, and a watcher's device is upright — the input's own space. */}
       <AndroidDeviceScreen
         screen={screen} deviceReady={deviceReady} posturePending={false}
-        overlay={marks ? <TapMarks marks={marks} place={(x, y) => {
+        overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => {
           // Marks are in the screen Android draws (the input's space); body mode's shell is the frame.
           const p = turnPoint({ x, y }, ((360 - screen.screenTurn) % 360) as Turn)
           return { left: p.x, top: p.y }

@@ -79,7 +79,7 @@ function WatchView({ sessionId }: { sessionId: string }) {
               platform={device?.platform ?? 'ios'}
               formFactor={device?.formFactor}
               binaryFrameHandlerRef={watch.binaryFrameHandlerRef}
-              marks={watch.marks}
+              touch={watch.touch}
               replay={over}
             />
           </div>

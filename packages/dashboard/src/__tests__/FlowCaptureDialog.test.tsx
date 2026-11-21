@@ -280,20 +280,19 @@ describe('EditScreen', () => {
     <EditScreen state={state} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
   )
 
-  it('draws where the step touched on its picture', () => {
+  // A canvas has no DOM to read: the layer says where its mark starts, as percentages of the picture.
+  it('draws where the step touched on its picture, in the machine\'s colour', () => {
     draw()
-    expect(screen.getByTestId('step-mark')).toBeInTheDocument()
+    const mark = screen.getByTestId('touch-marks')
+    expect(mark.getAttribute('data-anchor')).toBe('30,40')
+    expect(mark.getAttribute('data-tone')).toBe('machine')
   })
 
-  it('draws a swipe as a dashed trail that strengthens toward where the finger lifted', () => {
+  it('draws a swipe from where the finger went down', () => {
     const swipe = { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'swipe', from: [0.5, 0.7], to: [0.5, 0.3], durationMs: 200 }
     const swiped = { ...(state as object), captured: { steps: [{ raw: swipe, step: { type: 'tapOn', selector: { text: 'Login' } } }], secrets: {}, launchAdded: false } } as never
     render(<EditScreen state={swiped} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
-    const mark = screen.getByTestId('step-mark')
-    const line = mark.querySelector('line')!
-    expect(line.getAttribute('stroke-dasharray')).toBe('1 9')
-    expect(line.getAttribute('stroke')).toBe(`url(#${mark.querySelector('linearGradient')!.id})`)
-    expect(mark.querySelector('linearGradient')!.getAttribute('y1')).toBe('70%')
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('50,70')
   })
 
   // The YAML takes the picture's place, so the buttons stay where they are.
@@ -322,7 +321,7 @@ describe('VerifyScreen', () => {
   // The count said the step it was on twice ("2 of 2") until the result came, and moved the line as it grew.
   it('counts through the flow\'s own steps, in the room of the widest count', () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 2, live: [] } }
-    render(<VerifyScreen state={running} tap={{ surface: () => null } as never} marks={{ cursor: null, trails: [] }} total={15}
+    render(<VerifyScreen state={running} tap={{ surface: () => null } as never} touch={null} total={15}
       onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
     const status = screen.getByRole('status')
     expect(status).toHaveTextContent('Running step 3 of 15')
@@ -334,7 +333,7 @@ describe('VerifyScreen', () => {
   it('turns its button into Back to Edit, in place, when the run threw', async () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [] } }
     const onBack = vi.fn()
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
     const { rerender } = render(<VerifyScreen state={running} {...props} />)
     const button = screen.getByRole('button', { name: 'Continue' })
     button.focus()
@@ -353,7 +352,7 @@ describe('VerifyScreen', () => {
       { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 },
       { index: 1, name: 'tapOn("Row 23")', status: 'running' as const, startedAt: 1200 },
     ] } }
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const { rerender } = render(<VerifyScreen state={live} {...props} />)
     const list = screen.getByRole('list', { name: 'Verify' })
     expect(within(list).getByText('launchApp')).toBeInTheDocument()
@@ -376,7 +375,7 @@ describe('VerifyScreen', () => {
   // step after a failure as not run, and following those to the bottom pushed the failed step, opened onto why, out of
   // view (pre-PR review): the result does not move the list.
   it('follows the step running, and does not move when the result adds the steps that did not run', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const step0 = { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 }
     const one = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [step0] } }
     const { rerender } = render(<VerifyScreen state={one} {...props} />)
@@ -398,7 +397,7 @@ describe('VerifyScreen', () => {
 
   // #1125: a passed step whose touch the device could not judge opens onto why, since a covered row passed that way.
   it('opens a passed step onto a touch that was not checked to land on its element', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 1, live: [], result: { status: 'passed', steps: [
       { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'unchecked', reachNote: 'old agent' },
       { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified' },
@@ -412,7 +411,7 @@ describe('VerifyScreen', () => {
   // #1125: an overlay the tree does not show takes a touch and the step still passes, so a touch that changed nothing
   // says so, and one that changed something says what a run will look for.
   it('says a touch changed nothing, open, and what a run checks after one that did, closed', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 2, live: [], result: { status: 'passed', steps: [
       { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'verified', observed: null },
       { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified', observed: { appear: [{ text: 'Saved', role: 'text' }], gone: [{ id: 'save' }] } },
@@ -429,7 +428,7 @@ describe('VerifyScreen', () => {
 
 // #1139: Match and Verify start from a run's reset, and say what it did.
 describe('the device reset', () => {
-  const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+  const props = { tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
   const matching = reduce({ ...initialState, phase: 'range' as const }, { type: 'match-started', total: 2 })
 
   it('says what was reset, by name, once the agent has answered', () => {
@@ -471,13 +470,13 @@ describe('the device reset', () => {
 })
 
 describe('focus through a run', () => {
-  const marks = { cursor: null, trails: [] }
+  const touch = null
   const tapStub = { surface: () => null } as never
 
   // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
   it('keeps focus on the button pressed when Stop becomes Start again', () => {
     const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
-    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+    const props = { tap: tapStub, touch, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
     const { rerender } = render(<MatchScreen state={running} {...props} />)
     const stop = screen.getByRole('button', { name: 'Stop' })
     stop.focus()
@@ -488,7 +487,7 @@ describe('focus through a run', () => {
   // With nothing to hold, focus fell to the page when Verify began and stayed there after it finished.
   it('has its primary button there, busy, while Verify runs', () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [] } }
-    render(<VerifyScreen state={running} tap={tapStub} marks={marks} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
+    render(<VerifyScreen state={running} tap={tapStub} touch={touch} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveAttribute('aria-disabled', 'true')
   })
 })

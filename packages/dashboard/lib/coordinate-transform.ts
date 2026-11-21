@@ -67,7 +67,7 @@ export function androidToNorm(
  * A normalised point in a picture, carried to the same point in that picture turned `turn` clockwise.
  *
  * **Android's body mode needs it in both directions.** The viewer draws the frame as the body is held, while the
- * cursor, the pinch hint and the recording's overlay are drawn in the screen Android draws. The frame turned by
+ * pointer's touch marks, the recording's included, are drawn in the screen Android draws. The frame turned by
  * `streamRotation` is that screen (measured on a Pixel 9: body a quarter clockwise over a portrait-locked app,
  * frame (0,0) is screen (0,1) — 270 here). A touch is not turned here: it goes out as the frame's own point.
  */

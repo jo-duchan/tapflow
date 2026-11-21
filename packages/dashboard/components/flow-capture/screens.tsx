@@ -27,8 +27,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { markOf } from '@/lib/flowCapture/marks'
-import type { WatchMarks } from '@/lib/watchActions'
-import { SwipeStroke, TapMarks } from '@/components/watch/TapMarks'
+import type { MachineTouch } from '@/lib/touchMarks'
+import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer'
 import { TraceStep } from '@/components/TraceStep'
 import { typedOnScreenKeyboard, type AfterTouch } from '@/lib/flowCapture/runner'
 
@@ -386,7 +386,7 @@ function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; ind
 // ── Match ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The device as the viewer draws it, copied each frame: one decoder, two pictures. */
-function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; marks: WatchMarks }) {
+function DeviceMirror({ tap, label, touch }: { tap: CaptureTap; label: string; touch: MachineTouch | null }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     let frame = 0
@@ -412,7 +412,7 @@ function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; m
   return (
     <div className="relative max-h-full self-start">
       <canvas ref={canvas} role="img" aria-label={label} className="block max-h-[var(--picture-max,60vh)] w-auto max-w-full rounded-lg border bg-muted" />
-      <TapMarks marks={marks} place={(x, y) => ({ left: x, top: y })} />
+      <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => ({ left: x, top: y })} />
     </div>
   )
 }
@@ -435,10 +435,10 @@ function Busy() {
   return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
 }
 
-export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf }: {
+export function MatchScreen({ state, tap, touch, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf }: {
   state: CaptureState
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   onStop: () => void
   onRestart: () => void
   onTakeWhatMatched: () => void
@@ -453,14 +453,14 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
     return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} continueRef={stopRef} />
   }
   if (state.review) {
-    return <ReviewView state={state} review={state.review} tap={tap} marks={marks} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
+    return <ReviewView state={state} review={state.review} tap={tap} touch={touch} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
   }
   const { done, total } = state.progress
   const stopped = state.error !== null
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} /></div>
+        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} touch={touch} /></div>
         <div className="flex min-h-0 flex-col gap-3">
           <p role="status" className="flex items-center gap-2 text-sm font-medium">
             {!stopped && <Busy />}
@@ -490,11 +490,11 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
  * focusing one shows the screen it was tapped on in place of the device, since `#14 tapOn "Order#1215"` alone does not
  * say which screen that was. Rows stay as they are when checked: the choice can change until Continue.
  */
-function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, thumbnailOf, continueRef }: {
+function ReviewView({ state, review, tap, touch, onRestart, onContinue, onKeep, thumbnailOf, continueRef }: {
   state: CaptureState
   review: Review
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   onRestart: () => void
   onContinue: () => void
   onKeep: (step: number, kept: boolean) => void
@@ -517,7 +517,7 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
         <div className="flex min-h-0 flex-col items-center gap-2">
           {picture
             ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{replayed ? copy.reviewPictureReplayed(picked.step + 1) : copy.reviewPicture(picked.step + 1)}</p></>
-            : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
+            : <DeviceMirror tap={tap} label={copy.steps[1]} touch={touch} />}
         </div>
         {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}
         <div className="flex min-h-0 flex-col overflow-y-auto p-1">
@@ -931,8 +931,8 @@ function SecretName({ from, current, onRename, renameCheck }: {
 }
 
 /**
- * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's: a tap is
- * a ring, a swipe the same stroke (`SwipeStroke`).
+ * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's touch
+ * (`TouchMarksLayer`): the frame just before the finger lifted — a pressed dot, or a swipe's whole line.
  */
 /** `fill`: drawn at the device's height, as the live device is beside it — a recorded picture (1b-3b) is 160 px wide,
  *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */
@@ -942,7 +942,6 @@ function StepPicture({ src, step, fill = false }: { src: string; step: CapturedS
   // squeezed, its width capped and its height not (CodeRabbit, #1171).
   const [upright, setUpright] = useState(true)
   const filled = fill && upright
-  const pct = (n: number) => `${n * 100}%`
   return (
     // The border on the frame, not the image, as on the screen after a tap: on the image it came out of the height cap,
     // and the two pictures of one step differed by its width when the tabs were switched.
@@ -950,15 +949,7 @@ function StepPicture({ src, step, fill = false }: { src: string; step: CapturedS
     <div className={cn('relative max-h-full rounded-lg border', fill ? 'self-center' : 'self-start')}>
       <img src={src} alt={capturedStepLabel(step)} onLoad={(e) => setUpright(e.currentTarget.naturalHeight >= e.currentTarget.naturalWidth)}
         className={cn('block w-auto max-w-full rounded-md', filled ? 'h-[var(--picture-max,60vh)] bg-muted' : fill ? 'h-auto max-h-[var(--picture-max,60vh)]' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
-      {mark && (
-        <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
-          {mark.kind === 'swipe' ? (
-            <SwipeStroke from={{ left: mark.from[0], top: mark.from[1] }} to={{ left: mark.to[0], top: mark.to[1] }} />
-          ) : (
-            <circle cx={pct(mark.x)} cy={pct(mark.y)} r={11} fill={MARK_BLUE} fillOpacity={0.3} stroke={MARK_BLUE} strokeWidth={2} />
-          )}
-        </svg>
-      )}
+      {mark && <TouchMarksLayer tone="machine" still={mark} place={(x, y) => ({ left: x, top: y })} />}
     </div>
   )
 }
@@ -1048,9 +1039,6 @@ function AfterPicture({ step, after, before, secrets, shown, expected, onAdd }: 
   )
 }
 
-/** The blue the MCP watch view's marks are drawn in (`TapMarks`). */
-const MARK_BLUE = 'rgb(59 130 246)'
-
 /** The flow's YAML, highlighted, with line numbers and a copy button: the shared CodeBlock, as Flow Runs and MCP's
  *  capture page will show a flow. */
 function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: boolean; contentRef?: RefObject<HTMLPreElement | null> }) {
@@ -1074,10 +1062,10 @@ function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: bo
 
 // ── Verify ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function VerifyScreen({ state, tap, marks, total, onExport, onBack, primaryRef }: {
+export function VerifyScreen({ state, tap, touch, total, onExport, onBack, primaryRef }: {
   state: CaptureState
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   /** The flow's steps, which the run counts through; known before its result is. */
   total: number
   onExport: () => void
@@ -1091,7 +1079,7 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
     <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} marks={marks} /></div>
+      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} touch={touch} /></div>
       <div className="flex min-h-0 flex-col gap-3">
         <h3 className="text-sm font-medium">{copy.verifyHeading}</h3>
         <p className="text-sm text-muted-foreground">{copy.verifyHelp}</p>

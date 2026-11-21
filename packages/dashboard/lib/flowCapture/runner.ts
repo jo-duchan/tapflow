@@ -788,12 +788,12 @@ class AligningDriver extends SocketFlowDriver {
   // The flow's own points, before the driver turns them for the device: the mirror shows the device upright.
   override tap(x: number, y: number): Promise<void> {
     this.signal?.throwIfAborted()
-    this.onTouch?.({ kind: 'tap', x, y })
+    this.onTouch?.({ kind: 'tap', point: { x, y } })
     return super.tap(x, y)
   }
 
   override longPress(x: number, y: number, durationMs: number): Promise<void> {
-    this.onTouch?.({ kind: 'tap', x, y })
+    this.onTouch?.({ kind: 'tap', point: { x, y } })
     return super.longPress(x, y, durationMs)
   }
 
@@ -801,7 +801,7 @@ class AligningDriver extends SocketFlowDriver {
   // flung the list past the element as before.
   override swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number) {
     this.signal?.throwIfAborted()
-    this.onTouch?.({ kind: 'swipe', from, to })
+    this.onTouch?.({ kind: 'swipe', from: { x: from[0], y: from[1] }, to: { x: to[0], y: to[1] }, durationMs })
     return super.swipe(from, to, durationMs, holdMs)
   }
 

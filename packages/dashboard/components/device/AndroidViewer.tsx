@@ -23,9 +23,9 @@ import type { MutableRefObject } from 'react';
 import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
 import { toast } from 'sonner';
+import { PointerTouchMarks, drawTouchState, prefersReducedMotion } from '@/lib/touchMarks';
+import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer';
 
-const CURSOR_RING_R = 13;
-const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
 
@@ -107,21 +107,14 @@ export function AndroidViewer({
   const [userWantsLandscape, setUserWantsLandscape] = useState(false);
 
   const [keyboardActive, setKeyboardActive] = useState(false);
-  const [pinchActive, setPinchActive] = useState(false);
-  const [pinchHint, setPinchHint] = useState<{ f0: { x: number; y: number }; f1: { x: number; y: number } } | null>(null);
-  const pinchHintRef = useRef(pinchHint);
-  useEffect(() => { pinchHintRef.current = pinchHint; }, [pinchHint]);
+  // The person's pointer, drawn over the screen and into the recording (`lib/touchMarks`), in the screen Android
+  // draws: outside React, as a pointer moves at the display's rate.
+  const [pointerMarks] = useState(() => new PointerTouchMarks());
 
   const isPinchMode = useRef(false);
   const isOptionHeld = useRef(false);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const lastMoveSentAt = useRef(0);
-
-  // Cursor overlay (imperative — avoids re-renders on every mousemove)
-  const liveCursorRef = useRef<HTMLDivElement>(null);
-  const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
-  const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
-  const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
   // **Before the picture, because the picture is held back while one is in flight.** The effects that
   // release it stay with the rotate control below.
@@ -141,7 +134,7 @@ export function AndroidViewer({
     binaryFrameHandlerRef, perfHookRef, frameCount,
     screenWidth, screenHeight, streamRotation, cornerRadius, userWantsLandscape, rotatePending, bodyRotation, turnsAsked,
   })
-  const { surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, screenTurnRef, screenTurn, decoderUnsupported, totalTurn, spinning } = screen
+  const { surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, needsCSSRotation, screenTurnRef, screenTurn, decoderUnsupported, totalTurn, spinning } = screen
   useLayoutEffect(() => {
     if (!captureSurfaceRef) return
     captureSurfaceRef.current = () => decoderRef.current?.surface ?? null
@@ -189,47 +182,14 @@ export function AndroidViewer({
     ctx.translate(-shown.width / 2, -shown.height / 2)
     const longSide = Math.max(shown.width, shown.height)
     const s = longSide > MAX_ANDROID_LONG ? longSide / MAX_ANDROID_LONG : 1
-    const ringR = CURSOR_RING_R * s; const dotR = CURSOR_DOT_R * s
 
-    const ph = pinchHintRef.current
-    if (ph) {
-      for (const f of [ph.f0, ph.f1]) {
-        const cx = f.x * shown.width; const cy = f.y * shown.height
-        if (isPinchMode.current) {
-          ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2)
-          ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = s; ctx.stroke()
-        } else {
-          ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3 * s; ctx.stroke()
-          ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5 * s; ctx.stroke()
-        }
-      }
-    }
-
-    const cp = cursorPosRef.current
-    if (cp) {
-      const cx = cp.x * shown.width; const cy = cp.y * shown.height
-      const state = cursorStateRef.current; const ra = releaseAnimRef.current
-      if (state === 'down') {
-        ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = s; ctx.stroke()
-      } else if (state === 'release' && ra) {
-        const t = Math.min((performance.now() - ra.startTime) / 350, 1)
-        ctx.beginPath(); ctx.arc(cx, cy, dotR + 26 * s * t, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`; ctx.lineWidth = 1.5 * s; ctx.stroke()
-        if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null }
-      } else {
-        ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3 * s; ctx.stroke()
-        ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5 * s; ctx.stroke()
-      }
-    }
+    // The pointer, as the page draws it (`TouchMarksLayer`), at the page's size: `s` scales it to the stream's pixels.
+    ctx.scale(s, s)
+    const now = performance.now()
+    drawTouchState(ctx, pointerMarks.store.stateAt(now), now, (p) => ({ x: (p.x * shown.width) / s, y: (p.y * shown.height) / s }),
+      'person', { reduced: prefersReducedMotion() }, scale * s)
     ctx.restore()
-  }, [recordCanvasRef, totalTurn, streamRotation, decoderRef, videoSizeRef])
+  }, [recordCanvasRef, totalTurn, streamRotation, decoderRef, videoSizeRef, pointerMarks])
 
   // The recorder calls whichever composer was registered last, so a rotation reaches the frames
   // that follow it rather than being frozen at the moment recording started.
@@ -364,7 +324,7 @@ export function AndroidViewer({
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
     const onKeyDown = (e: KeyboardEvent) => {
       if (captureOpen) return
-      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return }
+      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; pointerMarks.option(true); return }
       if (e.metaKey) {
         const el = document.activeElement
         if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
@@ -387,9 +347,9 @@ export function AndroidViewer({
     }
     const endPinch = () => {
       if (isPinchMode.current) {
-        isPinchMode.current = false; setPinchActive(false); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() })
+        isPinchMode.current = false; pointerMarks.lift(); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() })
       }
-      isOptionHeld.current = false; setPinchHint(null)
+      isOptionHeld.current = false; pointerMarks.option(false)
     }
     // Quiet while Flow Capture's dialog replays, as onKeyDown is: ending a pinch sends one.
     const onKeyUp = (e: KeyboardEvent) => { if (!captureOpen && (e.code === 'AltLeft' || e.code === 'AltRight')) endPinch() }
@@ -402,7 +362,7 @@ export function AndroidViewer({
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, pointerMarks])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -421,7 +381,7 @@ export function AndroidViewer({
     if (!host) return null
     return toNormPure({ x: e.clientX, y: e.clientY }, host.getBoundingClientRect(), needsCSSRotationRef.current)
   }, [surfaceHostRef, needsCSSRotationRef])
-  /** Where the pointer is in the screen Android draws — for the cursor, the pinch hint and the recording's overlay,
+  /** Where the pointer is in the screen Android draws — for the pointer's touch marks, on the page and in the recording,
    *  which are drawn in that screen. Body mode turns the frame there by the description's correction. */
   const toShownNorm = useCallback((e: { clientX: number; clientY: number }) => {
     const p = toPictureNorm(e)
@@ -451,10 +411,9 @@ export function AndroidViewer({
     if (isOptionHeld.current) {
       const fingers = toPinchFingers(e)
       if (!fingers) return
-      isPinchMode.current = true; setPinchActive(true)
+      isPinchMode.current = true
       ;(e.target as Element).setPointerCapture(e.pointerId)
-      const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
-      setPinchHint(fingers.shown)
+      pointerMarks.press(fingers.shown.f1, true)
       send({ type: 'input:pinch:start', sessionId, payload: bodyMode ? { ...fingers.sent, space: 'frame' } : fingers.sent })
       return
     }
@@ -463,53 +422,26 @@ export function AndroidViewer({
     setKeyboardActive(true)
     touchStartPos.current = pos
     ;(e.target as Element).setPointerCapture(e.pointerId)
-    const _rect = (e.currentTarget as Element).getBoundingClientRect()
-    cursorPosRef.current = toShownNorm(e) // normalized — composeFrame maps to record-canvas (native) space
-    cursorStateRef.current = 'down'; releaseAnimRef.current = null
-    const _lc = liveCursorRef.current
-    if (_lc) {
-      _lc.style.display = 'block'
-      _lc.style.left = `${e.clientX - _rect.left}px`; _lc.style.top = `${e.clientY - _rect.top}px`
-      _lc.style.width = `${CURSOR_DOT_R * 2}px`; _lc.style.height = `${CURSOR_DOT_R * 2}px`
-      _lc.style.background = 'rgba(255,255,255,0.92)'; _lc.style.border = '1.5px solid rgba(0,0,0,0.2)'
-      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)'
-    }
+    const shownAt = toShownNorm(e)
+    if (shownAt) pointerMarks.press(shownAt, false)
     send({ type: 'input:touch:start', sessionId, payload: bodyMode ? { ...pos, space: 'frame' } : pos })
-  }, [toNorm, toShownNorm, toPinchFingers, send, sessionId, bodyMode])
+  }, [toNorm, toShownNorm, toPinchFingers, send, sessionId, bodyMode, pointerMarks])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (e.buttons === 0) {
-      if (isOptionHeld.current) {
-        setPinchHint(toPinchFingers(e)?.shown ?? null); cursorPosRef.current = null
-        const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
-        return
-      }
-      const norm = toShownNorm(e)
-      const _r = (e.currentTarget as Element).getBoundingClientRect()
-      const _lc = liveCursorRef.current
-      if (norm) {
-        cursorPosRef.current = norm // normalized — see composeFrame
-        if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle'
-        if (_lc) {
-          _lc.style.display = 'block'
-          _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
-          _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`
-          _lc.style.background = 'transparent'; _lc.style.border = '1.5px solid rgba(255,255,255,0.6)'
-          _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)'
-        }
-      } else {
-        cursorPosRef.current = null
-        if (_lc) _lc.style.display = 'none'
-      }
+      // Over the screen with nothing pressed: the hover disc, or a pinch's two while Option is held.
+      pointerMarks.hover(toShownNorm(e))
       return
     }
     if (isPinchMode.current) {
       const fingers = toPinchFingers(e)
       if (!fingers) return
+      // Drawn on every move; only what is sent is throttled.
+      pointerMarks.drag(fingers.shown.f1)
       const now = performance.now()
       if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
       lastMoveSentAt.current = now
-      setPinchHint(fingers.shown); send({ type: 'input:pinch:move', sessionId, payload: bodyMode ? { ...fingers.sent, space: 'frame' } : fingers.sent })
+      send({ type: 'input:pinch:move', sessionId, payload: bodyMode ? { ...fingers.sent, space: 'frame' } : fingers.sent })
       return
     }
     if (!touchStartPos.current) return
@@ -517,50 +449,39 @@ export function AndroidViewer({
     if (!pos) return
     const dx = pos.x - touchStartPos.current.x; const dy = pos.y - touchStartPos.current.y
     if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+    // Drawn as a drag only once it is sent as one: under the threshold the device takes a tap (review). On every move
+    // past it; only what is sent is throttled.
+    const shownAt = toShownNorm(e)
+    if (shownAt) pointerMarks.drag(shownAt)
     const now = performance.now()
     if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
     lastMoveSentAt.current = now
-    const _r = (e.currentTarget as Element).getBoundingClientRect()
-    cursorPosRef.current = toShownNorm(e) // normalized — see composeFrame
-    const _lc = liveCursorRef.current
-    if (_lc && _lc.style.display !== 'none') {
-      _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
-    }
     send({ type: 'input:touch:move', sessionId, payload: bodyMode ? { ...pos, space: 'frame' } : pos })
-  }, [toNorm, toShownNorm, toPinchFingers, send, sessionId, bodyMode])
+  }, [toNorm, toShownNorm, toPinchFingers, send, sessionId, bodyMode, pointerMarks])
 
   const handlePointerUp = useCallback(() => {
     if (isPinchMode.current) {
-      isPinchMode.current = false; setPinchActive(false); setPinchHint(null)
+      isPinchMode.current = false; pointerMarks.lift()
       send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
     }
     touchStartPos.current = null
-    cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
-    const _lc = liveCursorRef.current
-    if (_lc) {
-      _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`
-      _lc.style.background = 'transparent'; _lc.style.border = '1.5px solid rgba(255,255,255,0.6)'
-      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)'
-    }
+    pointerMarks.lift()
     send({ type: 'input:touch:end', sessionId, requestId: newRequestId() })
-  }, [send, sessionId])
+  }, [send, sessionId, pointerMarks])
 
   const handlePointerCancel = useCallback(() => {
     if (isPinchMode.current) {
-      isPinchMode.current = false; setPinchActive(false); setPinchHint(null)
+      isPinchMode.current = false; pointerMarks.lift()
       send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
     }
     touchStartPos.current = null
-    cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
+    pointerMarks.lift()
     send({ type: 'input:touch:end', sessionId, requestId: newRequestId() })
-  }, [send, sessionId])
+  }, [send, sessionId, pointerMarks])
 
   const handlePointerLeave = useCallback(() => {
-    setPinchHint(null)
-    cursorPosRef.current = null
-    const _lc = liveCursorRef.current
-    if (_lc) _lc.style.display = 'none'
-  }, [])
+    pointerMarks.leave()
+  }, [pointerMarks])
 
   /**
    * **The agent says which buttons exist; this file says where they go (#634).**
@@ -674,33 +595,15 @@ export function AndroidViewer({
             onPointerCancel: handlePointerCancel,
             onPointerLeave: handlePointerLeave,
           }}
-          overlay={
-            <>
-              <div
-                ref={liveCursorRef}
-                style={{
-                  display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
-                  transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                  transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
-                }}
-              />
-              {pinchHint && (
-                <>
-                  {([pinchHint.f0, pinchHint.f1] as const).map((sent) => turnPoint(sent, ((360 - screenTurn) % 360) as Turn)).map((f, i) => (
-                    <div key={i} style={{
-                      position: 'absolute', zIndex: 10, borderRadius: '50%',
-                      transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                      transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
-                      left: `${f.x * 100}%`, top: `${f.y * 100}%`,
-                      ...(pinchActive
-                        ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
-                        : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
-                    }} />
-                  ))}
-                </>
-              )}
-            </>
-          }
+          // The pointer's marks are in the screen Android draws, and the overlay is the box the picture sits in. Body mode
+          // turns the picture back by its correction; portrait content held landscape is turned a quarter by CSS inside
+          // a landscape box, undone here as `androidToNorm` does it (portrait x = yv, y = 1 − xv). Missing that, a point
+          // at the box's top right was drawn at its top left (review).
+          overlay={<TouchMarksLayer tone="person" store={pointerMarks.store} place={(x, y) => {
+            if (needsCSSRotation) return { left: 1 - y, top: x }
+            const p = turnPoint({ x, y }, ((360 - screenTurn) % 360) as Turn)
+            return { left: p.x, top: p.y }
+          }} />}
         />
 
         <SimulatorInfoCard

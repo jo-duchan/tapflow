@@ -37,7 +37,7 @@ If you opened the app from its icon on the home screen, the part starts at the f
 
 ### 4. Match: replay and name the steps {#match}
 
-tapflow resets the same device that way, turns it the way it was when the part started, launches the app, and replays the steps you picked one by one. It shows what was reset, and anything that could not be. It also sets the keyboard language the recording used. Before each step it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, and the device on the left shows where each step touches as a blue dot and trail.
+tapflow resets the same device that way, turns it the way it was when the part started, launches the app, and replays the steps you picked one by one. It shows what was reset, and anything that could not be. It also sets the keyboard language the recording used. Before each step it reads the screen and finds the name (selector) of what the step touched. Progress shows as **Step 3 of 12**, and the device on the left draws each step's touch in blue: a tap as a press, a swipe as a line from where it started to where it lifted.
 
 A typing step replaces what the field holds with the value the field really held when you recorded: Korean, Caps Lock, the on-screen keyboard and Backspace all replay as they ended up. If you typed into a field that was focused before the part began, the replay taps that field first, and the tap goes into the flow.
 

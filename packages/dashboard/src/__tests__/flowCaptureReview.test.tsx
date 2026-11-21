@@ -60,7 +60,7 @@ describe('the review state', () => {
 
 describe('the review screen', () => {
   const props = (state: CaptureState) => ({
-    state, tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(),
+    state, tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(),
     onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null },
     onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: (s: RawStep) => (s === steps[2] ? 'blob:plus' : 'blob:title'),
   })
@@ -174,7 +174,7 @@ describe('the review, as reviewed', () => {
   })
 
   it('names the open list by its summary', () => {
-    render(<MatchScreen state={reviewing} tap={{ surface: () => null } as never} marks={{ cursor: null, trails: [] }} onStop={vi.fn()} onRestart={vi.fn()}
+    render(<MatchScreen state={reviewing} tap={{ surface: () => null } as never} touch={null} onStop={vi.fn()} onRestart={vi.fn()}
       onTakeWhatMatched={vi.fn()} onBackToRange={vi.fn()} onContinueAnyway={vi.fn()} stopRef={{ current: null }} onContinueToEdit={vi.fn()} onKeep={vi.fn()} thumbnailOf={() => null} />)
     fireEvent.click(screen.getByRole('button', { name: /will be left out/ }))
     expect(screen.getByRole('region', { name: /will be left out/ })).toBeInTheDocument()

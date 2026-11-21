@@ -26,9 +26,10 @@ import type { PerfHook } from '@/components/perf/types';
 import { useClipboardBridge, isBridgedChord, type ClipboardMessageHandler } from '@/hooks/useClipboardBridge';
 import { toast } from 'sonner';
 import { isFramelessChrome } from '@/lib/framelessChrome';
+import { PointerTouchMarks, drawTouchState, prefersReducedMotion } from '@/lib/touchMarks';
+import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer';
+import { placeOnIosFrame } from '@/lib/watchActions';
 
-const CURSOR_RING_R = 13;
-const CURSOR_DOT_R = 8;
 const MOVE_THROTTLE_MS = 16;
 const DRAG_THRESHOLD = 0.02;
 
@@ -127,10 +128,9 @@ export function IOSViewer({
   const [keyboardActive, setKeyboardActive] = useState(false);
   const [flashedButton, setFlashedButton] = useState<string | null>(null);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
-  const [pinchActive, setPinchActive] = useState(false);
-  const [pinchHint, setPinchHint] = useState<{ f0: { x: number; y: number }; f1: { x: number; y: number } } | null>(null);
-  const pinchHintRef = useRef(pinchHint);
-  useEffect(() => { pinchHintRef.current = pinchHint; }, [pinchHint]);
+  // The person's pointer, drawn over the device and into the recording (`lib/touchMarks`): outside React, as a
+  // pointer moves at the display's rate.
+  const [pointerMarks] = useState(() => new PointerTouchMarks());
 
   // The frame button held down, and the pointer holding it. One at a time: a second pointer pressing
   // another button used to overwrite this slot, so the first button never got its `up` and stayed
@@ -146,11 +146,6 @@ export function IOSViewer({
   const isPinchMode = useRef(false);
   const isOptionHeld = useRef(false);
   const lastMoveSentAt = useRef(0);
-
-  const liveCursorRef = useRef<HTMLDivElement>(null);
-  const cursorPosRef = useRef<{ x: number; y: number } | null>(null);
-  const cursorStateRef = useRef<'idle' | 'down' | 'release'>('idle');
-  const releaseAnimRef = useRef<{ startTime: number } | null>(null);
 
   // ── Chrome image cache ────────────────────────────────────────────────────
   const chromeImgRef = useRef<HTMLImageElement | null>(null);
@@ -220,7 +215,7 @@ export function IOSViewer({
     ctx.clearRect(0, 0, rc.width, rc.height)
 
     // **Drawn in the device's own space, then turned into the canvas** — the way it is shown. Everything
-    // below is measured in that space (the pointer too, `normToRecordCanvas`), so only this transform knows
+    // below is measured in that space (the pointer's marks too), so only this transform knows
     // about the turn. Fitted rather than filled: a fold during a take changes the device under a fixed size.
     const container = containerRef.current
     const w = container?.clientWidth || rc.width; const h = container?.clientHeight || rc.height
@@ -248,49 +243,14 @@ export function IOSViewer({
       ctx.drawImage(fc, 0, 0, w, h)
     }
 
-    // Pinch hint
-    const ph = pinchHintRef.current
-    if (ph) {
-      for (const f of [ph.f0, ph.f1]) {
-        const cx = ch ? fc.offsetLeft + f.x * fc.clientWidth : f.x * w
-        const cy = ch ? fc.offsetTop  + f.y * fc.clientHeight : f.y * h
-        if (isPinchMode.current) {
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_DOT_R, 0, Math.PI * 2)
-          ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.stroke()
-        } else {
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3; ctx.stroke()
-          ctx.beginPath(); ctx.arc(cx, cy, CURSOR_RING_R, 0, Math.PI * 2)
-          ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5; ctx.stroke()
-        }
-      }
-    }
-
-    // Cursor
-    const cp = cursorPosRef.current
-    if (cp) {
-      const state = cursorStateRef.current; const ra = releaseAnimRef.current
-      ctx.save()
-      if (state === 'down') {
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_DOT_R, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill()
-        ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.stroke()
-      } else if (state === 'release' && ra) {
-        const t = Math.min((performance.now() - ra.startTime) / 350, 1)
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_DOT_R + 26 * t, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255,255,255,${(1 - t) * 0.55})`; ctx.lineWidth = 1.5; ctx.stroke()
-        if (t >= 1) { cursorStateRef.current = 'idle'; releaseAnimRef.current = null }
-      } else {
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 3; ctx.stroke()
-        ctx.beginPath(); ctx.arc(cp.x, cp.y, CURSOR_RING_R, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5; ctx.stroke()
-      }
-      ctx.restore()
-    }
+    // The pointer, as the page draws it (`TouchMarksLayer`): the same marks, in the device's own space.
+    const toPx = (p: { x: number; y: number }) => fc.clientWidth > 0
+      ? { x: fc.offsetLeft + p.x * fc.clientWidth, y: fc.offsetTop + p.y * fc.clientHeight }
+      : { x: p.x * w, y: p.y * h }
+    const now = performance.now()
+    drawTouchState(ctx, pointerMarks.store.stateAt(now), now, toPx, 'person', { reduced: prefersReducedMotion() }, scale)
     ctx.restore()
-  }, [recordCanvasRef, canvasRef, containerRef, shownTurn])
+  }, [recordCanvasRef, canvasRef, containerRef, shownTurn, pointerMarks])
 
   // **Re-registered on every turn, as `AndroidViewer`'s is.** `composeFrame` depends on `shownTurn`, so a
   // rotation builds a new composer, and the layout effect hands it over before `requestAnimationFrame` can
@@ -407,7 +367,7 @@ export function IOSViewer({
     const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight'])
     const onKeyDown = (e: KeyboardEvent) => {
       if (captureOpen) return
-      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; return }
+      if (e.code === 'AltLeft' || e.code === 'AltRight') { isOptionHeld.current = true; pointerMarks.option(true); return }
       if (e.metaKey) {
         const el = document.activeElement
         if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
@@ -431,15 +391,15 @@ export function IOSViewer({
       send({ type: 'input:key', sessionId, requestId: newRequestId(), payload: { code: e.code, modifiers } })
     }
     const endPinch = () => {
-      if (isPinchMode.current) { isPinchMode.current = false; setPinchActive(false); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }) }
-      isOptionHeld.current = false; setPinchHint(null)
+      if (isPinchMode.current) { isPinchMode.current = false; pointerMarks.lift(); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }) }
+      isOptionHeld.current = false; pointerMarks.option(false)
     }
     // Quiet while Flow Capture's dialog replays, as onKeyDown is: ending a pinch sends one.
     const onKeyUp = (e: KeyboardEvent) => { if (!captureOpen && (e.code === 'AltLeft' || e.code === 'AltRight')) endPinch() }
     const onBlur = () => { if (!captureOpen && isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
-  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending, pointerMarks])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -476,37 +436,22 @@ export function IOSViewer({
     return makePinchFingers(f1)
   }, [toNormScreen])
 
-  const normToRecordCanvas = useCallback((norm: { x: number; y: number }) => {
-    const fc = canvasRef.current; const rc = recordCanvasRef.current
-    if (fc && fc.clientWidth > 0) return { x: fc.offsetLeft + norm.x * fc.clientWidth, y: fc.offsetTop + norm.y * fc.clientHeight }
-    return { x: norm.x * (rc?.width ?? 1), y: norm.y * (rc?.height ?? 1) }
-  }, [recordCanvasRef, canvasRef])
-
   // ── Pointer interaction ───────────────────────────────────────────────────
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (performance.now() < spinUntil.current) return
     setKeyboardActive(true)
     if (isOptionHeld.current) {
       const fingers = toPinchFingers(e); if (!fingers) return
-      isPinchMode.current = true; setPinchActive(true)
+      isPinchMode.current = true
       ;(e.target as Element).setPointerCapture(e.pointerId)
-      setPinchHint(fingers); send({ type: 'input:pinch:start', sessionId, payload: fingers }); return
+      pointerMarks.press(fingers.f1, true); send({ type: 'input:pinch:start', sessionId, payload: fingers }); return
     }
     const pos = toNormScreen(e); if (!pos) return
     touchStartPos.current = pos
     ;(e.target as Element).setPointerCapture(e.pointerId)
-    cursorPosRef.current = normToRecordCanvas(pos); cursorStateRef.current = 'down'; releaseAnimRef.current = null
-    const _rect = (e.currentTarget as Element).getBoundingClientRect()
-    const _lc = liveCursorRef.current
-    if (_lc) {
-      _lc.style.display = 'block'
-      _lc.style.left = `${e.clientX - _rect.left}px`; _lc.style.top = `${e.clientY - _rect.top}px`
-      _lc.style.width = `${CURSOR_DOT_R * 2}px`; _lc.style.height = `${CURSOR_DOT_R * 2}px`
-      _lc.style.background = 'rgba(255,255,255,0.92)'; _lc.style.border = '1.5px solid rgba(0,0,0,0.2)'
-      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)'
-    }
+    pointerMarks.press(pos, false)
     send({ type: 'input:touch:start', sessionId, payload: pos })
-  }, [toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId])
+  }, [toNormScreen, toPinchFingers, send, sessionId, pointerMarks])
 
   // A frame button is its own element, so the browser decides which one a press lands on — through
   // the landscape rotation too, which is the container's transform rather than arithmetic here.
@@ -533,52 +478,34 @@ export function IOSViewer({
     // another finger started.
     if (refusedButtonPointers.current.has(e.pointerId)) return
     if (e.buttons === 0) {
-      if (isOptionHeld.current) {
-        setPinchHint(toPinchFingers(e)); cursorPosRef.current = null
-        const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
-      } else {
-        setPinchHint(null)
-        const norm = toNormScreen(e); cursorPosRef.current = norm ? normToRecordCanvas(norm) : null
-        if (cursorStateRef.current !== 'down') cursorStateRef.current = 'idle'
-        const _lc = liveCursorRef.current
-        if (_lc) {
-          if (norm) {
-            const _r = (e.currentTarget as Element).getBoundingClientRect()
-            _lc.style.display = 'block'
-            _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
-            _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`
-            _lc.style.background = 'transparent'; _lc.style.border = '1.5px solid rgba(255,255,255,0.6)'
-            _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)'
-          } else { _lc.style.display = 'none' }
-        }
-      }
+      // Over the screen with nothing pressed: the hover disc, or a pinch's two while Option is held.
+      pointerMarks.hover(toNormScreen(e))
       return
     }
     if (isPinchMode.current) {
       const fingers = toPinchFingers(e); if (!fingers) return
+      // Drawn on every move; only what is sent is throttled.
+      pointerMarks.drag(fingers.f1)
       const now = performance.now(); if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
-      lastMoveSentAt.current = now; setPinchHint(fingers); send({ type: 'input:pinch:move', sessionId, payload: fingers }); return
+      lastMoveSentAt.current = now; send({ type: 'input:pinch:move', sessionId, payload: fingers }); return
     }
     if (pressedButton.current?.pointerId === e.pointerId) return
     if (!touchStartPos.current) return
     const pos = toNormScreen(e); if (!pos) return
     const dx = pos.x - touchStartPos.current.x; const dy = pos.y - touchStartPos.current.y
     if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return
+    // Drawn as a drag only once it is sent as one: under the threshold the device takes a tap, and a swipe drawn there
+    // showed something that did not happen (review). On every move past it; only what is sent is throttled.
+    pointerMarks.drag(pos)
     const now = performance.now(); if (now - lastMoveSentAt.current < MOVE_THROTTLE_MS) return
     lastMoveSentAt.current = now
-    cursorPosRef.current = normToRecordCanvas(pos)
-    const _lc = liveCursorRef.current
-    if (_lc && _lc.style.display !== 'none') {
-      const _r = (e.currentTarget as Element).getBoundingClientRect()
-      _lc.style.left = `${e.clientX - _r.left}px`; _lc.style.top = `${e.clientY - _r.top}px`
-    }
     send({ type: 'input:touch:move', sessionId, payload: pos })
-  }, [toNormScreen, toPinchFingers, normToRecordCanvas, send, sessionId])
+  }, [toNormScreen, toPinchFingers, send, sessionId, pointerMarks])
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (refusedButtonPointers.current.delete(e.pointerId)) return
     if (isPinchMode.current) {
-      isPinchMode.current = false; setPinchActive(false); setPinchHint(null); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
+      isPinchMode.current = false; pointerMarks.lift(); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
     }
     touchStartPos.current = null
     if (pressedButton.current?.pointerId === e.pointerId) {
@@ -586,20 +513,14 @@ export function IOSViewer({
       pressedButton.current = null
       flashTimer.current = setTimeout(() => { flashTimer.current = null; setFlashedButton(null) }, 100); return
     }
-    cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
-    const _lc = liveCursorRef.current
-    if (_lc) {
-      _lc.style.width = `${CURSOR_RING_R * 2}px`; _lc.style.height = `${CURSOR_RING_R * 2}px`
-      _lc.style.background = 'transparent'; _lc.style.border = '1.5px solid rgba(255,255,255,0.6)'
-      _lc.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.3)'
-    }
+    pointerMarks.lift()
     send({ type: 'input:touch:end', sessionId, requestId: newRequestId() })
-  }, [send, sessionId])
+  }, [send, sessionId, pointerMarks])
 
   const handlePointerCancel = useCallback((e: React.PointerEvent) => {
     if (refusedButtonPointers.current.delete(e.pointerId)) return
     if (isPinchMode.current) {
-      isPinchMode.current = false; setPinchActive(false); setPinchHint(null); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
+      isPinchMode.current = false; pointerMarks.lift(); send({ type: 'input:pinch:end', sessionId, requestId: newRequestId() }); return
     }
     touchStartPos.current = null
     if (pressedButton.current?.pointerId === e.pointerId) {
@@ -607,14 +528,13 @@ export function IOSViewer({
       send({ type: 'input:button', sessionId, requestId: newRequestId(), payload: { name: pressedButton.current.name, phase: 'up' } })
       pressedButton.current = null; setFlashedButton(null); return
     }
-    cursorStateRef.current = 'release'; releaseAnimRef.current = { startTime: performance.now() }
+    pointerMarks.lift()
     send({ type: 'input:touch:end', sessionId, requestId: newRequestId() })
-  }, [send, sessionId])
+  }, [send, sessionId, pointerMarks])
 
   const handlePointerLeave = useCallback(() => {
-    setHoveredButton(null); setPinchHint(null); cursorPosRef.current = null
-    const _lc = liveCursorRef.current; if (_lc) _lc.style.display = 'none'
-  }, [])
+    setHoveredButton(null); pointerMarks.leave()
+  }, [pointerMarks])
 
   // ── Layout ────────────────────────────────────────────────────────────────
   const { screenPctLeft, screenPctTop, screenPctW, screenPctH } = iosScreenLayout(chrome);
@@ -757,41 +677,8 @@ export function IOSViewer({
             onPointerLeave: handlePointerLeave,
           }}
           buttons={{ hovered: hoveredButton, flashed: flashedButton, onHoverChange: setHoveredButton, onPress: pressFrameButton }}
-          overlay={
-            pinchHint && (() => {
-              const screenLeft = screenPctLeft / 100; const screenTop = screenPctTop / 100
-              const screenW = screenPctW / 100; const screenH = screenPctH / 100
-              const toCSS = (nx: number, ny: number) => ({
-                left: `${(screenLeft + nx * screenW) * 100}%`,
-                top: `${(screenTop + ny * screenH) * 100}%`,
-              })
-              return (
-                <>
-                  {([pinchHint.f0, pinchHint.f1] as const).map((f, i) => (
-                    <div key={i} style={{
-                      position: 'absolute', zIndex: 10, borderRadius: '50%',
-                      transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                      transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease',
-                      ...(pinchActive
-                        ? { width: CURSOR_DOT_R * 2, height: CURSOR_DOT_R * 2, background: 'rgba(255,255,255,0.92)', border: '1.5px solid rgba(0,0,0,0.2)', boxShadow: '0 0 0 1px rgba(0,0,0,0.15), 0 0 8px rgba(255,255,255,0.25)' }
-                        : { width: CURSOR_RING_R * 2, height: CURSOR_RING_R * 2, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.6)', boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }),
-                      ...toCSS(f.x, f.y),
-                    }} />
-                  ))}
-                </>
-              )
-            })()
-          }
-          areaOverlay={
-            <div
-              ref={liveCursorRef}
-              style={{
-                display: 'none', position: 'absolute', zIndex: 20, borderRadius: '50%',
-                transform: 'translate(-50%, -50%)', pointerEvents: 'none',
-                transition: 'width 0.1s ease, height 0.1s ease, background 0.1s ease, box-shadow 0.1s ease',
-              }}
-            />
-          }
+          // The pointer's marks, in the device's own (possibly turned) space, where the screen sits in the frame.
+          overlay={<TouchMarksLayer tone="person" store={pointerMarks.store} place={placeOnIosFrame({ screenPctLeft, screenPctTop, screenPctW, screenPctH })} />}
         />
 
         <SimulatorInfoCard

@@ -14,9 +14,9 @@ import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, v
 import { compareWithRecording, recordedAlike, tapDidNothing } from '@/lib/flowCapture/screenCompare'
 import { Remembered } from '@/lib/flowCapture/remembered'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
-import { addMark, type StepMark } from '@/lib/flowCapture/marks'
+import { touchOfMark, type StepMark } from '@/lib/flowCapture/marks'
 import { chromeOrientation } from '@tapflowio/protocol/screen'
-import { NO_MARKS, type WatchMarks } from '@/lib/watchActions'
+import type { MachineTouch } from '@/lib/touchMarks'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from './screens'
 
 /**
@@ -140,7 +140,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   // A stop at a step that looked different is a view of its own: its buttons replace Stop, and the focus on Stop with them.
   const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase === 'matching' && state.review ? 'review' : state.phase, fallback)
   // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
-  const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
+  const [touch, setTouch] = useState<MachineTouch | null>(null)
   const markId = useRef(0)
   // Only upright: the flow's points are the app's, the mirror is the framebuffer, and a turned device puts one in the
   // other's wrong place (as `markOf` refuses for Match's recorded points).
@@ -150,7 +150,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     if (o !== undefined && o !== 'portrait') return
     // The id is taken here, not in the updater, which React may run twice.
     const id = ++markId.current
-    setMarks((m) => addMark(m, id, mark))
+    setTouch(touchOfMark(id, mark, performance.now()))
   }
 
   // The keyboard language the range was recorded in, which both replays start from (#1135).
@@ -167,7 +167,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     const signal = run.begin()
     remembered.begin(state.range.start)
     dispatch({ type: 'match-started', total: state.range.end - state.range.start })
-    setMarks(NO_MARKS)
+    setTouch(null)
     setBusy(true)
     matchRange(tap, channel, lease, withAsked(state), state.range, bundleId, {
       signal,
@@ -228,7 +228,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     if (!flow || !edited || !opened) return
     const { channel, lease } = opened
     dispatch({ type: 'verify-started' })
-    setMarks(NO_MARKS)
+    setTouch(null)
     setBusy(true)
     verifyFlow(
       tap, channel, lease, flow, edited.secrets, (mark) => dispatch({ type: 'verify-step', mark, at: Date.now() }), keyboard, onTouch,
@@ -267,7 +267,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
         )}
         {state.phase === 'matching' && (
           <MatchScreen
-            state={state} tap={tap} marks={marks}
+            state={state} tap={tap} touch={touch}
             onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched}
             onBackToRange={backToRange} onContinueAnyway={continueAnyway} stopRef={fallback}
             onContinueToEdit={continueToEdit} onKeep={(step, kept) => dispatch({ type: 'set-kept', step, kept })}
@@ -281,7 +281,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
           />
         )}
         {state.phase === 'verifying' && (
-          <VerifyScreen state={state} tap={tap} marks={marks} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
+          <VerifyScreen state={state} tap={tap} touch={touch} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
         )}
         {state.phase === 'export' && flow && <ExportScreen flow={exportedFlow(state, bundleId) ?? flow} bundleId={bundleId} onDone={close} doneRef={fallback} />}
       </div>

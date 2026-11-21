@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WatchEndReason, WatchRefusal } from '@tapflowio/protocol'
 import { useRelay } from '@/hooks/useRelay'
 import { CODEC_AUDIO, HEADER_SIZE, parseEnvelopeHeader, type BinaryFrameHandler } from '@/lib/envelope'
-import { MARK_MS, MAX_ACTIONS, NO_MARKS, isMark, trailOf, type WatchMarks, type WatchedAction } from '@/lib/watchActions'
+import { MAX_ACTIONS, isMark, touchOfAction, type WatchedAction } from '@/lib/watchActions'
+import type { MachineTouch } from '@/lib/touchMarks'
 import type { BrowserInbound, ChromePayload, DeviceSummary, PosturesPayload } from '@/lib/types'
 
 /** Where a watch stands, as the page says it. */
@@ -34,15 +35,10 @@ export function useWatchSession(sessionId: string) {
    *  leaves it out (an agent reconnecting), so the page does not lose its title for a few seconds. */
   const [device, setDevice] = useState<DeviceSummary | null>(null)
   const binaryFrameHandlerRef = useRef<BinaryFrameHandler | undefined>(undefined)
-  /** What the holder did since this page started watching (A2), newest first; and the taps and swipes still drawn. */
+  /** What the holder did since this page started watching (A2), newest first; and its latest touch, to draw. */
   const [actions, setActions] = useState<WatchedAction[]>([])
-  const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
+  const [touch, setTouch] = useState<MachineTouch | null>(null)
   const nextId = useRef(0)
-  const markTimers = useRef(new Set<ReturnType<typeof setTimeout>>())
-  useEffect(() => {
-    const timers = markTimers.current
-    return () => { for (const t of timers) clearTimeout(t) }
-  }, [])
 
   const handleMessage = useCallback((msg: BrowserInbound) => {
     // The relay's `device:ready` replay carries no `sessionId`; everything else names one.
@@ -70,18 +66,8 @@ export function useWatchSession(sessionId: string) {
     else if (msg.type === 'watch:action') {
       const entry: WatchedAction = { id: nextId.current++, at: msg.at, action: msg.action }
       setActions((prev) => [entry, ...prev].slice(0, MAX_ACTIONS))
-      if (isMark(msg.action)) {
-        const a = msg.action
-        setMarks((prev) => ({
-          cursor: a.kind === 'tap' ? { x: a.x, y: a.y } : { x: a.to[0], y: a.to[1] },
-          trails: [...prev.trails, trailOf(entry.id, a, prev.cursor)],
-        }))
-        const timer = setTimeout(() => {
-          markTimers.current.delete(timer)
-          setMarks((prev) => ({ ...prev, trails: prev.trails.filter((t) => t.id !== entry.id) }))
-        }, MARK_MS)
-        markTimers.current.add(timer)
-      }
+      // On this page's clock, not the relay's `at`: the motion is played from when the page learned of it.
+      if (isMark(msg.action)) setTouch(touchOfAction(entry.id, msg.action, performance.now()))
     }
   }, [sessionId])
 
@@ -114,5 +100,5 @@ export function useWatchSession(sessionId: string) {
     return () => clearInterval(id)
   }, [connected, send, sessionId])
 
-  return { phase, device, chrome, postures, deviceReady, holderLeft, agentAway, connected, binaryFrameHandlerRef, actions, marks }
+  return { phase, device, chrome, postures, deviceReady, holderLeft, agentAway, connected, binaryFrameHandlerRef, actions, touch }
 }

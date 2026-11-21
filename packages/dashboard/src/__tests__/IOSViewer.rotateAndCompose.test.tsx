@@ -182,6 +182,37 @@ describe('IOSViewer — the recorder gets a composer, and the simulator gets put
     })
   })
 
+  // The recording draws the pointer where the page does: in the device's space, through the screen canvas's box. The
+  // page's own placement is held by `IOSViewer.touchMarks.test.tsx`; this is the recording's half (review: nothing
+  // held it, and swapping x and y here passed every test). Mutation: drop the screen's offset, or swap the axes.
+  it('records a press where the pointer is, in the screen\'s box', () => {
+    const arcs: [number, number][] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => k === 'arc'
+        ? (x: number, y: number) => { arcs.push([x, y]) }
+        : k === 'createLinearGradient' ? () => ({ addColorStop() {} })
+        : k in t ? t[k as string] : () => {},
+      set: (t, k, v) => { t[k as string] = v; return true },
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 320, height: 620, right: 320, bottom: 620, x: 0, y: 0, toJSON: () => ({}) })
+    Element.prototype.setPointerCapture ??= () => {}
+    withLaidOutDevice(() => {
+      recordCanvas.current = document.createElement('canvas')
+      const { container } = renderViewer({ chrome: { ...chrome, streamRotation: 0 } })
+      const screenCanvas = [...container.querySelectorAll('canvas')].find((c) => c !== recordCanvas.current && !c.dataset.testid)!
+      Object.defineProperty(screenCanvas, 'offsetLeft', { configurable: true, value: 10 })
+      Object.defineProperty(screenCanvas, 'offsetTop', { configurable: true, value: 20 })
+      // A quarter across and three quarters down — not the middle, where swapped axes land on the same point. The
+      // composite is 320x620 with the screen at (20, 20) and 280x580.
+      fireEvent.pointerDown(container.querySelector<HTMLElement>('[style*="rotate("]')!, { clientX: 90, clientY: 455, pointerId: 1, buttons: 1 })
+      arcs.length = 0
+      captured.compose!()
+      // The screen canvas laid out at 300x600, offset (10, 20): (10 + 0.25 × 300, 20 + 0.75 × 600).
+      expect(arcs.at(-1)).toEqual([85, 470])
+    })
+  })
+
   it('rotates the simulator back when the viewer goes away in landscape', async () => {
     const { send, unmount } = renderViewer()
 

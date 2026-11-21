@@ -5,7 +5,7 @@ import type { ChromeData } from '@/lib/types'
 const MAX_DISPLAY_H = 750;
 
 /** Where the device and its screen sit, in CSS — the screen component draws with it, and the controls
- *  place their overlays (pinch hints) with the same numbers. */
+ *  place their overlays (the touch marks) with the same numbers. */
 export function iosScreenLayout(chrome: ChromeData) {
   const compositeLogicalW = chrome.compositeWidth / 2;
   const compositeLogicalH = chrome.compositeHeight / 2;

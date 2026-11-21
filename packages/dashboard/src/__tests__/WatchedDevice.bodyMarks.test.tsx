@@ -19,11 +19,9 @@ describe('WatchedDevice — marks on a turned body', () => {
     render(
       <WatchedDevice
         chrome={chrome} deviceReady platform="android" binaryFrameHandlerRef={{ current: undefined }}
-        marks={{ cursor: { x: 0, y: 1 }, trails: [] }}
+        touch={{ id: 1, at: 0, kind: 'tap', point: { x: 0, y: 1 } }}
       />,
     )
-    const cursor = screen.getByTestId('tap-cursor')
-    expect(cursor.style.left).toBe('0%')
-    expect(cursor.style.top).toBe('0%')
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('0,0')
   })
 })
