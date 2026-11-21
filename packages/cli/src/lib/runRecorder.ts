@@ -35,6 +35,8 @@ export interface FlowReport {
     suggestions?: { yaml: string; element: { role: string; label: string; identifier?: string } }[]
   }[]
   device?: { id: string; name: string; platform?: string }
+  /** The engine tried to take a screenshot and got none: the record says so on the flow's card (`not-taken`). */
+  screenshotMissed?: true
 }
 
 /** The device a flow or a boot happened on, named by the session that holds it, so a run on several devices can tell

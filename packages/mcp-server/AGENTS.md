@@ -31,7 +31,7 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 - **The screenshot's format is read from its magic bytes, not from the request or the reply** (#508).
   The request's `format` is a preference (`ScreenshotRequest` in protocol) and the reply's is a claim, so
   neither can decide how to *parse* the bytes — and `getImageDimensions` picks a parser by format, feeding
-  numbers the LLM hands back as `tap`'s divisors. Android produces PNG whatever is asked and used to echo
+  numbers the LLM hands back as `tap`'s divisors. An older Android agent produces PNG whatever is asked and used to echo
   the request, so a JPEG request was measured with a JPEG parser against PNG bytes, where a stray `ff c0`
   in the IDAT reads as a SOF0 marker and yields a wrong size. Sniffing here rather than trusting the
   agent's fix is what makes it work against an agent that has **not** been upgraded — separate processes,

@@ -969,6 +969,20 @@ describe('runFlow', () => {
     expect(failing.screenshot).toHaveBeenCalledTimes(1)
   })
 
+  // The record says "the device did not return one" only of a flow that asked: a capture that failed, at the failure or
+  // at the end, and never a flow that took none (not asked, or refused before its first step). Mutations: set it
+  // whenever there is no screenshot, or never.
+  it('says a screenshot was tried and none came, and only then', async () => {
+    const failingShot = (d: ReturnType<typeof fakeDriver>) => { d.screenshot = vi.fn(async () => { throw new Error('screenshot failed: 500') }); return d }
+    const passed = await runFlow(flowOf('steps:\n  - pressKey: Enter\n'), failingShot(fakeDriver([[]])), { ...OPTS, captureLastScreen: true })
+    expect(passed.screenshotMissed).toBe(true)
+    const broke = failingShot(fakeDriver([[]]))
+    broke.openUrl = vi.fn(async () => { throw new Error('product failure') })
+    expect((await runFlow(flowOf('steps:\n  - openUrl: "app://x"\n'), broke, OPTS)).screenshotMissed).toBe(true)
+    expect((await runFlow(flowOf('steps:\n  - pressKey: Enter\n'), failingShot(fakeDriver([[]])), OPTS)).screenshotMissed).toBeUndefined()
+    expect((await runFlow(flowOf('steps:\n  - pressKey: Enter\n'), fakeDriver([[]]), { ...OPTS, captureLastScreen: true })).screenshotMissed).toBeUndefined()
+  })
+
   it('gives up on a last screen that stalls, and still passes the flow', async () => {
     vi.useFakeTimers()
     try {

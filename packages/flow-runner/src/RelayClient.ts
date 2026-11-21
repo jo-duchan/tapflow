@@ -617,10 +617,16 @@ export class RelayClient extends SessionChannel {
     }
   }
 
-  async screenshot(sessionId: string, signal?: AbortSignal): Promise<Buffer> {
+  /**
+   * `format` is a preference the agent may not honour (protocol `ScreenshotRequest`): read the bytes, not this. A run
+   * asks for JPEG (`RelayDriver`): a large screen's PNG went past the relay's 5 MB cap for a run's screenshot.
+   */
+  async screenshot(sessionId: string, signal?: AbortSignal, format: 'png' | 'jpeg' = 'png'): Promise<Buffer> {
     let res: Response
     try {
-      res = await fetchWithToken(this.tokens, new URL(`/api/v1/sessions/${sessionId}/screenshot`, this.httpBase()).toString(), { ...(signal ? { signal } : {}) })
+      const url = new URL(`/api/v1/sessions/${sessionId}/screenshot`, this.httpBase())
+      if (format === 'jpeg') url.searchParams.set('format', 'jpeg')
+      res = await fetchWithToken(this.tokens, url.toString(), { ...(signal ? { signal } : {}) })
     } catch (e) {
       const failure = this.failed(sessionId, `screenshot failed: ${(e as Error).message}`)
       throw new RelayHttpError(failure.message, 0, { cause: e })

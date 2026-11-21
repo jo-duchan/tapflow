@@ -4368,11 +4368,10 @@ describe('AndroidAgent', () => {
         expect(sent['data']).toBe(Buffer.from('PNGDATA').toString('base64'))
       })
 
-      it('answers png for a jpeg request, because that is what it produced (#508)', async () => {
-        // `screencap -p` produces PNG and takes no format argument, so the request is a preference
-        // this platform cannot honour (see `ScreenshotRequest` in protocol). Echoing it sent PNG
-        // bytes out under `format: 'jpeg'`, which the relay wrote into the HTTP Content-Type — and
-        // `mcp-server` then picked a JPEG parser for the dimensions it feeds to `tap` as divisors.
+      it('answers png for a jpeg request it could not convert, because that is what it produced (#508)', async () => {
+        // A JPEG request is converted with `sips`; bytes it cannot convert (these are not an image) go out as the PNG
+        // they are. Echoing the request sent PNG bytes out under `format: 'jpeg'`, which the relay wrote into the HTTP
+        // Content-Type — and `mcp-server` then picked a JPEG parser for the dimensions it feeds to `tap` as divisors.
         vi.spyOn(adb, 'screenshot').mockResolvedValue(Buffer.from('PNGDATA'))
         const sendSpy = vi.spyOn(internals(agent).ws!, 'send')
 

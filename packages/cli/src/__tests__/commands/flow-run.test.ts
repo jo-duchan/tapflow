@@ -426,6 +426,26 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
     expect(report.steps[0]!.suggestions).toEqual([suggestion])
   })
 
+  // A run asks the device for JPEG, and an older agent answers PNG: the failure's file is named by what it holds, so
+  // a viewer opens it, and the other extension's file from an earlier run goes, or it would pass as this failure's
+  // evidence. And a screenshot the engine tried and missed is on the report, for the card to say so.
+  // Mutations: name every file .png, keep the earlier file, or drop the report's field.
+  it('names the failure screenshot by its bytes, and reports a missed one', async () => {
+    fakeRelay()
+    const artifacts = path.join(dir, 'artifacts')
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('failed', 'product'), failureScreenshot: Buffer.from([0xff, 0xd8, 0xff, 0xe0]) })
+    await cmdFlowRun([file], { token: 'tflw_pat_x', artifacts })
+    expect(fs.readdirSync(artifacts).map((f) => f.slice(f.lastIndexOf('-')))).toEqual(['-failure.jpg'])
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('failed', 'product'), failureScreenshot: Buffer.from([0x89, 0x50, 0x4e, 0x47]) })
+    await cmdFlowRun([file], { token: 'tflw_pat_x', artifacts })
+    expect(fs.readdirSync(artifacts).map((f) => f.slice(f.lastIndexOf('-')))).toEqual(['-failure.png'])
+
+    const relay = fakeRelay()
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('passed'), screenshotMissed: true })
+    await cmdFlowRun([file], { token: 'tflw_pat_x' })
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).toMatchObject({ screenshotMissed: true })
+  })
+
   it('creates the run with the runner id and the planned flows, reports each flow, and finishes it', async () => {
     const relay = fakeRelay()
     mocks.runFlow.mockResolvedValue({ ...resultOf('failed', 'product'), failureScreenshot: Buffer.from('png') })

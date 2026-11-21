@@ -152,6 +152,12 @@ export interface FlowResult {
   failureScreenshot?: Uint8Array
   /** The screen a passed flow ended on, when `captureLastScreen` asked for it and it could be taken. */
   lastScreenshot?: Uint8Array
+  /**
+   * A screenshot was tried — at the failure, or the last screen asked for — and none came (it timed out or the read
+   * failed). Absent when none was tried (a flow refused before its first step), so a record never says "the device
+   * did not take one" of a flow that never asked.
+   */
+  screenshotMissed?: true
   /** With `observeEffects`, on a flow that touches points: the screen it ran on, for Flow Capture to pin them to. */
   viewport?: Viewport
   /**
@@ -1242,6 +1248,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   let failureKind: 'environment' | 'product' | undefined
   let deviceLacks = false
   let failureScreenshot: Uint8Array | undefined
+  let screenshotMissed = false
   // What earlier touches brought, kept across steps that changed nothing — a toast outlives a step or two (review of #1125).
   const effects = new EffectWatch()
 
@@ -1288,6 +1295,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
       steps.push({ index, name, status: 'failed', durationMs: Date.now() - stepStart, message, ...(suggestions ? { suggestions } : {}), ...touched() })
       options.onStep?.({ index, name, phase: 'end', status: 'failed' })
       failureScreenshot = await captureScreenshot(driver, FAILURE_SCREENSHOT_TIMEOUT_MS)
+      if (failureScreenshot === undefined) screenshotMissed = true
     }
   }
 
@@ -1301,6 +1309,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   if (failureMessage === undefined && options.captureLastScreen) {
     const shot = await captureScreenshot(driver, LAST_SCREEN_TIMEOUT_MS)
     if (shot !== undefined) result.lastScreenshot = shot
+    else screenshotMissed = true
   }
   if (flow.file !== undefined) result.file = flow.file
   if (options.observeEffects && viewport) result.viewport = viewport
@@ -1308,5 +1317,6 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   if (failureKind !== undefined) result.failureKind = failureKind
   if (deviceLacks) result.deviceLacks = true
   if (failureScreenshot !== undefined) result.failureScreenshot = failureScreenshot
+  if (screenshotMissed) result.screenshotMissed = true
   return result
 }

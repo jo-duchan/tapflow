@@ -53,6 +53,7 @@ import {
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
 import { AdbWrapper } from './AdbWrapper.js'
+import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
@@ -3455,11 +3456,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         break
       }
       case 'screenshot:request': {
-        // `format` is deliberately destructured and unused — it is on the wire and this platform
-        // cannot honour it, which is the whole of #508. Reading it here and answering with it is
-        // exactly the bug.
+        // `format` is a preference: JPEG is made with `sips` when asked, and the reply says what was produced — never
+        // the request's echo, which sent PNG bytes out as `image/jpeg` (#508).
         const raw = msg as unknown as { requestId: string; format?: 'png' | 'jpeg'; sessionId?: string }
-        const { requestId } = raw
+        const { requestId, format } = raw
         const sessionId = msg.sessionId
         const state = this.deviceStates.get(sessionId!)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined
@@ -3468,17 +3468,19 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.screenshot(serial)
-          .then((buf) => this.sendMsg({
-            type: 'screenshot:done',
-            sessionId,
-            requestId,
-            // `'png'`, never the requested format. `screencap -p` produces PNG and takes no format
-            // argument, and this field means what was produced — the request's is a preference (see
-            // `ScreenshotRequest` in protocol). Echoing it sent PNG bytes out under `image/jpeg`
-            // (#508), which the relay then wrote into the HTTP Content-Type.
-            format: 'png',
-            data: buf.toString('base64'),
-          }))
+          .then(async (shot) => {
+            const png = withoutLeadingText(shot)
+            // `screencap -p` writes PNG and takes no format; JPEG is converted here, and when that cannot be done the
+            // PNG goes out labelled as what it is.
+            const jpeg = format === 'jpeg' ? await toJpeg(png) : null
+            this.sendMsg({
+              type: 'screenshot:done',
+              sessionId,
+              requestId,
+              format: jpeg ? 'jpeg' : 'png',
+              data: (jpeg ?? png).toString('base64'),
+            })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'screenshot:error', sessionId, requestId, message })

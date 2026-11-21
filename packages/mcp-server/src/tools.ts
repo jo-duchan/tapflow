@@ -185,8 +185,8 @@ async function platformOf(client: TapflowClient, sessionId: string): Promise<str
  * What a buffer actually is, from its magic bytes, or `null` for anything else.
  *
  * The request's `format` is a **preference** (see `ScreenshotRequest` in protocol) and the reply's is
- * a claim, so neither can decide how to parse these bytes. Android produces PNG whatever is asked —
- * `screencap -p` takes no format — and used to echo the request, so a JPEG request arrived as PNG
+ * a claim, so neither can decide how to parse these bytes. An older Android agent produces PNG whatever is
+ * asked — `screencap -p` takes no format — and used to echo the request, so a JPEG request arrived as PNG
  * bytes that `getImageDimensions` then scanned for a JPEG SOF0 marker. In a few hundred KB of IDAT a
  * stray `ff c0` is close to certain, which yielded a **wrong** width and height, and those numbers go
  * into the response text the LLM reads and hands back as `tap`'s divisors. The tap lands somewhere
@@ -590,8 +590,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
         format: z.enum(['png', 'jpeg']).optional().describe(
-          'Preferred image format (default: png). Honoured on iOS; Android always returns PNG, and the ' +
-          'response says so when it differs.',
+          'Preferred image format (default: png). An older Android agent returns PNG; the response says so when it ' +
+          'differs.',
         ),
       },
     },

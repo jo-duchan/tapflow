@@ -70,6 +70,8 @@ export interface RunFlowInfo {
   device?: { name: string | null; platform: string | null } | null
   steps?: unknown[]
   hasScreenshot?: boolean
+  /** Why a flow has no screenshot: `too-large`, `not-image`, `storage-full` (the relay refused it) or `not-taken`. */
+  screenshotNote?: string | null
 }
 
 export interface RunDetailInfo extends Omit<RunInfo, 'flows'> {
@@ -1601,6 +1603,7 @@ export class TapflowClient {
           ...('device' in f ? { device: device ? { name: device.name ?? null, platform: device.platform ?? null } : null } : {}),
           ...('steps' in f ? { steps: f['steps'] as unknown[] } : {}),
           ...('hasScreenshot' in f ? { hasScreenshot: f['hasScreenshot'] as boolean } : {}),
+          ...('screenshotNote' in f ? { screenshotNote: f['screenshotNote'] as string | null } : {}),
         }
       }),
     }

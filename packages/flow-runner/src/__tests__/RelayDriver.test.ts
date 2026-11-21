@@ -227,6 +227,16 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
     ])
   })
 
+  // A run's screenshots are asked for as JPEG: a large screen's PNG went past the relay's 5 MB cap (2026-11-22). The
+  // channel underneath (`SocketFlowDriver`, which Flow Capture and others use) asks as it always did. Mutation: drop
+  // the override, and the run asks for PNG again.
+  it('asks the relay for a JPEG screenshot', async () => {
+    const screenshot = vi.fn(async () => Buffer.from([0xff, 0xd8]))
+    const driver = driverWith({ screenshot })
+    await driver.screenshot()
+    expect(screenshot).toHaveBeenCalledWith('s1', undefined, 'jpeg')
+  })
+
   it('sends points as they are when the tree carried no turn, or before any tree', async () => {
     const tap = vi.fn(async () => {})
     const driver = driverWith({ queryUITreeWithTurn: tree(), tap })

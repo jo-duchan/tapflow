@@ -683,8 +683,8 @@ export interface ScreenshotRequest {
    * produced in `ScreenshotDone.format`.
    *
    * That asymmetry is not slack, it is the platform contract: `DeviceAgent.screenshot()` takes no
-   * format argument at all, so no agent has ever been asked to honour this — iOS happens to
-   * (`simctl io … --type`), Android cannot (`screencap -p` produces PNG and takes no format), and a
+   * format argument at all, so honouring it is each agent's own — iOS does (`simctl io … --type`),
+   * Android converts `screencap -p`'s PNG with `sips` (an older Android agent answers PNG), and a
    * third-party platform registered through `AgentRegistry.register()` is free to produce whatever
    * it can. Required here only because every in-repo sender supplies one; absence would have to mean
    * "no preference", which is what `'png'` already means.
