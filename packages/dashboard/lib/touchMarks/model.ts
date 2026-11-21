@@ -4,8 +4,8 @@ import type { Point } from '@tapflowio/protocol'
  * What a touch looks like on the device, as one model for every place one is drawn: the QA viewer's own pointer (live
  * and in its recording), an AI agent's touches in the watch view, and Flow Capture's — its Match and Verify replays and
  * its step pictures. **The motion is the same everywhere; the colour says which surface it is on**: white on Manual QA,
- * where a person drives the device, blue in Flow Capture and on an AI agent's watch page (user, 2026-11-21; the
- * agreed mockup's numbers are the constants below).
+ * where a person drives the device, blue in Flow Capture and on an AI agent's watch page (user, 2026-11-21). The
+ * constants below are the user's Figma (Medium, node 4564:1730).
  *
  * Pure: a state and a time in, the parts to draw out, in the caller's pixels (`toPx`). Points stay in the device
  * screen's own space (0–1, the input's space) until then, so one state serves an overlay and a recording alike.
@@ -17,27 +17,29 @@ export type NormPoint = Point
 export type PxPoint = Point
 
 /**
- * The surface's colour: `person` on Manual QA (white), `machine` in Flow Capture and on an AI agent's watch page (blue).
+ * The surface's colour: `person` on Manual QA (white: a light grey fill in a white border), `machine` in Flow Capture and
+ * on an AI agent's watch page (blue).
  * Chosen by the surface, not by who made each touch: Flow Capture's step pictures show a person's recorded touches and
  * are blue, so one dialog never mixes the two (user, 2026-11-21).
  */
 export type TouchTone = 'person' | 'machine'
 
+/**
+ * Radii are to a disc's outer edge, its border inside them — the user's Figma (Medium, node 4564:1730): a tap 27 px
+ * across. The swipe's moving dot is 19 where Figma has 15, made larger beside Revyl's, where 15 read as a speck (user,
+ * 2026-11-21). The hover has no frame there; it stays a little larger than the press, as before.
+ */
 export const TOUCH_MARK = {
   /** The disc a pointer shows before it presses, and each finger of a pinch while Option is held. */
-  hoverR: 14,
-  /** A press tightens the disc to this. */
-  dotR: 11,
-  /** Where a moving finger went down, once it has split from the finger. */
-  ringR: 14,
+  hoverR: 15.5,
+  /** A press tightens the disc to this. A swipe's start keeps it, faint. */
+  dotR: 13.5,
   /** A moving finger's dot, once it has shrunk. */
-  endR: 6,
-  /** Travel before a press splits into a start ring and a moving dot: under it, the press is a tap. */
+  endR: 9.5,
+  /** Travel before a press splits into a faint start and a moving dot: under it, the press is a tap. */
   splitPx: 4,
   /** Travel over which the moving dot shrinks from `dotR` to `endR`. */
   shrinkPx: 24,
-  /** Travel over which the start ring grows from `dotR` to `ringR`. */
-  ringInPx: 6,
   /** A press tightening from the hover disc. */
   growMs: 80,
   /** A tap's release: a ring widening by `rippleGrowPx` as it fades. */
@@ -51,11 +53,11 @@ export const TOUCH_MARK = {
   swipeLeadMs: 60,
   /** A machine's swipe with no duration of its own is drawn over this. */
   swipeMs: 400,
-  /** The start ring, faint, so the direction reads at a glance. */
-  startAlpha: 0.5,
+  /** The start, faint, so the direction reads at a glance. */
+  startAlpha: 0.6,
   /** The line's opacity at its start and at the finger. */
-  lineFrom: 0.3,
-  lineTo: 0.95,
+  lineFrom: 0.6,
+  lineTo: 1,
 } as const
 
 /** One finger of a touch: where it went down, where it is, and the farthest it has been from where it went down. */
@@ -67,9 +69,12 @@ export interface TouchState { hover: NormPoint[]; touch: Touch | null }
 
 export const NO_TOUCH: TouchState = { hover: [], touch: null }
 
-/** A disc (hover, press, a moving finger), a ring (a swipe's start, a tap's release), or the line between. */
+/**
+ * A disc (hover, press, a swipe's start, its moving finger), a ring (a tap's release), or the line between. `glass` is
+ * the moving finger's dot: a lighter fill over what is under it, blurred.
+ */
 export type TouchPart =
-  | { kind: 'disc'; at: PxPoint; r: number }
+  | { kind: 'disc'; at: PxPoint; r: number; alpha?: number; glass?: true }
   | { kind: 'ring'; at: PxPoint; r: number; alpha: number }
   | { kind: 'line'; from: PxPoint; to: PxPoint }
 
@@ -115,12 +120,11 @@ function fingerParts(f: Finger, touch: Touch, now: number, toPx: (p: NormPoint) 
   }
   const shrink = clamp01(far / M.shrinkPx)
   const endR = opts.reduced ? M.endR : M.dotR + (M.endR - M.dotR) * shrink
-  const ringIn = opts.reduced ? 1 : clamp01((far - M.splitPx) / M.ringInPx)
   const parts: TouchPart[] = []
-  // From the start's centre, seen through its ring, to under the finger's dot: it shows from the moment they split.
+  // From the start's centre, seen through its faint disc, to under the finger's dot: it shows from the moment they split.
   if (dist(start, cur) > 1) parts.push({ kind: 'line', from: start, to: cur })
-  parts.push({ kind: 'ring', at: start, r: M.dotR + (M.ringR - M.dotR) * ringIn, alpha: M.startAlpha })
-  parts.push({ kind: 'disc', at: cur, r: endR })
+  parts.push({ kind: 'disc', at: start, r: M.dotR, alpha: M.startAlpha })
+  parts.push({ kind: 'disc', at: cur, r: endR, glass: true })
   return parts
 }
 

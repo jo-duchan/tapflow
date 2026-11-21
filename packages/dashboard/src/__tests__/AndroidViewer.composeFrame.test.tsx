@@ -75,12 +75,16 @@ import { AndroidViewer } from '@/components/device/AndroidViewer'
 
 /** Angles `ctx.rotate` was called with, in degrees, in order. */
 const rotations: number[] = []
+/** Filters the recording's context was given, in order. */
+const filters: string[] = []
 
 function stubCanvasContext() {
   const ctx = {
     clearRect: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(),
-    drawImage: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
+    drawImage: vi.fn(), beginPath: vi.fn(), arc: vi.fn(), rect: vi.fn(), clip: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
     closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), setTransform: vi.fn(),
+    getTransform: vi.fn(() => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })), createLinearGradient: vi.fn(() => ({ addColorStop() {} })),
+    set filter(f: string) { filters.push(f) },
     rotate: vi.fn((rad: number) => { rotations.push(Math.round((rad * 180) / Math.PI)) }),
     fillStyle: '', strokeStyle: '', lineWidth: 0,
   }
@@ -651,6 +655,21 @@ describe('AndroidViewer — a device that reports its body', () => {
     const [x, y] = ctx.arc.mock.calls.at(-1) as [number, number]
     expect(x).toBeCloseTo(97.2)
     expect(y).toBeCloseTo(72)
+  })
+
+  // A swipe's moving dot blurs the frame under it, which a recording has on its own canvas. Mutation: drop `backdrop`
+  // from the composer's call.
+  it('blurs the frame under a swipe\'s moving dot in the recording', () => {
+    const { container } = renderViewer(0)
+    readyToCompose()
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 100, height: 240, right: 100, bottom: 240, x: 0, y: 0, toJSON: () => ({}) })
+    Element.prototype.setPointerCapture ??= () => {}
+    const host = container.querySelector('div[style*="cursor: none"]') as Element
+    act(() => { host.dispatchEvent(new PointerEvent('pointerdown', { clientX: 20, clientY: 200, bubbles: true, pointerId: 1, buttons: 1 })) })
+    act(() => { host.dispatchEvent(new PointerEvent('pointermove', { clientX: 20, clientY: 60, bubbles: true, pointerId: 1, buttons: 1 })) })
+    filters.length = 0
+    captured.compose?.()
+    expect(filters.some((f) => f.startsWith('blur('))).toBe(true)
   })
 
   // The user: Option alone shows the pinch guide where the pointer already is, no move needed; letting go shows one

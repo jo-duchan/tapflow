@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, render } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer'
 import { TouchMarkStore, type PlaceOnLayer } from '@/lib/touchMarks'
 
@@ -79,6 +79,25 @@ describe('TouchMarksLayer — what it draws', () => {
     store.move([{ x: 0.409, y: 0.4 }])
     store.move([{ x: 0.4, y: 0.406 }])
     expect(store.stateAt(0).touch?.fingers[0]!.far).toEqual({ x: 0.4, y: 0.406 })
+  })
+
+  // The canvas cannot read the screen under it, so the moving dot's blur is a CSS backdrop placed under the dot: in the
+  // 200 × 400 box, a finger 100 px down from (90, 240) has its dot at (90, 340), 8.5 px in radius inside its border.
+  // Mutation: place it at the start, or leave it shown once the swipe is a tap again.
+  it('puts the CSS backdrop under a moving finger\'s dot, and nowhere when there is none', () => {
+    const store = new TouchMarkStore()
+    render(<TouchMarksLayer tone="person" place={upright} store={store} />)
+    store.down([{ x: 0.25, y: 0.5 }], performance.now())
+    store.move([{ x: 0.25, y: 0.75 }])
+    flush()
+    const [first, second] = screen.getAllByTestId('touch-glass')
+    expect(first!.style.display).toBe('block')
+    expect(first!.style.transform).toBe('translate(41.5px, 291.5px)')
+    expect(first!.style.width).toBe('17px')
+    expect(second!.style.display).toBe('none')
+    act(() => { store.clear() })
+    flush()
+    expect(first!.style.display).toBe('none')
   })
 
   // A caller builds `place` on every render; the same mapping is not a reason to draw.

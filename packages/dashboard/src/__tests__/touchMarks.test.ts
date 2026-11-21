@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   TOUCH_MARK as M, NO_TOUCH, PointerTouchMarks, TouchMarkStore, drawTouchParts, machineState, machineTouchEnd, stillParts, touchParts,
   type NormPoint, type TouchPart, type TouchState,
@@ -34,26 +34,26 @@ describe('touch marks — the motion (one for a person and a machine)', () => {
   })
 
   // The split is at 4 px of travel: 0.01 across is exactly 4 px, still a tap; 0.0125 (5 px) is a swipe.
-  it('splits a press into a start ring, a line and a moving dot once it travels past 4 px', () => {
+  it('splits a press into a faint start, a line and a moving glass dot once it travels past 4 px', () => {
     expect(kinds(touchParts(pressed({ x: 0.5, y: 0.5 }, { x: 0.51, y: 0.5 }), 500, toPx))).toEqual(['disc'])
     const swipe = touchParts(pressed({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.6 }), 500, toPx)
     expect(swipe).toEqual([
-      // From the start's centre — seen through its ring — to the finger.
+      // From the start's centre — seen through its faint disc — to the finger.
       { kind: 'line', from: { x: 200, y: 400 }, to: { x: 200, y: 480 } },
-      { kind: 'ring', at: { x: 200, y: 400 }, r: M.ringR, alpha: M.startAlpha },
-      { kind: 'disc', at: { x: 200, y: 480 }, r: M.endR },
+      { kind: 'disc', at: { x: 200, y: 400 }, r: M.dotR, alpha: M.startAlpha },
+      { kind: 'disc', at: { x: 200, y: 480 }, r: M.endR, glass: true },
     ])
   })
 
   it('shrinks the moving dot over the first 24 px of travel', () => {
     // 12 px down: half way.
     const half = touchParts(pressed({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.515 }), 500, toPx)
-    expect(half.at(-1)).toEqual({ kind: 'disc', at: { x: 200, y: 412 }, r: (M.dotR + M.endR) / 2 })
+    expect(half.at(-1)).toEqual({ kind: 'disc', at: { x: 200, y: 412 }, r: (M.dotR + M.endR) / 2, glass: true })
   })
 
   // Judged by the farthest the finger went, not where it is: a swipe that comes back is still a swipe.
   it('keeps a swipe that came back to where it started a swipe', () => {
-    expect(kinds(touchParts(pressed({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.7 }), 500, toPx))).toEqual(['ring', 'disc'])
+    expect(kinds(touchParts(pressed({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.7 }), 500, toPx))).toEqual(['disc', 'disc'])
   })
 
   // User: no fade, no easing. Mutation: fade it out over the hold, and the frame before the end stops matching.
@@ -69,12 +69,12 @@ describe('touch marks — the motion (one for a person and a machine)', () => {
       { start: { x: 0.4, y: 0.4 }, cur: { x: 0.3, y: 0.3 }, far: { x: 0.3, y: 0.3 } },
       { start: { x: 0.6, y: 0.6 }, cur: { x: 0.7, y: 0.7 }, far: { x: 0.7, y: 0.7 } },
     ] } }
-    expect(kinds(touchParts(pinch, 500, toPx))).toEqual(['line', 'ring', 'disc', 'line', 'ring', 'disc'])
+    expect(kinds(touchParts(pinch, 500, toPx))).toEqual(['line', 'disc', 'disc', 'line', 'disc', 'disc'])
   })
 
   it('draws a still picture\'s mark as the frame before the lift', () => {
     expect(stillParts({ kind: 'tap', point: { x: 0.5, y: 0.5 } }, toPx)).toEqual([{ kind: 'disc', at: { x: 200, y: 400 }, r: M.dotR }])
-    expect(kinds(stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx))).toEqual(['line', 'ring', 'disc'])
+    expect(kinds(stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx))).toEqual(['line', 'disc', 'disc'])
   })
 })
 
@@ -155,7 +155,7 @@ describe('touch marks — the store and a person\'s pointer', () => {
     store.move([{ x: 0.5, y: 0.7 }])
     store.move([{ x: 0.5, y: 0.5 }])
     expect(store.stateAt(0).touch?.fingers[0]!.far).toEqual({ x: 0.5, y: 0.7 })
-    expect(kinds(touchParts(store.stateAt(500), 500, toPx))).toEqual(['ring', 'disc'])
+    expect(kinds(touchParts(store.stateAt(500), 500, toPx))).toEqual(['disc', 'disc'])
   })
 
   // On a screen taller than wide the farthest in fractions can be the nearer in pixels: 0.009 across is 3.6 px, 0.006
@@ -168,7 +168,7 @@ describe('touch marks — the store and a person\'s pointer', () => {
     store.move([{ x: 0.409, y: 0.4 }])
     store.move([{ x: 0.4, y: 0.406 }])
     expect(store.stateAt(0).touch?.fingers[0]!.far).toEqual({ x: 0.4, y: 0.406 })
-    expect(kinds(touchParts(store.stateAt(0), 0, toPx))).toEqual(['line', 'ring', 'disc'])
+    expect(kinds(touchParts(store.stateAt(0), 0, toPx))).toEqual(['line', 'disc', 'disc'])
   })
 
   // The user: Option alone shows the pinch guide, with no move needed.
@@ -202,14 +202,14 @@ describe('touch marks — the store and a person\'s pointer', () => {
   })
 })
 
-describe('touch marks — the colour says who touched', () => {
+describe('touch marks — the colour says which surface', () => {
   // A 2D context that remembers what each fill and stroke was drawn in; jsdom has none of its own.
   function recordingContext() {
     const fills: string[] = []
     const ctx = {
       fillStyle: '', strokeStyle: '' as unknown, lineWidth: 0, lineCap: '', globalAlpha: 1,
       shadowColor: '', shadowBlur: 0, shadowOffsetY: 0,
-      save() {}, restore() {}, beginPath() {}, arc() {}, moveTo() {}, lineTo() {}, stroke() {},
+      save() {}, restore() {}, beginPath() {}, arc() {}, rect() {}, clip() {}, moveTo() {}, lineTo() {}, stroke() {},
       fill() { fills.push(ctx.fillStyle) },
       createLinearGradient: () => ({ addColorStop() {} }),
     }
@@ -218,12 +218,139 @@ describe('touch marks — the colour says who touched', () => {
   const disc: TouchPart[] = [{ kind: 'disc', at: { x: 10, y: 10 }, r: M.dotR }]
 
   // Mutation: draw both tones in one colour.
-  it('fills a person\'s touch white and a machine\'s blue', () => {
+  it('fills a person\'s touch light grey and a machine\'s blue, shadow and all', () => {
     const person = recordingContext()
     drawTouchParts(person.ctx, disc, 'person')
     const machine = recordingContext()
     drawTouchParts(machine.ctx, disc, 'machine')
-    expect(person.fills).toEqual(['rgba(255,255,255,0.5)'])
-    expect(machine.fills).toEqual(['rgba(59,130,246,0.6)'])
+    // The first fill is the shadow, the second the disc: a machine's are both blue (user: a dark shadow read grey).
+    expect(person.fills).toEqual(['rgba(0,0,0,0.2)', 'rgba(228,228,228,0.8)'])
+    expect(machine.fills).toEqual(['rgba(37,99,235,0.35)', 'rgba(59,130,246,0.8)'])
+  })
+})
+
+describe('touch marks — the moving dot\'s glass in a recording', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  // A recording drew the device's frame first, so the dot's backdrop is on its own canvas: it is copied out and drawn
+  // back blurred, inside the dot. The live layer blurs with CSS instead and must not do this.
+  function blurringContext() {
+    const filters: string[] = []
+    const arcs: [number, number, number][] = []
+    const images: [number, number][] = []
+    /** What reaches the canvas in order: the clip and the filter must be set before the copy is drawn. */
+    const log: string[] = []
+    const ctx = {
+      canvas: {} as HTMLCanvasElement,
+      fillStyle: '', strokeStyle: '' as unknown, lineWidth: 0, lineCap: '', globalAlpha: 1, shadowColor: '', shadowBlur: 0,
+      set filter(f: string) { filters.push(f); log.push('filter') },
+      save() {}, restore() {}, beginPath() {}, rect() {}, clip() { log.push('clip') }, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
+      setTransform() {},
+      drawImage(...a: number[]) { images.push([a[1]!, a[2]!], [a[5]!, a[6]!]); log.push('image') },
+      arc(x: number, y: number, r: number) { arcs.push([x, y, r]) },
+      getTransform: () => ({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }),
+      createLinearGradient: () => ({ addColorStop() {} }),
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, filters, arcs, images, log }
+  }
+  const swipe = stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx)
+
+  // Mutation: blur every disc, or ignore the option.
+  it('blurs under the moving dot alone, and only when asked', () => {
+    const asked = blurringContext()
+    drawTouchParts(asked.ctx, swipe, 'person', 2, { backdrop: true })
+    expect(asked.filters).toEqual(['blur(6px)'])
+    const live = blurringContext()
+    drawTouchParts(live.ctx, swipe, 'person', 2)
+    expect(live.filters).toEqual([])
+  })
+
+  // Where, in the canvas's own pixels: the dot at (200, 160) under a 2× transform is at (400, 320), and the blurred copy
+  // is clipped to inside its border, (9.5 − 1) × 2 = 17 across the radius, from a patch around it. Mutations: swap x and
+  // y, draw the copy somewhere else, or blur the whole patch unclipped.
+  it('blurs under the moving dot where the canvas has it, inside its border', () => {
+    const { ctx, arcs, images, log } = blurringContext()
+    drawTouchParts(ctx, swipe, 'person', 2, { backdrop: true })
+    expect(arcs).toContainEqual([400, 320, (M.endR - 1) * 2])
+    const pad = Math.ceil(M.endR * 2 + 4 * 3 * 2)
+    // Read from and drawn back to the same patch.
+    expect(images.slice(-2)).toEqual([[400 - pad, 320 - pad], [400 - pad, 320 - pad]])
+    const image = log.indexOf('image')
+    expect(log.slice(image - 2, image)).toEqual(['clip', 'filter'])
+  })
+})
+
+describe('touch marks — the line stops at the moving dot', () => {
+  // The live page blurs only the screen under a glass dot, not the canvas's own line, so a line through it stayed sharp
+  // (user, 2026-11-21). Mutation: drop the clip, and the line is stroked with nothing cut away.
+  it('cuts the line out of the moving dot, where it went down to its edge', () => {
+    const calls: string[] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => k === 'createLinearGradient' ? () => { calls.push('line'); return { addColorStop() {} } }
+        : k === 'arc' ? (x: number, y: number, r: number) => { calls.push(`arc ${x},${y},${r}`) }
+        : k === 'clip' ? (rule?: string) => { calls.push(`clip ${rule ?? ''}`) }
+        : k === 'save' ? () => { calls.push('save') }
+        : k in t ? t[k as string] : () => {},
+      set: (t, k, v) => { t[k as string] = v; return true },
+    })
+    // From (200, 640) up to (200, 160): the dot is at the end, `endR` across inside the clip.
+    drawTouchParts(ctx as unknown as CanvasRenderingContext2D, stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx), 'person')
+    const line = calls.indexOf('line')
+    const block = calls.slice(calls.lastIndexOf('save', line), line)
+    expect(block).toEqual(['save', `arc 200,160,${M.endR}`, 'clip evenodd'])
+  })
+})
+
+describe('touch marks — a pinch\'s two glass dots', () => {
+  // A single even-odd path over two overlapping dots let the line back in where they overlap (review): each dot is cut
+  // on its own. Mutation: one path for both.
+  it('cuts the line out of each glass dot with a clip of its own', () => {
+    let clips = 0
+    let line = -1
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => k === 'clip' ? () => { clips++ }
+        : k === 'createLinearGradient' ? () => { if (line < 0) line = clips; return { addColorStop() {} } }
+        : k in t ? t[k as string] : () => {},
+      set: (t, k, v) => { t[k as string] = v; return true },
+    })
+    const pinch: TouchState = { hover: [], touch: { downAt: 0, upAt: null, fingers: [
+      { start: { x: 0.45, y: 0.5 }, cur: { x: 0.49, y: 0.5 }, far: { x: 0.49, y: 0.5 } },
+      { start: { x: 0.55, y: 0.5 }, cur: { x: 0.51, y: 0.5 }, far: { x: 0.51, y: 0.5 } },
+    ] } }
+    drawTouchParts(ctx as unknown as CanvasRenderingContext2D, touchParts(pinch, 500, toPx), 'person')
+    expect(line).toBe(2)
+  })
+})
+
+describe('touch marks — what the renderer applies', () => {
+  // The model hands over colours, alphas and the glass flag; these hold that the renderer uses them (review: a fill-only
+  // record let the machine's border, the faint start and the glass fill change unseen). Mutations: machine border white,
+  // `globalAlpha = 1`, glass filled like a press.
+  function styleContext() {
+    const fills: string[] = []
+    const strokes: string[] = []
+    const ctx = {
+      fillStyle: '', strokeStyle: '' as unknown, lineWidth: 0, lineCap: '', globalAlpha: 1, shadowColor: '', shadowBlur: 0,
+      save() {}, restore() {}, beginPath() {}, arc() {}, rect() {}, clip() {}, moveTo() {}, lineTo() {},
+      fill() { fills.push(`${ctx.fillStyle}@${ctx.globalAlpha}`) },
+      stroke() { if (typeof ctx.strokeStyle === 'string') strokes.push(ctx.strokeStyle) },
+      createLinearGradient: () => ({ addColorStop() {} }),
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, fills, strokes }
+  }
+  const swipe = stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx)
+
+  it('borders a person\'s mark white and a machine\'s blue-300', () => {
+    const person = styleContext(); drawTouchParts(person.ctx, [{ kind: 'disc', at: { x: 10, y: 10 }, r: M.dotR }], 'person')
+    const machine = styleContext(); drawTouchParts(machine.ctx, [{ kind: 'disc', at: { x: 10, y: 10 }, r: M.dotR }], 'machine')
+    expect(person.strokes).toContain('#fff')
+    expect(machine.strokes).toContain('#93c5fd')
+    expect(machine.strokes).not.toContain('#fff')
+  })
+
+  it('draws a swipe\'s start faint and its moving dot as lighter glass', () => {
+    const { ctx, fills } = styleContext()
+    drawTouchParts(ctx, swipe, 'person')
+    const discs = fills.filter((f) => f.startsWith('rgba(228'))
+    expect(discs).toEqual([`rgba(228,228,228,0.8)@${M.startAlpha}`, 'rgba(228,228,228,0.4)@1'])
   })
 })

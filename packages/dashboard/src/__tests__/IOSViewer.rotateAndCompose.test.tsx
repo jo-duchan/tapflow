@@ -182,6 +182,31 @@ describe('IOSViewer — the recorder gets a composer, and the simulator gets put
     })
   })
 
+  // A swipe's moving dot blurs the frame under it, and in a recording that frame is on the same canvas: the composer
+  // asks the renderer for it. Mutation: drop `backdrop` from the composer's call, and nothing is blurred.
+  it('blurs the frame under a swipe\'s moving dot in the recording', () => {
+    const filters: string[] = []
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => k === 'getTransform' ? () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 })
+        : k === 'createLinearGradient' ? () => ({ addColorStop() {} })
+        : k in t ? t[k as string] : () => {},
+      set: (t, k, v) => { if (k === 'filter') filters.push(v as string); t[k as string] = v; return true },
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 320, height: 620, right: 320, bottom: 620, x: 0, y: 0, toJSON: () => ({}) })
+    Element.prototype.setPointerCapture ??= () => {}
+    withLaidOutDevice(() => {
+      recordCanvas.current = document.createElement('canvas')
+      const { container } = renderViewer({ chrome: { ...chrome, streamRotation: 0 } })
+      const surface = container.querySelector<HTMLElement>('[style*="rotate("]')!
+      fireEvent.pointerDown(surface, { clientX: 90, clientY: 455, pointerId: 1, buttons: 1 })
+      fireEvent.pointerMove(surface, { clientX: 90, clientY: 200, pointerId: 1, buttons: 1 })
+      filters.length = 0
+      captured.compose!()
+      expect(filters.some((f) => f.startsWith('blur('))).toBe(true)
+    })
+  })
+
   // The recording draws the pointer where the page does: in the device's space, through the screen canvas's box. The
   // page's own placement is held by `IOSViewer.touchMarks.test.tsx`; this is the recording's half (review: nothing
   // held it, and swapping x and y here passed every test). Mutation: drop the screen's offset, or swap the axes.
