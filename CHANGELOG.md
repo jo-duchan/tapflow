@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A flow's video on the Flow Runs page draws the touches the runner sent**: taps, swipes, pinches and long presses, in blue, where the runner sent them and at the moment it sent them. Seeking back shows a touch again, and pausing holds it. Only videos recorded by a runner from this release have touches.
 - **The mouse pointer stays visible over the device on the session watch page and in a flow's video.** It was hidden there as it is in a QA Session, where a touch disc stands in for it, but those pages take no input and show no disc.
 
+### Fixed
+
+- **Flow Capture leaves out the swipes on the Google feed beside an Android home screen, as it does the home screen's.** A swipe right from the home screen opens the feed, which is a different app from the home screen, so the range stopped skipping there and kept the drawer swipe and the icon tap that followed in the flow. Now the steps before the app's first reported touch are left out as long as the home screen comes back after them. A tap on a dialog the app opened, such as a permission prompt, comes after the icon tap and stays.
+
 ## [0.33.0] - 2026-11-19
 
 Flow Capture: save the steps you took in a QA session as a flow, replayed on the device to check it before you export it, with Android brought level with iOS along the way.
