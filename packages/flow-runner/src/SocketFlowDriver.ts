@@ -79,6 +79,17 @@ function isEnvironmentFailure(e: unknown): boolean {
 // to the CLI's exit code without replacing the original error object. Anything
 // else (selector misses, assertion timeouts, and transient query blips) is
 // rethrown untouched, messages verbatim either way.
+/**
+ * A touch as it was sent, in the frame it was sent in — after the driver turned the flow's points for the device. The
+ * same space a watcher's `watch:action` is in, so whatever draws a session's touches places this one the same way: a
+ * run's video records it (design review of #1205's follow-up: the flow's own, unturned points drew a landscape tap a
+ * quarter off). `holdMs` on a tap is a long press.
+ */
+export type SentTouch =
+  | { kind: 'tap'; point: [number, number]; holdMs?: number }
+  | { kind: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
+  | { kind: 'pinch'; from: PinchFingers; to: PinchFingers; durationMs: number }
+
 export class SocketFlowDriver implements FlowDriver {
   /**
    * The app's interface turn from the latest tree this driver read (`UiTreeResponse.interfaceTurn`). A flow's points
@@ -93,6 +104,8 @@ export class SocketFlowDriver implements FlowDriver {
     private readonly client: SessionDevice,
     private readonly sessionId: string,
     private readonly buildId?: number,
+    /** Told each touch as it is sent, before the device has it (a run's video records it). */
+    private readonly onInput?: (touch: SentTouch) => void,
   ) {}
 
   private point(x: number, y: number): [number, number] {
@@ -127,11 +140,15 @@ export class SocketFlowDriver implements FlowDriver {
 
   tap(x: number, y: number): Promise<void> {
     const [fx, fy] = this.point(x, y)
+    this.onInput?.({ kind: 'tap', point: [fx, fy] })
     return this.guard(() => this.client.tap(this.sessionId, fx, fy))
   }
 
   swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number) {
-    return this.guard(() => this.client.swipe(this.sessionId, this.point(...from), this.point(...to), durationMs, holdMs))
+    const f = this.point(...from)
+    const t = this.point(...to)
+    this.onInput?.({ kind: 'swipe', from: f, to: t, durationMs })
+    return this.guard(() => this.client.swipe(this.sessionId, f, t, durationMs, holdMs))
   }
 
   inputText(text: string): Promise<void> {
@@ -150,6 +167,7 @@ export class SocketFlowDriver implements FlowDriver {
 
   longPress(x: number, y: number, durationMs: number): Promise<void> {
     const [fx, fy] = this.point(x, y)
+    this.onInput?.({ kind: 'tap', point: [fx, fy], holdMs: durationMs })
     return this.guard(() => this.client.longPress(this.sessionId, fx, fy, durationMs))
   }
 
@@ -161,7 +179,10 @@ export class SocketFlowDriver implements FlowDriver {
   async pinch(start: PinchFingers, end: PinchFingers, durationMs: number): Promise<void> {
     try {
       const turned = (f: PinchFingers): PinchFingers => [this.point(...f[0]), this.point(...f[1])]
-      await this.guard(() => this.client.pinch(this.sessionId, turned(start), turned(end), durationMs))
+      const from = turned(start)
+      const to = turned(end)
+      this.onInput?.({ kind: 'pinch', from, to, durationMs })
+      await this.guard(() => this.client.pinch(this.sessionId, from, to, durationMs))
     } catch (e) {
       if (e instanceof InputRefusedError && e.reason === 'unsupported') throw markEnvironmentFailure(e)
       throw e

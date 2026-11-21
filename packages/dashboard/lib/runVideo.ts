@@ -2,11 +2,13 @@
  * A flow's video as the runner recorded it (A4), and the arithmetic the player needs. No React here.
  *
  * The file is records `[u8 kind][u32 BE ms][u32 BE length][payload]` (flow-runner `video.ts`): kind 1 is a frame as
- * the runner received it, in its envelope; kind 2 is a JSON event — the device's chrome, its info, or a step mark.
+ * the runner received it, in its envelope; kind 2 is a JSON event — the device's chrome, its info, a step mark, or a touch.
  * `ms` is the runner's receive time on the video's clock, which starts at its first record. The relay never reads
  * a byte of it; the chunk index it keeps (`GET …/video/index`) is the seek index: a chunk whose `keyframe` is set
  * starts with an IDR carrying SPS/PPS, a point decoding can begin from.
  */
+
+import type { MachineTouch } from '@/lib/touchMarks'
 
 export const VIDEO_FORMAT_VERSION = 1
 
@@ -55,6 +57,12 @@ export type VideoEvent =
   | { type: 'chrome'; payload: unknown }
   | { type: 'deviceInfo'; payload: unknown }
   | { type: 'step'; index: number; name: string; phase: 'start' | 'end'; status?: string }
+  /** A touch the runner sent, in the frame it sent it in (flow-runner's `SentTouch`) — drawn over the picture. */
+  | ({ type: 'touch' } & (
+    | { kind: 'tap'; point: [number, number]; holdMs?: number }
+    | { kind: 'swipe'; from: [number, number]; to: [number, number]; durationMs: number }
+    | { kind: 'pinch'; from: [[number, number], [number, number]]; to: [[number, number], [number, number]]; durationMs: number }
+  ))
 
 export interface FrameRecord { kind: 'frame'; ms: number; chunk: number; data: ArrayBuffer }
 export interface EventRecord { kind: 'event'; ms: number; chunk: number; event: VideoEvent }
@@ -73,6 +81,8 @@ export interface LoadedVideo {
   durationMs: number
   gaps: Gap[]
   steps: { index: number; name: string; ms: number; status?: string }[]
+  /** The touches the runner sent, on the video's clock (`at` is ms into it), in order. Empty from an older runner. */
+  touches: MachineTouch[]
 }
 
 /** Splits one chunk's bytes into records. A truncated tail (a write cut short) is dropped, not thrown. */
@@ -129,7 +139,7 @@ export function loadVideo(index: VideoIndex, file: ArrayBuffer): LoadedVideo {
     : []))
   const ends = new Map(records.flatMap((r) => (r.kind === 'event' && r.event.type === 'step' && r.event.phase === 'end' ? [[r.event.index, r.event]] : [])))
   return {
-    meta: index.meta, records, chunkStarts, chunks, durationMs, gaps,
+    meta: index.meta, records, chunkStarts, chunks, durationMs, gaps, touches: touchesOf(records),
     // The end mark's name, when there is one: a launch learns which of the relay's defaults it applied only once it
     // answers, so its end mark is the one that matches the run record.
     steps: steps.map((s) => {
@@ -145,6 +155,20 @@ export function loadVideo(index: VideoIndex, file: ArrayBuffer): LoadedVideo {
  * between them** — a decoder fed across a gap gets frames whose references never arrived. With none, the first
  * decodable chunk after `t` (the picture resumes there), or -1 when the video has no decodable chunk left.
  */
+/** A video's touch events as touches to play on its own clock. */
+export function touchesOf(records: VideoRecord[]): MachineTouch[] {
+  const pt = ([x, y]: [number, number]) => ({ x, y })
+  return records.flatMap((r, id): MachineTouch[] => {
+    if (r.kind !== 'event' || r.event.type !== 'touch') return []
+    const e = r.event
+    switch (e.kind) {
+      case 'tap': return [{ id, at: r.ms, kind: 'tap', point: pt(e.point), ...(e.holdMs !== undefined ? { holdMs: e.holdMs } : {}) }]
+      case 'swipe': return [{ id, at: r.ms, kind: 'swipe', from: pt(e.from), to: pt(e.to), durationMs: e.durationMs }]
+      case 'pinch': return [{ id, at: r.ms, kind: 'pinch', from: [pt(e.from[0]), pt(e.from[1])], to: [pt(e.to[0]), pt(e.to[1])], durationMs: e.durationMs }]
+    }
+  })
+}
+
 export function seekChunk(video: Pick<LoadedVideo, 'chunks'>, t: number): number {
   const chunks = video.chunks
   let at = -1

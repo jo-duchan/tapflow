@@ -46,7 +46,9 @@ vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
     activity = mocks.activity
   },
   RelayDriver: class {
-    constructor(..._args: unknown[]) {}
+    /** What the run built it with: the fourth is where each sent touch goes (a flow's video). */
+    readonly args: unknown[]
+    constructor(...args: unknown[]) { this.args = args }
   },
 }))
 
@@ -919,10 +921,11 @@ describe('cmdFlowRun keeps each flow\'s video beside the record (A4)', () => {
 
   it('sends each flow\'s frames as its video, with the step marks, and ends it', async () => {
     const relay = fakeRelay()
-    mocks.runFlow.mockImplementation(async (_flow: unknown, _driver: unknown, opts: { onStep?: (m: unknown) => void }) => {
+    mocks.runFlow.mockImplementation(async (_flow: unknown, driver: { args: unknown[] }, opts: { onStep?: (m: unknown) => void }) => {
       const tap = streamListener()
       tap.frame(IDR)
       opts.onStep?.({ index: 0, name: 'tap', phase: 'start' })
+      ;(driver.args[3] as (t: unknown) => void)({ kind: 'tap', point: [0.1, 0.2] })
       tap.frame(PFRAME)
       return { ...resultOf('failed', 'product'), failureScreenshot: Buffer.from('png') }
     })
@@ -938,6 +941,8 @@ describe('cmdFlowRun keeps each flow\'s video beside the record (A4)', () => {
     expect(open).toMatchObject({ formatVersion: 1, codec: 'h264', platform: 'ios' })
     const chunk = relay.calls.find((c) => c.url.endsWith('/0/video/chunks/0'))!.body as Uint8Array
     expect(Buffer.from(chunk).includes(Buffer.from('"type":"step"'))).toBe(true)
+    // Each touch the driver sends is in the video too, for the player to draw. Mutation: build the driver without it.
+    expect(Buffer.from(chunk).includes(Buffer.from('"type":"touch","kind":"tap","point":[0.1,0.2]'))).toBe(true)
     expect(relay.calls.find((c) => c.url.endsWith('/0/video/end'))!.body).toEqual({ lastSeq: 0, reason: 'done' })
     // The record is unchanged by its video.
     expect(relay.calls.filter((c) => !c.url.includes('/video')).map((c) => c.url.replace('http://localhost:4000', ''))).toEqual([

@@ -124,6 +124,23 @@ describe('VideoTap', () => {
     ])
   })
 
+  // The player draws a touch over the picture at the moment it was sent, on the frames' clock. Before the video opens
+  // there is nothing to play, so a touch then is dropped, as a step mark is. Mutation: drop the event.
+  it('records a touch on the frames\' clock once the video is open, and none before', () => {
+    const c = clock()
+    const tap = new VideoTap({ now: c.now })
+    tap.touch({ kind: 'tap', point: [0.1, 0.2] })
+    tap.frame(h264(IDR(), true))
+    const sink = new Sink()
+    tap.begin(sink)
+    c.advance(30)
+    tap.touch({ kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: 500 })
+    tap.end()
+    const touches = records(sink.chunks[0]!.data).filter((r) => r.kind === 2).map((r) => [r.ms, JSON.parse(r.payload.toString())])
+      .filter(([, e]) => e.type === 'touch')
+    expect(touches).toEqual([[30, { type: 'touch', kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: 500 }]])
+  })
+
   it('opens a JPEG stream\'s video only to say it is not kept', () => {
     const tap = new VideoTap({ now: clock().now })
     const sink = new Sink()

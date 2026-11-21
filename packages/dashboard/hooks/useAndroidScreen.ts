@@ -245,7 +245,6 @@ export function useAndroidScreen({
     transform: `rotate(${totalTurn}deg)`,
     transformOrigin: 'center center',
     visibility: pictureVisible ? 'visible' : 'hidden',
-    cursor: 'none',
   }
 
   return {

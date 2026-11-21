@@ -38,7 +38,7 @@ export { VideoTap, VIDEO_FORMAT_VERSION, MAX_FLOW_VIDEO_BYTES, carriesParameterS
 export type { VideoChunk, VideoEndReason, VideoMeta, VideoSink } from './video.js'
 export { RelayDriver } from './RelayDriver.js'
 export { SocketFlowDriver, reachTargetOf } from './SocketFlowDriver.js'
-export type { SessionDevice } from './SocketFlowDriver.js'
+export type { SessionDevice, SentTouch } from './SocketFlowDriver.js'
 export { SessionChannel, newRequestId } from './sessionChannel.js'
 export { reachRequest, readReachResults } from './uiTreeRead.js'
 export type { RelayMsg } from './sessionChannel.js'

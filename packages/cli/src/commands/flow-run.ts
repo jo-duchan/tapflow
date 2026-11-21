@@ -386,7 +386,7 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         console.log(`${prefix}installing build ${opts.build}...`)
         await client.installApp(lease.sessionId, opts.build)
       }
-      const driver = new RelayDriver(client, lease.sessionId, opts.build)
+      const driver = new RelayDriver(client, lease.sessionId, opts.build, (t) => worker.tap?.touch(t))
       const engineOpts = {
         ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),
         ...(recorder ? { captureLastScreen: true } : {}),
@@ -753,7 +753,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       await client.installApp(sessionId, opts.build)
     }
 
-    const driver = new RelayDriver(client, sessionId, opts.build)
+    const driver = new RelayDriver(client, sessionId, opts.build, (t) => video?.tap.touch(t))
     const relay = client
     const engineOpts = {
       ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),

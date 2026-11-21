@@ -109,7 +109,9 @@ export function IOSDeviceScreen({
           style={{
             position: 'absolute', zIndex: 3,
             ...screenBox,
-            backgroundColor: '#010101', cursor: 'none',
+            // Hidden only where the pointer drives the device (the QA viewer's disc stands in); kept over a watch page
+            // or a run's video, which take no input (user).
+            backgroundColor: '#010101', cursor: containerHandlers ? 'none' : undefined,
             visibility: canvasReady ? 'visible' : 'hidden',
           }}
         />

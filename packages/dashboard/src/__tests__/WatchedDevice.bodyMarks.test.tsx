@@ -38,6 +38,19 @@ describe('WatchedDevice — marks on a turned body', () => {
     expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('20,70')
   })
 
+  // A watcher sends nothing, so the pointer is kept over the device: hidden, it vanished with nothing standing in for
+  // it (user). The QA viewer, which draws its own disc, still hides it (AndroidViewer tests find its surface by it).
+  // Mutation: hide it on every screen again.
+  it('keeps the pointer over a device it only shows, on both platforms', () => {
+    const android = { screenWidth: 1080, screenHeight: 2400, streamRotation: 0 } as AndroidChrome
+    const a = render(<WatchedDevice chrome={android} deviceReady platform="android" binaryFrameHandlerRef={{ current: undefined }} touch={null} />)
+    expect(a.container.querySelector('[style*="cursor: none"]')).toBeNull()
+    a.unmount()
+    const i = render(<WatchedDevice chrome={null} deviceReady platform="ios" binaryFrameHandlerRef={{ current: undefined }} touch={null} />)
+    expect(i.container.querySelector('canvas:not([data-testid])')).not.toBeNull()
+    expect(i.container.querySelector('[style*="cursor: none"]')).toBeNull()
+  })
+
   // A pinch is anchored at both fingers' starts. Mutation: anchor one.
   it('anchors a pinch at both fingers', () => {
     const chrome = { screenWidth: 1080, screenHeight: 2400, streamRotation: 0 } as AndroidChrome

@@ -39,6 +39,7 @@ A flow the runner kept a video of has a **Play the video** button. It downloads 
 
 - The dots above the bar mark where each step started, red where one failed. A grey bar is a stretch that never reached the relay. Hover over a dot or bar to see what it is, and select it to go there.
 - Dragging the bar catches on each step's start. Playback speed goes from 0.5× to 4×.
+- The taps, swipes, pinches and long presses the runner sent are drawn over the video in blue, and drawn again when you go back to them. Only videos recorded by a runner from this release have them.
 - A flow with no video says why: the agent sent JPEG, the device's stream had no frame a video could start from, or the video is past its retention window.
 - A video that ends early says why too: it reached the 100 MB limit for one flow, video storage was full, the run was cancelled, the runner disconnected, or the end of the video never reached the relay.
 
