@@ -223,7 +223,11 @@ function printFailure(result: FlowResult, flow: Flow, flowIndex: number, opts: F
     fs.mkdirSync(dir, { recursive: true })
     // Named by what the bytes are: a run asks the device for JPEG, and an older agent answers PNG.
     const ext = result.failureScreenshot[0] === 0xff && result.failureScreenshot[1] === 0xd8 ? 'jpg' : 'png'
-    const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.${ext}`)
+    const base = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure`)
+    const shot = `${base}.${ext}`
+    // The other extension's file is an earlier run's: left there, a CI step collecting the directory would carry it as
+    // this failure's evidence (CodeRabbit on #1208). The same name was always overwritten; two names are not.
+    fs.rmSync(`${base}.${ext === 'jpg' ? 'png' : 'jpg'}`, { force: true })
     fs.writeFileSync(shot, result.failureScreenshot)
     console.error(`${prefix}  screenshot: ${shot}`)
   }

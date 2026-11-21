@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, promises as fs } from 'fs'
+import path from 'path'
 import { deflateSync } from 'zlib'
 import { toJpeg, withoutLeadingText, type RunFile } from '../screenshotJpeg.js'
 
@@ -45,10 +46,12 @@ describe('toJpeg', () => {
 
   // Its own directory each time, gone afterwards, so two at once never share a file and none is left behind.
   it('uses a temp directory of its own and removes it, whatever happened', async () => {
+    // The directory itself, not the file inside it: a cleanup that removed only `in.png` would leave the directory and
+    // a converted `out.jpg` behind (CodeRabbit on #1208).
     const dirs: string[] = []
-    const run: RunFile = async (_f, args) => { dirs.push(args[args.length - 3]!); throw new Error('boom') }
+    const run: RunFile = async (_f, args) => { dirs.push(path.dirname(args[args.length - 3]!)); throw new Error('boom') }
     await Promise.all([toJpeg(png(), run), toJpeg(png(), run)])
-    expect(new Set(dirs.map((d) => d.replace(/\/in\.png$/, ''))).size).toBe(2)
+    expect(new Set(dirs).size).toBe(2)
     for (const d of dirs) expect(existsSync(d)).toBe(false)
   })
 
