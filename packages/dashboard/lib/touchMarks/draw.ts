@@ -77,7 +77,8 @@ function clipOut(ctx: CanvasRenderingContext2D, a: PxPoint, b: PxPoint, discs: {
   // One clip per disc: a single even-odd path over two overlapping discs — a pinch's fingers close together — counts
   // their overlap three times and lets the line back in there (review).
   for (const d of discs) {
-    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.arc(d.at.x, d.at.y, d.r, 0, Math.PI * 2)
+    // A subpath of its own, or the arc is joined to the rect's corner by an edge that can leave a seam.
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.moveTo(d.at.x + d.r, d.at.y); ctx.arc(d.at.x, d.at.y, d.r, 0, Math.PI * 2)
     ctx.clip('evenodd')
   }
 }

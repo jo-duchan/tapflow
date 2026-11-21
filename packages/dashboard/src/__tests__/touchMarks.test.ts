@@ -237,18 +237,20 @@ describe('touch marks — the moving dot\'s glass in a recording', () => {
     const filters: string[] = []
     const arcs: [number, number, number][] = []
     const images: [number, number][] = []
+    /** What reaches the canvas in order: the clip and the filter must be set before the copy is drawn. */
+    const log: string[] = []
     const ctx = {
       canvas: {} as HTMLCanvasElement,
       fillStyle: '', strokeStyle: '' as unknown, lineWidth: 0, lineCap: '', globalAlpha: 1, shadowColor: '', shadowBlur: 0,
-      set filter(f: string) { filters.push(f) },
-      save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
-      setTransform() {}, drawImage(_: unknown, x: number, y: number) { images.push([x, y]) },
+      set filter(f: string) { filters.push(f); log.push('filter') },
+      save() {}, restore() {}, beginPath() {}, rect() {}, clip() { log.push('clip') }, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
+      setTransform() {},
+      drawImage(...a: number[]) { images.push([a[1]!, a[2]!], [a[5]!, a[6]!]); log.push('image') },
       arc(x: number, y: number, r: number) { arcs.push([x, y, r]) },
       getTransform: () => ({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }),
       createLinearGradient: () => ({ addColorStop() {} }),
     }
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ clearRect() {}, drawImage() {} }) as never)
-    return { ctx: ctx as unknown as CanvasRenderingContext2D, filters, arcs, images }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, filters, arcs, images, log }
   }
   const swipe = stillParts({ kind: 'swipe', from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 } }, toPx)
 
@@ -264,13 +266,16 @@ describe('touch marks — the moving dot\'s glass in a recording', () => {
 
   // Where, in the canvas's own pixels: the dot at (200, 160) under a 2× transform is at (400, 320), and the blurred copy
   // is clipped to inside its border, (9.5 − 1) × 2 = 17 across the radius, from a patch around it. Mutations: swap x and
-  // y, or blur the whole patch unclipped.
+  // y, draw the copy somewhere else, or blur the whole patch unclipped.
   it('blurs under the moving dot where the canvas has it, inside its border', () => {
-    const { ctx, arcs, images } = blurringContext()
+    const { ctx, arcs, images, log } = blurringContext()
     drawTouchParts(ctx, swipe, 'person', 2, { backdrop: true })
     expect(arcs).toContainEqual([400, 320, (M.endR - 1) * 2])
     const pad = Math.ceil(M.endR * 2 + 4 * 3 * 2)
-    expect(images.at(-1)).toEqual([400 - pad, 320 - pad])
+    // Read from and drawn back to the same patch.
+    expect(images.slice(-2)).toEqual([[400 - pad, 320 - pad], [400 - pad, 320 - pad]])
+    const image = log.indexOf('image')
+    expect(log.slice(image - 2, image)).toEqual(['clip', 'filter'])
   })
 })
 
