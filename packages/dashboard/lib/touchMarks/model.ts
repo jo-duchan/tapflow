@@ -142,7 +142,7 @@ export function touchParts(state: TouchState, now: number, toPx: (p: NormPoint) 
   return state.hover.map((p) => ({ kind: 'disc' as const, at: toPx(p), r: TOUCH_MARK.hoverR }))
 }
 
-/** A touch to draw on a still picture: a tap's point, or a swipe's two ends. */
+/** A touch to draw on a still picture: a tap's point, a swipe's two ends, or a pinch's two fingers' ends. */
 export type StillTouch =
   | { kind: 'tap'; point: NormPoint }
   | { kind: 'swipe'; from: NormPoint; to: NormPoint }

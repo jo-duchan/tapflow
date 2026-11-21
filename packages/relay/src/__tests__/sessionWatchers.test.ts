@@ -309,6 +309,27 @@ describe('session watchers', () => {
     expect(w.actions()).toEqual([{ kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: expect.any(Number) }])
   })
 
+  // The hold and the length are measured from the press, so a long press is drawn held and a slow swipe slowly. A type
+  // check passes a zero, a negative or NaN: these are numbers in a range. Mutations: never stamp the start, measure 0,
+  // or subtract the wrong way round.
+  it('measures how long a tap was held and a pinch lasted, from its start', async () => {
+    const w = await watched()
+    w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
+    await w.settled()
+    await new Promise((r) => setTimeout(r, 40))
+    w.send({ type: 'input:touch:end', requestId: 'r1' })
+    w.send({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.4 }, f1: { x: 0.6, y: 0.6 } } })
+    await w.settled()
+    await new Promise((r) => setTimeout(r, 40))
+    w.send({ type: 'input:pinch:end', requestId: 'r2' })
+    await w.settled()
+    const [tap, pinch] = w.actions() as Array<{ holdMs?: number; durationMs?: number }>
+    expect(tap!.holdMs).toBeGreaterThanOrEqual(35)
+    expect(tap!.holdMs).toBeLessThan(5000)
+    expect(pinch!.durationMs).toBeGreaterThanOrEqual(35)
+    expect(pinch!.durationMs).toBeLessThan(5000)
+  })
+
   // A body-mode holder's points are of the frame, not the screen: the watcher is told so, or it turns them a quarter.
   it('tells which picture a gesture\'s points are of', async () => {
     const w = await watched()

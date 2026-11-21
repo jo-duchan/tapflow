@@ -243,12 +243,14 @@ describe('the touches drawn', () => {
 
   // A captured pinch has its fingers' start and end; drawn as both. A body-mode holder's is in the frame's points, not
   // the picture's: none. Mutations: drop the pinch case, swap start and end, or draw the frame's.
-  it('marks a pinch with both fingers, and none in the frame\'s points', () => {
+  it('marks a pinch with both fingers, and no step in the frame\'s points', () => {
     const pinch = { ...base, kind: 'pinch', start: [[0.4, 0.45], [0.6, 0.55]], end: [[0.2, 0.35], [0.8, 0.65]], durationMs: 300 }
     expect(markOf(pinch as unknown as RawStep)).toEqual({
       kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300,
     })
     expect(markOf({ ...pinch, space: 'frame' } as unknown as RawStep)).toBeNull()
+    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame' } as unknown as RawStep)).toBeNull()
+    expect(markOf({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200, space: 'frame' } as unknown as RawStep)).toBeNull()
   })
 
   it('marks nothing on a turned device, whose points are in another frame than its picture', () => {

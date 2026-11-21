@@ -932,7 +932,7 @@ function SecretName({ from, current, onRename, renameCheck }: {
 
 /**
  * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's touch
- * (`TouchMarksLayer`): the frame just before the finger lifted — a pressed dot, or a swipe's whole line.
+ * (`TouchMarksLayer`): the frame just before the finger lifted — a pressed dot, or a swipe's (or a pinch's two) whole lines.
  */
 /** `fill`: drawn at the device's height, as the live device is beside it — a recorded picture (1b-3b) is 160 px wide,
  *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */

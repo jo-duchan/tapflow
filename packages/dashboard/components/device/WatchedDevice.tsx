@@ -105,7 +105,7 @@ function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch }: {
   });
   return (
     <>
-      {/* The overlay is the screen itself on Android, and a watcher's device is upright — the input's own space. */}
+      {/* The overlay is the frame on Android, and a watcher's device is upright: a screen point is turned onto it, a frame point sits as it is. */}
       <AndroidDeviceScreen
         screen={screen} deviceReady={deviceReady} posturePending={false}
         overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => {
