@@ -276,6 +276,8 @@ describe('the touches drawn', () => {
       expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, turned)).toBe(false)
       expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, { bodyRotation: 0 } as unknown as ChromePayload)).toBe(true)
       expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, null)).toBe(true)
+      // Upright, but the frame a quarter off the screen (an unfolded foldable): a screen's mark would land a quarter off.
+      expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, { bodyRotation: 0, streamRotation: 90 } as unknown as ChromePayload)).toBe(false)
     })
 
     it('turns it into the screen on a screenshot, and draws none with no map', () => {
@@ -285,8 +287,10 @@ describe('the touches drawn', () => {
       expect(markOf(swipe(chrome(270)))).toEqual({ kind: 'swipe', from: { x: 0.8, y: 0.9 }, to: { x: 0.2, y: 0.9 }, durationMs: 200 })
       expect(markOf(tap(chrome(undefined)))).toBeNull()
       expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame' } as unknown as RawStep)).toBeNull()
-      // A turned body is reset upright before the replay its screenshot is from.
-      expect(markOf(tap(chrome(0, 90)))).toBeNull()
+      // The replay turns the device to the range's start before its screenshots, so a turned body's step is turned too.
+      expect(markOf(tap(chrome(90, 90)))).toEqual({ kind: 'tap', point: { x: 0.7, y: 0.2 } })
+      // A screen's step on a turned body is still not drawn: its points are not the picture's.
+      expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], chrome: chrome(0, 90) } as unknown as RawStep)).toBeNull()
     })
   })
 

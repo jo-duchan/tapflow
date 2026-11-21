@@ -15,14 +15,15 @@ export type StepMark = StillTouch & { durationMs?: number; inFrame?: boolean }
  * An Android body-mode holder's step is in the frame's own points (`space: 'frame'`), and the agent places a replayed
  * one in the frame it holds — so over the mirror it is drawn as it is, however the frame is turned; until this, none
  * was drawn and Android's replays showed no touch at all. On a screenshot it is turned into the screen by the frame's
- * map there (`AndroidChrome.streamRotation`, recorded with the step), and with no map, not drawn. Any other step only
- * while the device was upright: its points are the screen's, which a turned body's frame is not, and a mark in the
- * wrong place says more than none.
+ * map there (`AndroidChrome.streamRotation`, recorded with the step), whichever way the body was held — the replay
+ * turns the device to the range's start before its screenshots (`rangeStartOrientation`) — and with no map, not
+ * drawn. Any other step only while the device was upright: its points are the screen's, which a turned body's frame
+ * is not, and a mark in the wrong place says more than none.
  */
 export function markOf(raw: RawStep, into: 'frame' | 'screen' = 'screen'): StepMark | null {
   const chrome = typeof raw.chrome === 'object' && raw.chrome !== null ? raw.chrome as ChromePayload : undefined
   const inFrame = 'space' in raw && raw.space === 'frame'
-  if (!(inFrame && into === 'frame')) {
+  if (!inFrame) {
     const orientation = chrome ? chromeOrientation(chrome) : undefined
     if (orientation !== undefined && orientation !== 'portrait') return null
   }
@@ -45,10 +46,13 @@ export function markOf(raw: RawStep, into: 'frame' | 'screen' = 'screen'): StepM
 
 /**
  * Whether a replayed touch can be drawn over the mirror, which copies the video frame. One in the frame's own points
- * always can; one in the screen's only while the device is upright, since a turned body's frame is not the screen.
+ * always can. One in the screen's only where the frame is the screen: the device upright, and on Android no turn from
+ * the frame to the screen (`streamRotation`) — an upright unfolded foldable, or an app locked to landscape, has one,
+ * and a screen point drawn on that frame lands a quarter off (adversarial review).
  */
 export function drawsOverMirror(mark: StepMark, chrome: ChromePayload | null): boolean {
   if (mark.inFrame) return true
+  if (chrome && !('framePng' in chrome) && ((chrome as AndroidChrome).streamRotation ?? 0) !== 0) return false
   const o = chrome ? chromeOrientation(chrome) : undefined
   return o === undefined || o === 'portrait'
 }

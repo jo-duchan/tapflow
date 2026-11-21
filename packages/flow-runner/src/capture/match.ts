@@ -443,6 +443,9 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
     // A label only a person can read: an icon font's glyph selects the element but reads as a box (`visible`).
     const label = named?.label && visible(named.label) ? named.label : undefined
     if (named?.identifier) {
+      // A shared resource id with a label nobody can read: by the id alone the search would stop at the first row, so
+      // not named at all, and the tap stays a point (adversarial review).
+      if (RESOURCE_ID.test(named.identifier) && named.label && !label && !named.input) return null
       return label && !named.input && RESOURCE_ID.test(named.identifier)
         ? { id: named.identifier, label, exact: true } : { id: named.identifier }
     }
