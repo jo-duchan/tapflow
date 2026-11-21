@@ -1,7 +1,5 @@
 import { useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useParams } from 'react-router-dom'
 import { useBreadcrumb } from '@/hooks/useBreadcrumb'
 import { useWatchSession } from '@/hooks/useWatchSession'
 import { WatchedDevice } from '@/components/device/WatchedDevice'
@@ -62,13 +60,8 @@ function WatchView({ sessionId }: { sessionId: string }) {
         {/* Mounted once with only the text changing: a live region inserted together with its first sentence is
             routinely not announced, and each of these states is one a viewer is waiting on. */}
         <p role="status" className="text-sm text-muted-foreground">{status}</p>
-        {over && (
-          <div>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/app-center"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to App Center</Link>
-            </Button>
-          </div>
-        )}
+        {/* No back button once the watch ends, as the QA session has none: a watch is opened from an agent's link, not
+            from App Center, so there is no page to go back to, and the side menu is always there (user, 2026-11-21). */}
         {/* **Kept after the watch ends**: the last picture stays, without the live stall notice, and the activity
             beside it stays to be read. A refused watch never had either. */}
         {!refused && (

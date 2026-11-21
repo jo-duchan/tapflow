@@ -124,7 +124,6 @@ describe('the watch page\'s actions', () => {
     expect(screen.getByTestId('watched-device')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'step 1: launchApp' })).toBeTruthy()
     expect(screen.getByText('Launched the app')).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Back to App Center/ })).toBeTruthy()
   })
 
   it('ignores another session\'s actions', async () => {
@@ -165,12 +164,11 @@ describe('the watch page', () => {
 
   // Mutation: let a reconnect start a new watch. The relay ended it because the session became someone
   // else's — a fresh watch would be refused at best.
-  it('stays ended across a reconnect, and offers the way back', async () => {
+  it('stays ended across a reconnect', async () => {
     renderAt('/automation/sessions/sess-a')
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'watch:ended', sessionId: 'sess-a', reason: 'holder-changed' })
     expect(screen.getByRole('status').textContent).toBe('Someone else picked up this device, so the watch ended.')
-    expect(screen.getByRole('link', { name: /Back to App Center/ })).toBeTruthy()
     // The last picture stays to be looked at (no frames come any more); the activity beside it stays too.
     expect(screen.getByTestId('watched-device')).toBeTruthy()
     send.mockClear()
