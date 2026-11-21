@@ -1,8 +1,8 @@
-import { NO_TOUCH, TOUCH_MARK, machineState, machineTouchEnd, type MachineTouch, type NormPoint, type TouchState } from './model'
+import { NO_TOUCH, TOUCH_MARK, machineState, machineTouchEnd, type MachineTouch, type NormPoint, type PxPoint, type TouchState } from './model'
 
 const now = () => performance.now()
-/** Distance in the screen's own fractions: only compares which of two points is farther, so the aspect is moot. */
-const away = (a: NormPoint, b: NormPoint) => Math.hypot(a.x - b.x, a.y - b.y)
+/** Distance in the screen's own fractions: right only on a square screen, so it stands in until the drawing measures. */
+const inFractions = (a: NormPoint, b: NormPoint) => Math.hypot(a.x - b.x, a.y - b.y)
 
 /**
  * What is touching the screen right now, held outside React: a pointer moves at the display's rate, and a re-render
@@ -16,6 +16,7 @@ export class TouchMarkStore {
   private state: TouchState = NO_TOUCH
   private script: MachineTouch | null = null
   private readonly listeners = new Set<() => void>()
+  private away: (a: NormPoint, b: NormPoint) => number = inFractions
 
   /** What to draw at `t`. */
   stateAt(t: number): TouchState {
@@ -31,6 +32,16 @@ export class TouchMarkStore {
     const touch = this.state.touch
     if (!touch) return false
     return touch.upAt !== null || t - touch.downAt < TOUCH_MARK.growMs
+  }
+
+  /**
+   * Measure the farthest point in the pixels it is drawn in. A tap or a swipe is judged by the farthest point's travel in
+   * pixels, and on a screen that is not square the farthest in fractions can be the nearer in pixels: 0.009 across a
+   * 400 px width is 3.6 px, 0.006 down an 800 px height is 4.8 px (review, CodeRabbit). Any uniform scale of these
+   * pixels — a recording's — keeps the same order.
+   */
+  measureIn(toPx: (p: NormPoint) => PxPoint): void {
+    this.away = (a, b) => { const p = toPx(a); const q = toPx(b); return Math.hypot(p.x - q.x, p.y - q.y) }
   }
 
   /** Called when the state changes; the layer then draws, and keeps drawing while `animating`. */
@@ -55,7 +66,7 @@ export class TouchMarkStore {
     if (!touch || touch.upAt !== null) return
     const fingers = touch.fingers.map((f, i) => {
       const p = points[i] ?? f.cur
-      return { start: f.start, cur: p, far: away(p, f.start) > away(f.far, f.start) ? p : f.far }
+      return { start: f.start, cur: p, far: this.away(p, f.start) > this.away(f.far, f.start) ? p : f.far }
     })
     this.set({ hover: points, touch: { ...touch, fingers } })
   }

@@ -37,6 +37,10 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
   // Read on every frame rather than restarting the loop: a caller builds `place` on each render.
   const placeRef = useRef(place)
   useEffect(() => { placeRef.current = place })
+  // ...but a mapping that really changed is drawn again: a device body turning spins the box by CSS, which leaves its
+  // size alone, so no resize redraws it and a mark sat where it was until the pointer moved (review, CodeRabbit). A
+  // placement is a turn and a scale, so three corners say whether it changed.
+  const placeKey = [place(0, 0), place(1, 0), place(0, 1)].map((q) => `${q.left},${q.top}`).join(';')
 
   useEffect(() => {
     if (store || touch === undefined) return
@@ -70,6 +74,7 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
         if (mark) drawTouchParts(ctx, stillParts(mark, toPx), tone, dpr)
         return
       }
+      source.measureIn(toPx)
       const now = performance.now()
       const opts = { reduced: prefersReducedMotion() }
       const shown = source.stateAt(now)
@@ -91,7 +96,7 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
     const resize = new ResizeObserver(wake)
     resize.observe(c)
     return () => { unsubscribe(); resize.disconnect(); cancelAnimationFrame(frame) }
-  }, [source, store, tone, isStill, stillKey])
+  }, [source, store, tone, isStill, stillKey, placeKey])
 
   const anchor = still ? (still.kind === 'tap' ? still.point : still.from)
     : touch ? (touch.kind === 'tap' ? touch.point : touch.from) : undefined

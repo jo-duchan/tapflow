@@ -158,6 +158,19 @@ describe('touch marks — the store and a person\'s pointer', () => {
     expect(kinds(touchParts(store.stateAt(500), 500, toPx))).toEqual(['ring', 'disc'])
   })
 
+  // On a screen taller than wide the farthest in fractions can be the nearer in pixels: 0.009 across is 3.6 px, 0.006
+  // down is 4.8 px. Judged in fractions it kept the first and drew a tap; measured as drawn it is a swipe (review,
+  // CodeRabbit). Mutation: compare in fractions again.
+  it('measures the farthest point in the pixels it is drawn in, not the screen\'s fractions', () => {
+    const store = new TouchMarkStore()
+    store.measureIn(toPx)
+    store.down([{ x: 0.4, y: 0.4 }], 0)
+    store.move([{ x: 0.409, y: 0.4 }])
+    store.move([{ x: 0.4, y: 0.406 }])
+    expect(store.stateAt(0).touch?.fingers[0]!.far).toEqual({ x: 0.4, y: 0.406 })
+    expect(kinds(touchParts(store.stateAt(0), 0, toPx))).toEqual(['line', 'ring', 'disc'])
+  })
+
   // The user: Option alone shows the pinch guide, with no move needed.
   it('shows a pinch\'s two fingers as soon as Option is held, and one again when it is let go', () => {
     const p = new PointerTouchMarks()
