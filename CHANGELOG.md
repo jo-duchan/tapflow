@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A flow's video on the Flow Runs page draws the touches the runner sent**: taps, swipes, pinches and long presses, in blue, where the runner sent them and at the moment it sent them. Seeking back shows a touch again, and pausing holds it. Only videos recorded by a runner from this release have touches.
 - **The mouse pointer stays visible over the device on the session watch page and in a flow's video.** It was hidden there as it is in a QA Session, where a touch disc stands in for it, but those pages take no input and show no disc.
 
+### Fixed
+
+- **Flow Capture shows the touches on an Android emulator's Match, Edit and Verify.** An emulator drawn with its body sends touches in the video frame's own points, and the dialog drew no tap, swipe or pinch for those at all. They are now drawn over the replay as they are, and on a step's picture turned into the screen.
+- **A tap on an element whose only label is an icon font's glyph is no longer written as that glyph.** A tab bar drawn with an icon font gave steps like `tapOn("")`, which select the tab but read as a box in the flow. Such a tap is named by its id or position instead, or kept as a point.
+
 ## [0.33.0] - 2026-11-19
 
 Flow Capture: save the steps you took in a QA session as a flow, replayed on the device to check it before you export it, with Android brought level with iOS along the way.

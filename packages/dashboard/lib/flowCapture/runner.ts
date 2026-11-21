@@ -458,7 +458,7 @@ export async function matchRange(
       const tapIt = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
       if (!tapIt) return undefined
       const focusShot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
-      const focusMark = markOf(tapIt)
+      const focusMark = markOf(tapIt, 'frame')
       if (focusMark) hooks.onTouch?.(focusMark)
       await replayStep(channel, sessionId, tapIt, hooks.signal)
       const tapped = matchStep(tapIt, { tree: before!.elements, postures: tap.postures().postures, platform: tap.platform })
@@ -617,7 +617,7 @@ export async function matchRange(
       hooks.signal.throwIfAborted()
       // Named: on its element again, or not at all — the point is what a named tap is there not to trust.
       if (prev.named) return (await attempt([{ type: 'tapOn', selector: prev.named.selector }])) ? 'pressed' : 'waited'
-      const mark = markOf(prev.raw)
+      const mark = markOf(prev.raw, 'frame')
       if (mark) hooks.onTouch?.(mark)
       await replayStep(channel, sessionId, prev.raw, hooks.signal)
       return 'pressed'
@@ -683,7 +683,7 @@ export async function matchRange(
       }
       ;({ questions, reach } = await ask(before?.elements ?? []))
     }
-    const mark = markOf(raw)
+    const mark = markOf(raw, 'frame')
     if (mark) hooks.onTouch?.(mark)
     await replayStep(channel, sessionId, raw, hooks.signal).catch((e: unknown) => {
       throw unfocused ? new Error(copy.typedBeforeRange, { cause: e }) : e

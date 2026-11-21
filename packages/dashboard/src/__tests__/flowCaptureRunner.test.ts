@@ -223,6 +223,16 @@ describe('matchRange', () => {
     expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 } }]])
   })
 
+  // An Android body-mode step is in the frame's own points, which the replay's mirror is: drawn as it is, and said so.
+  it('says an Android body-mode step\'s touch is in the frame the mirror shows', async () => {
+    const onTouch = vi.fn()
+    const lease = new PauseLease(tap)
+    const at = { ...base, kind: 'tap', point: [0.25, 0.75], space: 'frame', chrome: { bodyRotation: 90, streamRotation: 90 } } as unknown as RawStep
+    await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 }, inFrame: true }]])
+  })
+
   // #1125: the tree cannot say what covers an element on the device, so the device is asked about the screen the step is
   // about to act on — before it is replayed, which changes that screen.
   it('asks the device where a touch on the tapped element lands, before replaying it, and matches with the answer', async () => {

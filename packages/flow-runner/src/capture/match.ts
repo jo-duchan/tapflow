@@ -4,6 +4,7 @@ import type { ScrollDirection, Selector, Step } from '../schema.js'
 import type { StepExpect } from '../effect.js'
 import { progress } from '../scrollProgress.js'
 import { matchSelector } from '../selector.js'
+import { visible } from '../unseen.js'
 import { selectorFor } from '../suggest.js'
 import { modifierNames } from './keys.js'
 import { LONG_PRESS_MS, TAP_SLOP, type Point, type RawStep } from './segment.js'
@@ -439,14 +440,16 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   for (const named of [touched.button, touched.element]) {
     // With its label where rows share the identifier (an Android resource id): by the id alone the search stops at the
     // first row it scrolls to. Anywhere else the id is the one element's, whose label may have changed (a counter).
+    // A label only a person can read: an icon font's glyph selects the element but reads as a box (`visible`).
+    const label = named?.label && visible(named.label) ? named.label : undefined
     if (named?.identifier) {
-      return named.label && !named.input && RESOURCE_ID.test(named.identifier)
-        ? { id: named.identifier, label: named.label, exact: true } : { id: named.identifier }
+      return label && !named.input && RESOURCE_ID.test(named.identifier)
+        ? { id: named.identifier, label, exact: true } : { id: named.identifier }
     }
     // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
     // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
     // its end and back (the user's session ff5d3d3c). The trait says which one was touched.
-    if (named?.label && !named.input) return { label: named.label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
+    if (named && label && !named.input) return { label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
   }
   return null
 }

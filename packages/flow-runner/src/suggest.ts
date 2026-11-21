@@ -2,6 +2,7 @@ import { parse as parseYaml } from 'yaml'
 import type { UIElement } from '@tapflowio/agent-core'
 import { parseSelector, type Selector } from './schema.js'
 import { matchSelector } from './selector.js'
+import { visible } from './unseen.js'
 
 /**
  * A `tapOn` line to try instead of one that matched nothing or several (B2). No LLM: the tree the runner failed to
@@ -68,8 +69,9 @@ export function selectorFor(tree: UIElement[], target: UIElement): Selector | nu
 function firstVerifiedForm(tree: UIElement[], target: UIElement, sel: Selector): string | null {
   const timeout = sel.timeoutMs !== undefined ? sel.timeoutMs / 1000 : undefined
   // A secure element's label can be what was typed into it, whatever its role (an Android password node of another
-  // class), so it is never a name to select by.
-  const named = target.role !== 'input' && target.secure !== true && target.label.trim().length > 0 && target.label.length <= MAX_NAME
+  // class), so it is never a name to select by. Nor one a person cannot read: an icon font's glyph (a tab bar's
+  // `\uE88A`) selects the element but reads as a box in the flow (`visible`).
+  const named = target.role !== 'input' && target.secure !== true && visible(target.label) && target.label.length <= MAX_NAME
   const id = target.identifier && target.identifier.length <= MAX_NAME ? target.identifier : undefined
 
   const byLabel: Form[] = named
