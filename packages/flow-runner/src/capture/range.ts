@@ -31,7 +31,8 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
   if (start < 0 && clean >= 0) {
     // Opened from its icon: the steps on the home screen before it are the person finding the app, which a replay that
     // launches it would make on top of it. Only the run straight after the clean start, and only steps the reads place
-    // there — a step they cannot place stops it, and a visit home later is the person's own.
+    // there — a step they cannot place stops it, and a visit home later is the person's own — unless the app's first
+    // report says the app had not been touched yet (`pastOtherSurfaces`).
     start = clean + 1
     let inApp = start
     while (inApp < steps.length && steps[inApp]!.onHome === true && findsTheApp(steps[inApp]!)) inApp++
@@ -57,13 +58,19 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
  * after reads as the icon's tap might (`withHome`). Read alone, a step there looks like a tap on a permission dialog the
  * app opened (another package too), so order decides: a touch is still finding the app when a home-screen step comes
  * after it, before the first touch the app reported. Only with such a report, since without one there is no point the
- * app was surely in front by, and a touch in the app before it would have been reported itself. Anything but a touch or
- * a navigation button (a link, a launch, typing) stops it here.
+ * app was surely in front by; and only when that report is the app's first touch (`seq` 1), since a touch the app took
+ * before it whose report was not paired is a step in the app. Anything but a touch or a navigation button (a link, a
+ * launch, typing) stops it here.
+ *
+ * What this cannot tell: a tap on a dialog the app opened (another package, so unreported), then a trip home and back
+ * before the app's first touch, reads like the feed's swipe and is left out (adversarial review; #1214).
  */
 function pastOtherSurfaces(steps: readonly RawStep[], from: number): number {
-  // A reported touch is in the app (`onHome: false`), so none lies before `from`.
-  const firstReported = steps.findIndex((s) => 'touched' in s && s.touched)
+  // From `from`: a report before the clean start is another run of the app.
+  const firstReported = steps.findIndex((s, i) => i >= from && 'touched' in s && s.touched)
   if (firstReported < 0) return from
+  const first = steps[firstReported]!
+  if (!('touched' in first) || first.touched?.seq !== 1) return from
   let start = from
   for (let i = from; i < firstReported; i++) {
     const s = steps[i]!

@@ -995,6 +995,33 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
     })
 
+    // Adversarial review: a report from before the clean start is another run of the app, not where this one began.
+    it('looks for the app\'s first touch after the clean start', () => {
+      const r = new Rec().launch()
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      r.msg({ type: 'app:clear-state', sessionId: 's', requestId: r.id(), payload: { bundleId: 'b' } }, true)
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['launch', 'tap', 'clearState', 'swipe', 'swipe', 'tap', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 6, end: 7 })
+    })
+
+    // Adversarial review: the app took a touch whose report was not paired (seq 1 missing), so a step before the first
+    // paired one may be in the app — the skip stays where the reads put it.
+    it('does not look past a step when the app\'s first paired touch is not its first', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(read(r, HOME), APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
+    })
+
     it('does not look past a step that does not find the app', () => {
       const typed = new Rec().install()
       read(typed, APP).msg({ type: 'open-url', sessionId: 's', requestId: typed.id(), payload: { url: 'app://x' } }, true)
