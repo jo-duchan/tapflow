@@ -60,8 +60,9 @@ function WatchView({ sessionId }: { sessionId: string }) {
         {/* Mounted once with only the text changing: a live region inserted together with its first sentence is
             routinely not announced, and each of these states is one a viewer is waiting on. */}
         <p role="status" className="text-sm text-muted-foreground">{status}</p>
-        {/* No back button once the watch ends, as the QA session has none: a watch is opened from an agent's link, not
-            from App Center, so there is no page to go back to, and the side menu is always there (user, 2026-11-21). */}
+        {/* No back button once the watch ends or is refused (user, 2026-11-21). It went to App Center, which is not where a
+            watch is opened from — an agent's link, or a running run on Flow Runs — so it took nobody back. The browser's
+            back and the side menu do. */}
         {/* **Kept after the watch ends**: the last picture stays, without the live stall notice, and the activity
             beside it stays to be read. A refused watch never had either. */}
         {!refused && (
