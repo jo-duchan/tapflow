@@ -126,8 +126,8 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
     return () => { unsubscribe(); resize.disconnect(); cancelAnimationFrame(frame) }
   }, [source, store, tone, isStill, stillKey, placeKey])
 
-  const anchor = still ? (still.kind === 'tap' ? still.point : still.from)
-    : touch ? (touch.kind === 'tap' ? touch.point : touch.from) : undefined
+  const mark = still ?? touch
+  const anchors = !mark ? [] : mark.kind === 'tap' ? [mark.point] : mark.kind === 'pinch' ? mark.from : [mark.from]
   return (
     <>
       {Array.from({ length: GLASSES }, (_, i) => (
@@ -145,7 +145,7 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
       aria-hidden="true"
       data-testid="touch-marks"
       data-tone={tone}
-      data-anchor={anchor ? anchorsOf([anchor], place) : undefined}
+      data-anchor={anchorsOf(anchors, place)}
       className="pointer-events-none absolute"
       style={{ zIndex: 5, inset: -BLEED, width: `calc(100% + ${2 * BLEED}px)`, height: `calc(100% + ${2 * BLEED}px)` }}
     />

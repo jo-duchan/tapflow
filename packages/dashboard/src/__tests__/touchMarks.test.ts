@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   TOUCH_MARK as M, NO_TOUCH, PointerTouchMarks, TouchMarkStore, drawTouchParts, machineState, machineTouchEnd, stillParts, touchParts,
-  type NormPoint, type TouchPart, type TouchState,
+  type NormPoint, type Pair, type TouchPart, type TouchState,
 } from '@/lib/touchMarks'
 
 // A 400 × 800 screen: 0.01 across is 4 px, 0.01 down is 8 px.
@@ -113,6 +113,32 @@ describe('touch marks — a machine\'s touch, played', () => {
     const end = machineTouchEnd(still)
     expect(touchParts(machineState(still, end - 1), end - 1, toPx)).not.toEqual([])
     expect(touchParts(machineState(still, end), end, toPx)).toEqual([])
+  })
+})
+
+describe('touch marks — a machine\'s pinch and long press', () => {
+  const pinch = { id: 1, at: 0, kind: 'pinch' as const, from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }] as Pair, to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }] as Pair, durationMs: 400 }
+
+  // Two fingers, each from its own start to its own end, as a swipe moves. Mutations: one finger, or fingers crossed.
+  it('moves a pinch\'s two fingers each to its own end, then lifts them together', () => {
+    const end = machineState(pinch, M.swipeLeadMs + 400)
+    expect(end.touch?.fingers.map((f) => [f.start, f.cur])).toEqual([[pinch.from[0], pinch.to[0]], [pinch.from[1], pinch.to[1]]])
+    expect(end.touch?.upAt).toBe(M.swipeLeadMs + 400)
+    expect(machineTouchEnd(pinch)).toBe(M.swipeLeadMs + 400 + Math.max(M.holdMs, M.rippleMs))
+  })
+
+  it('draws a still pinch as both fingers\' lines', () => {
+    expect(kinds(stillParts({ kind: 'pinch', from: pinch.from, to: pinch.to }, toPx))).toEqual(['line', 'disc', 'disc', 'line', 'disc', 'disc'])
+  })
+
+  // User: a long press is a tap, held for its duration — capped, so a stuck finger does not hold forever. Mutations:
+  // ignore the hold, or drop the cap.
+  it('holds a long press for its own hold, up to the cap', () => {
+    const press = { id: 2, at: 0, kind: 'tap' as const, point: { x: 0.5, y: 0.5 }, holdMs: 900 }
+    expect(machineState(press, 899).touch?.upAt).toBeNull()
+    expect(machineState(press, 900).touch?.upAt).toBe(900)
+    expect(machineState({ ...press, holdMs: 60_000 }, M.maxHoldMs).touch?.upAt).toBe(M.maxHoldMs)
+    expect(machineState({ ...press, holdMs: undefined }, M.tapMs).touch?.upAt).toBe(M.tapMs)
   })
 })
 

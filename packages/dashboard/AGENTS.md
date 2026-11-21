@@ -197,14 +197,18 @@ Three things that look optional and are not:
   composer has a test reading the canvas calls it makes.
 
 A machine's touch arrives as one event with no pointer to follow, so the model plays it: the press, then for a swipe
-the finger moving to its end — over the swipe's own length in Flow Capture, and over 400 ms on the watch page, whose
-`watch:action` carries none. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
+the finger moving to its end, and for a pinch both fingers each to its own — over the gesture's own length (Flow
+Capture's step, or the `durationMs` the relay now puts on `watch:action`), else over 400 ms. A tap is held for its
+`holdMs` when longer, so a long press reads as one (user, 2026-11-21), capped at 3 s. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
 it arrives once it has already reached the device, so a hover drew the press 300 ms late, over the screen it brought.
 
 **A person's press is drawn as a drag only once it is sent as one** (`DRAG_THRESHOLD`, 2 % of the screen). Under that
 the device takes a tap, and a swipe drawn there showed something that did not happen.
-Machine pinches carry no coordinates on the wire yet, so none is drawn; Automation run videos carry no touch points,
-so they draw none either. Both are follow-ups.
+**A pinch reaches watchers with its fingers** because the relay keeps them as it keeps a touch's (`Session.pinch`
+beside `gesture`); a relay from before that sends a bare pinch, which is a row and no mark. **A body-mode holder's
+points are of the frame** (`space: 'frame'`), and the relay passes that on: the watch view places them as they are,
+not through the screen's turn, which put them a quarter off. Flow Capture draws no mark for a frame-space step.
+Automation run videos carry no touch points yet, so they draw none; that is a follow-up.
 
 ### The React Compiler is on
 

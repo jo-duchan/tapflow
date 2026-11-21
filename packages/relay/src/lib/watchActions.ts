@@ -1,4 +1,4 @@
-import type { Point, WatchActionKind } from '@tapflowio/protocol'
+import type { Point, PointSpace, WatchActionKind } from '@tapflowio/protocol'
 
 /**
  * What a session's watchers are told the holder did (A2), derived from the input the relay passes on. Pure, so the
@@ -20,11 +20,27 @@ export function keyForWatchers(code: string): string {
     : code
 }
 
+/** How long the finger was down, and which picture its points are of — what a watcher needs to draw it as it was. */
+export interface GestureTiming { ms?: number; space?: PointSpace }
+
+const extras = ({ ms, space }: GestureTiming, key: 'holdMs' | 'durationMs') =>
+  ({ ...(ms !== undefined ? { [key]: ms } : {}), ...(space ? { space } : {}) })
+
 /** The gesture a touch made, from where it began (if seen) to where it ended. Null when there is nothing to show. */
-export function gestureAction(start: Point | null, end: Point | null): WatchActionKind | null {
-  if (!start) return end ? { kind: 'tap', x: end.x, y: end.y } : null
+export function gestureAction(start: Point | null, end: Point | null, timing: GestureTiming = {}): WatchActionKind | null {
+  if (!start) return end ? { kind: 'tap', x: end.x, y: end.y, ...extras({ space: timing.space }, 'holdMs') } : null
   const to = end ?? start
   return Math.hypot(to.x - start.x, to.y - start.y) <= TAP_RADIUS
-    ? { kind: 'tap', x: start.x, y: start.y }
-    : { kind: 'swipe', from: [start.x, start.y], to: [to.x, to.y] }
+    ? { kind: 'tap', x: start.x, y: start.y, ...extras(timing, 'holdMs') }
+    : { kind: 'swipe', from: [start.x, start.y], to: [to.x, to.y], ...extras(timing, 'durationMs') }
+}
+
+/**
+ * A pinch's two fingers, from where they went down to where they last were. Null when its start was not seen — a
+ * watcher then gets the bare row, as from an older relay. An end carries no points, so the last move is the end.
+ */
+export function pinchAction(p: { start: [Point, Point]; last: [Point, Point]; at: number; space?: PointSpace } | null, now: number): WatchActionKind {
+  if (!p) return { kind: 'pinch' }
+  const pair = (f: [Point, Point]): [[number, number], [number, number]] => [[f[0].x, f[0].y], [f[1].x, f[1].y]]
+  return { kind: 'pinch', from: pair(p.start), to: pair(p.last), durationMs: now - p.at, ...(p.space ? { space: p.space } : {}) }
 }

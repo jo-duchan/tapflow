@@ -253,7 +253,7 @@ describe('session watchers', () => {
     w.send({ type: 'input:touch:start', payload: { x: 0.5, y: 0.8 } })
     w.send({ type: 'input:touch:end', requestId: 'r1', payload: { x: 0.505, y: 0.8 } })
     await w.settled()
-    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
+    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8, holdMs: expect.any(Number) }])
   })
 
   // A client leaving mid-gesture sends a cancel, then an end (#1115). An agent that cancels injects nothing for that
@@ -274,7 +274,7 @@ describe('session watchers', () => {
     w.send({ type: 'input:touch:cancel' })
     w.send({ type: 'input:touch:end', requestId: 'r1', payload: { x: 0.5, y: 0.8 } })
     await w.settled()
-    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
+    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8, holdMs: expect.any(Number) }])
   })
 
   // The end may carry no point (the dashboard's never does): the gesture the cancel left in place describes the tap.
@@ -284,7 +284,7 @@ describe('session watchers', () => {
     w.send({ type: 'input:touch:cancel' })
     w.send({ type: 'input:touch:end', requestId: 'r1' })
     await w.settled()
-    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8 }])
+    expect(w.actions()).toEqual([{ kind: 'tap', x: 0.5, y: 0.8, holdMs: expect.any(Number) }])
   })
 
   it('tells a drag as one swipe at its end, not a frame per move', async () => {
@@ -293,7 +293,39 @@ describe('session watchers', () => {
     for (const y of [0.75, 0.7, 0.6, 0.5, 0.4, 0.3]) w.send({ type: 'input:touch:move', payload: { x: 0.5, y } })
     w.send({ type: 'input:touch:end', requestId: 'r1' })
     await w.settled()
-    expect(w.actions()).toEqual([{ kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3] }])
+    expect(w.actions()).toEqual([{ kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: expect.any(Number) }])
+  })
+
+  // A pinch's fingers reach the agent on start and every move; the watcher is told both, where they went down and where
+  // they last were, at the end (which carries none). Asymmetric points, so a swapped finger or axis shows. Mutations:
+  // keep the start for the end, or swap f0 and f1.
+  it('tells a pinch with its two fingers, from where they went down to where they last were', async () => {
+    const w = await watched()
+    w.send({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.45 }, f1: { x: 0.6, y: 0.55 } } })
+    w.send({ type: 'input:pinch:move', payload: { f0: { x: 0.3, y: 0.4 }, f1: { x: 0.7, y: 0.6 } } })
+    w.send({ type: 'input:pinch:move', payload: { f0: { x: 0.2, y: 0.35 }, f1: { x: 0.8, y: 0.65 } } })
+    w.send({ type: 'input:pinch:end', requestId: 'r1' })
+    await w.settled()
+    expect(w.actions()).toEqual([{ kind: 'pinch', from: [[0.4, 0.45], [0.6, 0.55]], to: [[0.2, 0.35], [0.8, 0.65]], durationMs: expect.any(Number) }])
+  })
+
+  // A body-mode holder's points are of the frame, not the screen: the watcher is told so, or it turns them a quarter.
+  it('tells which picture a gesture\'s points are of', async () => {
+    const w = await watched()
+    w.send({ type: 'input:touch:start', payload: { x: 0.2, y: 0.3, space: 'frame' } })
+    w.send({ type: 'input:touch:end', requestId: 'r1' })
+    w.send({ type: 'input:pinch:start', payload: { f0: { x: 0.4, y: 0.4 }, f1: { x: 0.6, y: 0.6 }, space: 'frame' } })
+    w.send({ type: 'input:pinch:end', requestId: 'r2' })
+    await w.settled()
+    expect(w.actions().map((a) => (a as { space?: string }).space)).toEqual(['frame', 'frame'])
+  })
+
+  // A pinch whose start this relay never saw is told bare, as an older relay tells every pinch: the row, no drawing.
+  it('tells a pinch whose start it did not see without fingers', async () => {
+    const w = await watched()
+    w.send({ type: 'input:pinch:end', requestId: 'r1' })
+    await w.settled()
+    expect(w.actions()).toEqual([{ kind: 'pinch' }])
   })
 
   it('tells typing as a count, and never puts the text on a watcher\'s wire', async () => {
@@ -373,7 +405,7 @@ describe('session watchers', () => {
     await watch(viewer, sessionId)
     const action = waitForType<WatchAction>(viewer, 'watch:action')
     mcp.send(JSON.stringify({ type: 'input:touch:end', sessionId, requestId: 'r1', payload: { x: 0.2, y: 0.3 } }))
-    expect((await action).action).toEqual({ kind: 'swipe', from: [0.2, 0.9], to: [0.2, 0.3] })
+    expect((await action).action).toEqual({ kind: 'swipe', from: [0.2, 0.9], to: [0.2, 0.3], durationMs: expect.any(Number) })
   })
 
   it('refuses a watcher\'s input, and nothing reaches the agent', async () => {

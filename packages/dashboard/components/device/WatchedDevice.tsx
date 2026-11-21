@@ -109,6 +109,9 @@ function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch }: {
       <AndroidDeviceScreen
         screen={screen} deviceReady={deviceReady} posturePending={false}
         overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => {
+          // A body-mode holder sends the frame's own points (`space: 'frame'`): the shell is that frame, so they sit as
+          // they are. Placed through the screen's turn they landed a quarter off (design review of #1204's follow-up).
+          if (touch?.space === 'frame') return { left: x, top: y }
           // Marks are in the screen Android draws (the input's space); body mode's shell is the frame.
           const p = turnPoint({ x, y }, ((360 - screen.screenTurn) % 360) as Turn)
           return { left: p.x, top: p.y }
