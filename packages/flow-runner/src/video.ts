@@ -1,4 +1,5 @@
 import { CODEC_AUDIO, CODEC_H264, HEADER_SIZE, hasEnvelope, readEnvelopeFlags } from '@tapflowio/agent-core/utils'
+import type { SentTouch } from './SocketFlowDriver.js'
 
 /**
  * A flow's video, cut from the stream the runner already receives as the session's holder (A4).
@@ -7,7 +8,7 @@ import { CODEC_AUDIO, CODEC_H264, HEADER_SIZE, hasEnvelope, readEnvelopeFlags } 
  * dashboard replays them with the decoders the live viewer has. What this adds is framing:
  *
  * - **A record** is `[u8 kind][u32 BE ms][u32 BE length][payload]`. Kind 1 is a frame, as received; kind 2 is a JSON
- *   event (`chrome`, `deviceInfo`, `step`). `ms` is the runner's receive time on the video's clock.
+ *   event (`chrome`, `deviceInfo`, `step`, `touch`). `ms` is the runner's receive time on the video's clock.
  * - **The clock** starts at the video's first record (`clockBase`, epoch ms, in the open call's meta), so every time
  *   is ≥ 0 even though the video starts before the flow: the frames since the last keyframe are kept at all times,
  *   because on a still screen a keyframe may not come for a minute. `flowStartMs` places the flow on that clock.
@@ -164,6 +165,15 @@ export class VideoTap {
   event(type: 'chrome' | 'deviceInfo', payload: unknown): void {
     this.latest.set(type, payload)
     this.writeEvent({ type, payload })
+  }
+
+  /**
+   * A touch the runner just sent, so the player draws it over the picture (#1205's follow-up). Stamped on the frames'
+   * own clock at send time, a little before the frame that shows its effect; before the video opens it is dropped, as
+   * a step mark is, since nothing before the first keyframe plays.
+   */
+  touch(t: SentTouch): void {
+    this.writeEvent({ type: 'touch', ...t })
   }
 
   /** A step boundary of the open flow, for the player's timeline. */

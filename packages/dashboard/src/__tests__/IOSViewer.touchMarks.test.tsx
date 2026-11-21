@@ -58,6 +58,13 @@ describe('IOSViewer — the pointer\'s touch marks', () => {
     expect(marks().getAttribute('aria-hidden')).toBe('true')
   })
 
+  // The QA viewer's disc is its pointer, so the system one is hidden over the screen; a watch page keeps it
+  // (WatchedDevice tests). Mutation: never hide it.
+  it('hides the system pointer over the screen, where its disc stands in', () => {
+    const { container } = renderViewer()
+    expect(container.querySelector('canvas[style*="cursor: none"]')).not.toBeNull()
+  })
+
   // The user: Option alone shows the pinch guide where the pointer already is. Mutation: drop `pointerMarks.option(true)`.
   it('shows a pinch guide\'s two discs as soon as Option is held, and one when it is let go', () => {
     laidOut()

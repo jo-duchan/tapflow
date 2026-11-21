@@ -16,7 +16,7 @@ import { iosScreenLayout } from '@/lib/iosScreenLayout';
 import { iosTurn, turnPoint, type Turn } from '@/lib/coordinate-transform';
 import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer';
 import { placeOnIosFrame } from '@/lib/watchActions';
-import type { MachineTouch } from '@/lib/touchMarks';
+import type { MachineTouch, TouchTimeline } from '@/lib/touchMarks';
 
 interface WatchedDeviceProps {
   chrome: ChromePayload | null;
@@ -34,6 +34,9 @@ interface WatchedDeviceProps {
   /** The holder's latest touch to draw on the device (A2), in the machine's colour. The live watch page passes it
    *  (null before the first); a replay does not. */
   touch?: MachineTouch | null;
+  /** A recording's touches on its playback clock — a run video's replay. Stable for the video's life, so a playing
+   *  replay does not re-render the screen (the clock moves the marks, not props). */
+  timeline?: TouchTimeline;
 }
 
 /**
@@ -42,7 +45,7 @@ interface WatchedDeviceProps {
  * recording. A device that reports its own turn (iOS `streamRotation`, Android `bodyRotation`) is drawn as
  * reported; one that does not is drawn upright, since the holder's toggle is its own state and not on the wire.
  */
-export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binaryFrameHandlerRef, replay = false, screenKey, touch }: WatchedDeviceProps) {
+export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binaryFrameHandlerRef, replay = false, screenKey, touch, timeline }: WatchedDeviceProps) {
   const [streamSize, setStreamSize] = useState<{ width: number; height: number } | null>(null);
   // Choosing which screen to mount is routing, not drawing — the same split `DeviceViewer` makes, and for
   // the same reason: an iOS agent that could not build a frame sends none, and the stream must still show.
@@ -54,10 +57,10 @@ export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binar
     : null);
 
   if (ios) {
-    return <WatchedIOS key={screenKey} chrome={ios} formFactor={formFactor} binaryFrameHandlerRef={binaryFrameHandlerRef} onStreamSize={setStreamSize} replay={replay} touch={touch} />;
+    return <WatchedIOS key={screenKey} chrome={ios} formFactor={formFactor} binaryFrameHandlerRef={binaryFrameHandlerRef} onStreamSize={setStreamSize} replay={replay} touch={touch} timeline={timeline} />;
   }
   if (android) {
-    return <WatchedAndroid key={screenKey} chrome={android} deviceReady={deviceReady} binaryFrameHandlerRef={binaryFrameHandlerRef} touch={touch} />;
+    return <WatchedAndroid key={screenKey} chrome={android} deviceReady={deviceReady} binaryFrameHandlerRef={binaryFrameHandlerRef} touch={touch} timeline={timeline} />;
   }
   return (
     <div aria-hidden="true" style={{ background: '#1c1c1e', borderRadius: '34px', padding: '12px' }}>
@@ -66,13 +69,14 @@ export function WatchedDevice({ chrome, deviceReady, platform, formFactor, binar
   );
 }
 
-function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, replay, touch }: {
+function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, replay, touch, timeline }: {
   chrome: ChromeData;
   formFactor?: FormFactor;
   binaryFrameHandlerRef: MutableRefObject<BinaryFrameHandler | undefined>;
   onStreamSize: (size: { width: number; height: number }) => void;
   replay: boolean;
   touch?: MachineTouch | null;
+  timeline?: TouchTimeline;
 }) {
   const { fps, frameCount } = useFps();
   const screen = useIOSScreen({ chrome, binaryFrameHandlerRef, fps, frameCount, onCanvasResize: onStreamSize });
@@ -83,18 +87,20 @@ function WatchedIOS({ chrome, formFactor, binaryFrameHandlerRef, onStreamSize, r
       {/* `joined` is what lets the screen say a live stream stalled; a replay is never waiting on one. */}
       <IOSDeviceScreen
         screen={screen} chrome={chrome} formFactor={formFactor} turn={iosTurn(chrome.streamRotation, false)} joined={!replay} fps={fps}
-        overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={place} /> : undefined}
+        overlay={timeline ? <TouchMarksLayer tone="machine" timeline={timeline} place={place} />
+          : touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={place} /> : undefined}
       />
       {screen.decoderUnsupported && <UnsupportedDecoder />}
     </>
   );
 }
 
-function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch }: {
+function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch, timeline }: {
   chrome: AndroidChrome;
   deviceReady: boolean;
   binaryFrameHandlerRef: MutableRefObject<BinaryFrameHandler | undefined>;
   touch?: MachineTouch | null;
+  timeline?: TouchTimeline;
 }) {
   const { frameCount } = useFps();
   const screen = useAndroidScreen({
@@ -103,19 +109,22 @@ function WatchedAndroid({ chrome, deviceReady, binaryFrameHandlerRef, touch }: {
     streamRotation: chrome.streamRotation ?? 0, cornerRadius: chrome.cornerRadius,
     userWantsLandscape: false, rotatePending: false, bodyRotation: chrome.bodyRotation,
   });
+  const place = (x: number, y: number) => {
+    // A body-mode holder sends the frame's own points (`space: 'frame'`): the shell is that frame, so they sit as they
+    // are. Placed through the screen's turn they landed a quarter off (design review of #1204's follow-up). A run's
+    // recorded touches are the screen's, as a flow's are.
+    if (touch?.space === 'frame') return { left: x, top: y }
+    // Marks are in the screen Android draws (the input's space); body mode's shell is the frame.
+    const p = turnPoint({ x, y }, ((360 - screen.screenTurn) % 360) as Turn)
+    return { left: p.x, top: p.y }
+  }
   return (
     <>
       {/* The overlay is the frame on Android, and a watcher's device is upright: a screen point is turned onto it, a frame point sits as it is. */}
       <AndroidDeviceScreen
         screen={screen} deviceReady={deviceReady} posturePending={false}
-        overlay={touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => {
-          // A body-mode holder sends the frame's own points (`space: 'frame'`): the shell is that frame, so they sit as
-          // they are. Placed through the screen's turn they landed a quarter off (design review of #1204's follow-up).
-          if (touch?.space === 'frame') return { left: x, top: y }
-          // Marks are in the screen Android draws (the input's space); body mode's shell is the frame.
-          const p = turnPoint({ x, y }, ((360 - screen.screenTurn) % 360) as Turn)
-          return { left: p.x, top: p.y }
-        }} /> : undefined}
+        overlay={timeline ? <TouchMarksLayer tone="machine" timeline={timeline} place={place} />
+          : touch !== undefined ? <TouchMarksLayer tone="machine" touch={touch} place={place} /> : undefined}
       />
       {screen.decoderUnsupported && <UnsupportedDecoder />}
     </>

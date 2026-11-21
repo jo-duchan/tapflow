@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Pause, Play, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,7 @@ import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { WatchedDevice } from '@/components/device/WatchedDevice'
+import { PlaybackClock, type TouchTimeline } from '@/lib/touchMarks'
 import { parseEnvelopeHeader, CODEC_AUDIO, HEADER_SIZE, type BinaryFrameHandler } from '@/lib/envelope'
 import {
   chromeAt, formatClock, loadVideo, seekChunk, snapToStep, videoEndNote, videoUnavailableText,
@@ -143,6 +144,9 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1)
   /** Playback position and the next record to deliver; refs, because the animation loop reads them every frame. */
   const clock = useRef({ ms: start, next: 0 })
+  /** Where playback is, for the touch marks over the picture: told every frame it plays and on every seek, read when
+   *  they draw. Its own object, so the device screen's props stay as they are while it plays. */
+  const [marksClock] = useState(() => new PlaybackClock(start))
   /** Where the current screen was asked to start. `flush`: present the target now — right for a still picture, and
    *  wrong while playing, since after a flush the decoder accepts only a keyframe and playback continues after it.
    *  Kept, not consumed: an effect that runs again (StrictMode does, and so does any remount of the screen's hook)
@@ -176,8 +180,9 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
   const seek = useCallback((ms: number, flush: boolean) => {
     seekTarget.current = { ms: Math.max(0, Math.min(ms, video.durationMs)), flush }
     setShownMs(seekTarget.current.ms)
+    marksClock.set(seekTarget.current.ms)
     setEpoch((e) => e + 1)
-  }, [video])
+  }, [video, marksClock])
 
   // A new decoder is fed from the keyframe before the seek target, up to it.
   useLayoutEffect(() => {
@@ -206,6 +211,7 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
       }
       clock.current.ms = Math.min(target, video.durationMs)
       deliver(clock.current.ms)
+      marksClock.set(clock.current.ms)
       // Every animation frame, so the thumb glides rather than steps. Cheap: the compiler keeps the device screen,
       // whose props do not change, from re-rendering; only the bar and the clock do.
       setShownMs(clock.current.ms)
@@ -219,7 +225,7 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, speed, video, deliver, seek, epoch])
+  }, [playing, speed, video, deliver, seek, epoch, marksClock])
 
   const toggle = () => {
     // Paused on the frame shown: a decoder may hold its last output until more input arrives, and none will.
@@ -230,6 +236,9 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
   }
 
   const chrome = chromeAt(video, shownMs) as ChromePayload | null
+  // The runner's touches, drawn where it sent them (#1205's follow-up). New only with the video (loading the rest of it):
+  // the clock moves them, so playing re-renders nothing under the marks.
+  const timeline = useMemo<TouchTimeline>(() => ({ touches: video.touches, clock: marksClock }), [video.touches, marksClock])
   const pct = (ms: number) => `${video.durationMs > 0 ? (ms / video.durationMs) * 100 : 0}%`
   const endNote = videoEndNote(index.endReason)
   // Dragging catches on a step's start. Pointer only: with the arrow keys a catch would hold the thumb on the step
@@ -248,6 +257,7 @@ function Player({ video, index, flowName, focusPlay, onLoadRest }: {
           platform={video.meta.platform ?? 'ios'}
           binaryFrameHandlerRef={handlerRef}
           replay
+          timeline={timeline}
         />
       </div>
       <div className="flex max-w-xl flex-col gap-4">

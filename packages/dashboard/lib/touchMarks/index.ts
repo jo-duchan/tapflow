@@ -1,5 +1,5 @@
 export {
-  TOUCH_MARK, NO_TOUCH, touchParts, touchDone, stillParts, machineState, machineTouchEnd,
+  TOUCH_MARK, NO_TOUCH, touchParts, touchDone, stillParts, machineState, machineTouchEnd, timelineState,
   type NormPoint, type PxPoint, type TouchTone, type Finger, type Touch, type TouchState, type TouchPart,
   type TouchOptions, type StillTouch, type MachineTouch, type Pair,
 } from './model'
@@ -7,3 +7,4 @@ export { GLASS_BLUR, TOUCH_BORDER, drawTouchParts, drawTouchState, prefersReduce
 export { TouchMarkStore } from './store'
 export { PointerTouchMarks } from './pointer'
 export { BLEED, layerPoint, type PlaceOnLayer } from './layer'
+export { PlaybackClock, type TouchTimeline } from './playback'

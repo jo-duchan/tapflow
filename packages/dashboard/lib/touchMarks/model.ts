@@ -208,6 +208,17 @@ export function machineTouchEnd(m: MachineTouch): number {
     : m.at + TOUCH_MARK.swipeLeadMs + swipeMs(m) + Math.max(TOUCH_MARK.holdMs, TOUCH_MARK.rippleMs)
 }
 
+/**
+ * What a recording's touches show at `t`, on the recording's own clock: the latest that began by then, as it was at
+ * that moment. Pure in `t`, so seeking back shows a touch again and a pause holds it — a run's video (#1205's follow-up).
+ * `touches` in order of `at`.
+ */
+export function timelineState(touches: readonly MachineTouch[], t: number): TouchState {
+  let latest: MachineTouch | undefined
+  for (const m of touches) { if (m.at > t) break; latest = m }
+  return latest && t < machineTouchEnd(latest) ? machineState(latest, t) : NO_TOUCH
+}
+
 /** How long a machine's tap is held: the usual press, or a long press's own hold (user: a tap, held for its duration). */
 function holdOf(m: Extract<MachineTouch, { kind: 'tap' }>): number {
   return Math.max(TOUCH_MARK.tapMs, Math.min(TOUCH_MARK.maxGestureMs, m.holdMs ?? 0))

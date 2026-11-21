@@ -153,7 +153,7 @@ fifth is refused with the reason (`watchRefusalText`).
 is in the middle of. The relay refuses those from a watching socket too; this is the half that does not depend
 on it. A watch that ended or was refused stays so across a reconnect (`AISession.test.tsx`).
 
-**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's latest tap, swipe or pinch through the screens' `overlay` (`TouchMarksLayer` with a `touch`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space, or as it is when the holder sent the frame's own points) — see "Touches are drawn by one model" below. The run video's replay passes no `touch`, so it draws none. Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
+**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's latest tap, swipe or pinch through the screens' `overlay` (`TouchMarksLayer` with a `touch`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space, or as it is when the holder sent the frame's own points) — see "Touches are drawn by one model" below. The run video's replay passes a `timeline` instead: the runner's recorded touches on the playback clock (below). Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
 
 ### Touches are drawn by one model, and the colour says which surface
 
@@ -209,7 +209,13 @@ the device takes a tap, and a swipe drawn there showed something that did not ha
 beside `gesture`); a relay from before that sends a bare pinch, which is a row and no mark. **A body-mode holder's
 points are of the frame** (`space: 'frame'`), and the relay passes that on: the watch view places them as they are,
 not through the screen's turn, which put them a quarter off. Flow Capture draws no mark for a frame-space step, whatever its kind.
-Automation run videos carry no touch points yet, so they draw none; that is a follow-up.
+**An Automation run's video draws the runner's touches** (#1205's follow-up). The runner writes each as a `touch`
+event in the video, on the frames' clock, at send time — **in the frame it was sent in**, after `SocketFlowDriver`
+turned the flow's points (`onInput`), so the player places it as the watch page places a `watch:action`; the flow's
+own points drew a landscape tap a quarter off. The player draws them with `TouchMarksLayer`'s `timeline` source:
+`timelineState` at the playback clock's time, never the wall clock, so a seek back shows a touch again and a pause
+holds it. The clock (`PlaybackClock`) is told by the player and read by the layer, so playing re-renders nothing under
+the marks — `RunVideo` relies on the device screen's props not changing per frame.
 
 ### The React Compiler is on
 

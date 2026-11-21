@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  TOUCH_MARK as M, NO_TOUCH, PointerTouchMarks, TouchMarkStore, drawTouchParts, machineState, machineTouchEnd, stillParts, touchParts,
+  TOUCH_MARK as M, NO_TOUCH, PointerTouchMarks, timelineState, TouchMarkStore, drawTouchParts, machineState, machineTouchEnd, stillParts, touchParts,
   type NormPoint, type Pair, type TouchPart, type TouchState,
 } from '@/lib/touchMarks'
 
@@ -148,6 +148,21 @@ describe('touch marks — a machine\'s pinch and long press', () => {
     expect(machineState(press, 900).touch?.upAt).toBe(900)
     expect(machineState({ ...press, holdMs: 60_000 }, M.maxGestureMs).touch?.upAt).toBe(M.maxGestureMs)
     expect(machineState({ ...press, holdMs: undefined }, M.tapMs).touch?.upAt).toBe(M.tapMs)
+  })
+})
+
+describe('touch marks — a recording\'s touches on its own clock', () => {
+  const tap = { id: 1, at: 100, kind: 'tap' as const, point: { x: 0.25, y: 0.75 } }
+  const swipe = { id: 2, at: 1000, kind: 'swipe' as const, from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.2 }, durationMs: 300 }
+
+  // Pure in the playback time: before a touch nothing, during it the touch, after its end nothing, and the same at a
+  // time asked for again — a seek back. Mutations: keep the first touch, never end one, or read ahead of `t`.
+  it('shows the latest touch begun by then, as it was then', () => {
+    expect(timelineState([tap, swipe], 50)).toEqual(NO_TOUCH)
+    expect(timelineState([tap, swipe], 150).touch?.fingers[0]!.start).toEqual(tap.point)
+    expect(timelineState([tap, swipe], machineTouchEnd(tap))).toEqual(NO_TOUCH)
+    expect(timelineState([tap, swipe], 1100).touch?.fingers[0]!.start).toEqual(swipe.from)
+    expect(timelineState([tap, swipe], 150)).toEqual(timelineState([tap, swipe], 150))
   })
 })
 
