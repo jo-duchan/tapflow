@@ -5,7 +5,7 @@ export type PlaceOnLayer = (x: number, y: number) => { left: number; top: number
 
 /**
  * How far the canvas reaches past the box on each side, in CSS px: a mark near an edge — a tap's widening ring, the
- * glow — is drawn past it, as an SVG with visible overflow was. More than the ripple's widest radius (37 px).
+ * shadow — is drawn past it, as an SVG with visible overflow was. The ripple's widest is 39.5 px, by then all but faded.
  */
 export const BLEED = 40
 

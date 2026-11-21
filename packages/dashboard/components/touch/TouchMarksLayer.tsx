@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  BLEED, TouchMarkStore, drawTouchParts, layerPoint, prefersReducedMotion, stillParts, touchDone, touchParts,
-  type MachineTouch, type NormPoint, type PlaceOnLayer, type StillTouch, type TouchState, type TouchTone,
+  BLEED, GLASS_BLUR, TOUCH_BORDER, TouchMarkStore, drawTouchParts, layerPoint, prefersReducedMotion, stillParts, touchDone,
+  touchParts, type MachineTouch, type NormPoint, type PlaceOnLayer, type StillTouch, type TouchPart, type TouchState,
+  type TouchTone,
 } from '@/lib/touchMarks'
 
 /** What the layer draws: a person's live pointer, a machine's latest touch, or a still picture's mark. */
@@ -22,6 +23,26 @@ function anchorsOf(points: NormPoint[], place: PlaceOnLayer): string | undefined
 }
 const shownPoints = (s: TouchState): NormPoint[] => (s.touch ? s.touch.fingers.map((f) => f.start) : s.hover)
 
+/** At most a pinch's two fingers move at once, so at most two glass dots. */
+const GLASSES = 2
+
+/**
+ * Puts the CSS backdrop under each glass dot the canvas draws: the canvas cannot read the screen under it, so the blur
+ * is the browser's, on an element sitting just under the canvas, where the dot's fill and border are then drawn.
+ */
+function placeGlass(glass: (HTMLDivElement | null)[], parts: TouchPart[]): void {
+  const dots = parts.filter((p) => p.kind === 'disc' && p.glass)
+  glass.forEach((el, i) => {
+    if (!el) return
+    const p = dots[i]
+    if (!p || p.kind !== 'disc') { el.style.display = 'none'; return }
+    const r = p.r - TOUCH_BORDER
+    el.style.display = 'block'
+    el.style.width = el.style.height = `${2 * r}px`
+    el.style.transform = `translate(${p.at.x - BLEED - r}px, ${p.at.y - BLEED - r}px)`
+  })
+}
+
 /**
  * The one place a touch is drawn over a device or a picture of one: the QA viewer's pointer (`store`), an agent's or a
  * replay's touches (`touch`), and a step picture's mark (`still`). A canvas, drawn by `drawTouchParts` — the same call
@@ -32,6 +53,7 @@ const shownPoints = (s: TouchState): NormPoint[] => (s.touch ? s.touch.fingers.m
  */
 export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: TouchTone; place: PlaceOnLayer } & TouchMarksSource) {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const glass = useRef<(HTMLDivElement | null)[]>([])
   const [own] = useState(() => new TouchMarkStore())
   const source = store ?? own
   // Read on every frame rather than restarting the loop: a caller builds `place` on each render.
@@ -71,7 +93,9 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
       ctx.clearRect(0, 0, cssW, cssH)
       const toPx = layerPoint(placeRef.current, cssW, cssH)
       if (isStill) {
-        if (mark) drawTouchParts(ctx, stillParts(mark, toPx), tone, dpr)
+        const parts = mark ? stillParts(mark, toPx) : []
+        drawTouchParts(ctx, parts, tone, dpr)
+        placeGlass(glass.current, parts)
         return
       }
       source.measureIn(toPx)
@@ -79,7 +103,9 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
       const opts = { reduced: prefersReducedMotion() }
       const shown = source.stateAt(now)
       if (shown.touch && touchDone(shown.touch, now, toPx, opts)) source.dropFinished()
-      drawTouchParts(ctx, touchParts(source.stateAt(now), now, toPx, opts), tone, dpr)
+      const parts = touchParts(source.stateAt(now), now, toPx, opts)
+      drawTouchParts(ctx, parts, tone, dpr)
+      placeGlass(glass.current, parts)
       if (source.animating(now)) frame = requestAnimationFrame(draw)
     }
     const wake = () => {
@@ -101,6 +127,17 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
   const anchor = still ? (still.kind === 'tap' ? still.point : still.from)
     : touch ? (touch.kind === 'tap' ? touch.point : touch.from) : undefined
   return (
+    <>
+      {Array.from({ length: GLASSES }, (_, i) => (
+        <div
+          key={i}
+          ref={(el) => { glass.current[i] = el }}
+          aria-hidden="true"
+          data-testid="touch-glass"
+          className="pointer-events-none absolute left-0 top-0 rounded-full"
+          style={{ zIndex: 5, display: 'none', backdropFilter: `blur(${GLASS_BLUR}px)`, WebkitBackdropFilter: `blur(${GLASS_BLUR}px)` }}
+        />
+      ))}
     <canvas
       ref={canvas}
       aria-hidden="true"
@@ -110,5 +147,6 @@ export function TouchMarksLayer({ tone, place, store, touch, still }: { tone: To
       className="pointer-events-none absolute"
       style={{ zIndex: 5, inset: -BLEED, width: `calc(100% + ${2 * BLEED}px)`, height: `calc(100% + ${2 * BLEED}px)` }}
     />
+    </>
   )
 }

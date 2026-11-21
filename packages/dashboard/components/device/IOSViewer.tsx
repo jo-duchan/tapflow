@@ -248,7 +248,7 @@ export function IOSViewer({
       ? { x: fc.offsetLeft + p.x * fc.clientWidth, y: fc.offsetTop + p.y * fc.clientHeight }
       : { x: p.x * w, y: p.y * h }
     const now = performance.now()
-    drawTouchState(ctx, pointerMarks.store.stateAt(now), now, toPx, 'person', { reduced: prefersReducedMotion() }, scale)
+    drawTouchState(ctx, pointerMarks.store.stateAt(now), now, toPx, 'person', { reduced: prefersReducedMotion() }, scale, { backdrop: true })
     ctx.restore()
   }, [recordCanvasRef, canvasRef, containerRef, shownTurn, pointerMarks])
 

@@ -187,7 +187,7 @@ export function AndroidViewer({
     ctx.scale(s, s)
     const now = performance.now()
     drawTouchState(ctx, pointerMarks.store.stateAt(now), now, (p) => ({ x: (p.x * shown.width) / s, y: (p.y * shown.height) / s }),
-      'person', { reduced: prefersReducedMotion() }, scale * s)
+      'person', { reduced: prefersReducedMotion() }, scale * s, { backdrop: true })
     ctx.restore()
   }, [recordCanvasRef, totalTurn, streamRotation, decoderRef, videoSizeRef, pointerMarks])
 

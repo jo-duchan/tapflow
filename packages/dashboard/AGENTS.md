@@ -159,8 +159,9 @@ on it. A watch that ended or was refused stays so across a reconnect (`AISession
 
 Every touch on a device or a picture of one is drawn by `lib/touchMarks` and nothing else: the QA viewer's own
 pointer (live, and burned into its recording), the watch view's agent, Flow Capture's Match and Verify replays, and
-its step pictures. **The motion is the same everywhere; only the colour differs, and it follows the surface — white on
-Manual QA, where a person drives the device, blue in Flow Capture and on the watch page** (user, 2026-11-21). By
+its step pictures. **The motion is the same everywhere; only the colour differs, and it follows the surface — white
+(a light grey fill) on Manual QA, where a person drives the device, blue in Flow Capture and on the watch page** (user,
+2026-11-21). By
 surface and not by who made each touch: Flow Capture's step pictures show a person's recorded touches and are blue,
 so one dialog never mixes the two. Before it, the QA viewer had a white cursor in a DOM div plus a second copy in each
 recording composer, and the machine side had a blue gliding cursor with a dashed trail: three looks for one gesture.
@@ -170,12 +171,26 @@ Three layers, each used everywhere: `model.ts` (pure — a state and a time in, 
 did), and `store.ts` (what is touching now, outside React, since a pointer moves at the display's rate).
 `PointerTouchMarks` turns pointer events into it for both viewers, and `TouchMarksLayer` puts it over a screen,
 fed by a `store`, a machine's `touch`, or a picture's `still` mark. **A new place that shows a touch uses the layer;
-it does not draw its own.** The numbers are the agreed mockup's (`TOUCH_MARK`); change them there.
+it does not draw its own.** The numbers are the user's Figma (Medium, node 4564:1730), in `TOUCH_MARK` and at the
+top of `draw.ts`; change them there.
 
-Two things that look optional and are not:
+**A light border and a thin dark shadow are what keep a mark visible on any screen**, not the colour. The first look
+was a white disc with a white glow, and on a white screen it all but vanished. The fill carries the mark on white, the
+border on black, the shadow on both, as a pointer cursor's fill, outline and shadow do. The shadow is 20 % where Figma
+has 8 %: at 8 % a tap's release ring, which has no fill, could not be seen on white. A machine's border and shadow are
+blue as well (blue-300, blue-600 at 35 %): white and black on a blue dot read as two colours, and a navy shadow read
+grey (user, 2026-11-21).
 
-- **The layer's canvas bleeds 40 px past its box.** A mark near an edge (a tap's widening ring, the glow) was drawn
+Three things that look optional and are not:
+
+- **The layer's canvas bleeds 40 px past its box.** A mark near an edge (a tap's widening ring, the shadow) was drawn
   past it when this was SVG with visible overflow; a canvas clips at its edge.
+- **A swipe's moving dot blurs what is under it, and two ways do it.** A recording draws the device's frame on its
+  own canvas first, so `drawTouchParts(…, { backdrop: true })` copies that patch out and draws it back blurred. The
+  layer's canvas has nothing under it to read: the screen is another element. So the layer places a div with CSS
+  `backdrop-filter` under each moving dot, and the browser blurs the screen. Both are placed from the same parts.
+  That CSS blur sits under the canvas, so it cannot blur the canvas's own line: **the line is cut at the moving dot's
+  edge**, on the page and in a recording alike, or it ran sharp through the glass.
 - **The layer keeps where its marks start on `data-anchor`.** A canvas has no DOM a test can read, and that a mark
   sits under the pointer — through iOS's frame and Android's turns — is the thing placement is for. The anchor checks
   `place`; what the drawing does with it (the bleed) is `layerPoint`, tested on its own, and each viewer's recording
