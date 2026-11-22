@@ -195,6 +195,47 @@ describe('TapflowClient after the relay closes it for any other reason (#1213)',
     await back.close()
   })
 
+  // CodeRabbit on #1222: a reconnect with the new token that failed on the network must stay eligible — the token
+  // was never refused.
+  it('after a credential close, retries the new token once the relay is back, when the first try could not reach it', async () => {
+    const r = await relay()
+    const port = r.port
+    store(port, 'tflw_pat_old')
+    const tokens = resolveToken({ relayUrl: `ws://localhost:${port}`, env: { TAPFLOW_TOKEN_FILE: file } })
+    const client = new TapflowClient(`ws://localhost:${port}`, tokens)
+    await client.connect()
+    const gone = closed(client)
+    r.sockets[0]!.close(1008, 'token revoked')
+    await gone
+    await r.close()
+    store(port, 'tflw_pat_new')
+    await expect(client.reconnectIfClosed()).rejects.toThrow()
+
+    const back = await relayOn(port)
+    await client.reconnectIfClosed()
+    expect(back.auths).toEqual(['Bearer tflw_pat_new'])
+    expect(await client.listDevices()).toEqual([])
+    client.disconnect()
+    await back.close()
+  })
+
+  // CodeRabbit on #1222: a token written while the connection was down is the one the reconnect carries.
+  it('reconnects after a drop with the token written meanwhile', async () => {
+    const r = await relay()
+    store(r.port, 'tflw_pat_old')
+    const tokens = resolveToken({ relayUrl: `ws://localhost:${r.port}`, env: { TAPFLOW_TOKEN_FILE: file } })
+    const client = new TapflowClient(`ws://localhost:${r.port}`, tokens)
+    await client.connect()
+    const gone = closed(client)
+    r.sockets[0]!.terminate()
+    await gone
+    store(r.port, 'tflw_pat_new')
+    await client.reconnectIfClosed()
+    expect(r.auths).toEqual(['Bearer tflw_pat_old', 'Bearer tflw_pat_new'])
+    client.disconnect()
+    await r.close()
+  })
+
   it('does not reconnect a client that disconnected itself', async () => {
     const r = await relay()
     const client = new TapflowClient(`ws://localhost:${r.port}`, 'tflw_pat_x')
