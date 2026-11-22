@@ -952,6 +952,84 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
     })
 
+    // #1194, measured on Android 16 (Pixel 9): a swipe right opens the Google feed, which is another package and reads as
+    // not home, so the swipe onto it is not placed (home before, not after) and the one back is off the home screen. The
+    // drawer's swipe and the icon's tap followed, and all of it was kept in the flow.
+    it('leaves out a screen beside the home screen when the home screen comes after it', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.5, 0.8], [0.5, 0.3]])
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.5, 0.9], [0.5, 0.2]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.5, 0.6]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 6, end: 8 })
+    })
+
+    // A permission dialog the app opens is another package too, and reads the same as the search screen: what follows it
+    // decides. Its Allow comes after the icon's tap, so it stays.
+    it('keeps a tap off the home screen after the icon\'s tap, such as a permission dialog\'s Allow', () => {
+      const r = new Rec().install()
+      // The read after the icon's tap still says home while the app comes up, then the dialog is in front.
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.7]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // Without a touch the app reported there is no point it was surely in front by, and a visit home later is the
+    // person's own (the case above, 'not a visit to it later').
+    it('does not look past a screen beside the home screen when the app reported no touch', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(read(r, HOME), APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
+    })
+
+    // Adversarial review: a report from before the clean start is another run of the app, not where this one began.
+    it('looks for the app\'s first touch after the clean start', () => {
+      const r = new Rec().launch()
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      r.msg({ type: 'app:clear-state', sessionId: 's', requestId: r.id(), payload: { bundleId: 'b' } }, true)
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['launch', 'tap', 'clearState', 'swipe', 'swipe', 'tap', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 6, end: 7 })
+    })
+
+    // Adversarial review: the app took a touch whose report was not paired (seq 1 missing), so a step before the first
+    // paired one may be in the app — the skip stays where the reads put it.
+    it('does not look past a step when the app\'s first paired touch is not its first', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(read(r, HOME), APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
+    })
+
+    it('does not look past a step that does not find the app', () => {
+      const typed = new Rec().install()
+      read(typed, APP).msg({ type: 'open-url', sessionId: 's', requestId: typed.id(), payload: { url: 'app://x' } }, true)
+      read(typed, HOME).touch([[0.3, 0.4]])
+      read(typed, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      expect(defaultRange(typed.steps())).toEqual({ start: 1, end: 4 })
+    })
+
     it('keeps a Launch in charge when there is one', () => {
       const r = new Rec().install()
       read(r, HOME).touch([[0.2, 0.3]])
