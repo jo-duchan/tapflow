@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
 import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
-import { markOf, touchOfMark } from '@/lib/flowCapture/marks'
+import { markOf, mirrorMark, touchOfMark } from '@/lib/flowCapture/marks'
+import type { ChromePayload } from '@tapflowio/protocol'
 
 // Flow Capture's dialog (#1125), the parts with no screen: the order of its states, and what Edit makes of the flow.
 const raw = {} as CapturedStep['raw']
@@ -241,16 +242,78 @@ describe('the touches drawn', () => {
     expect(markOf({ ...base, kind: 'text', text: 'a' } as unknown as RawStep)).toBeNull()
   })
 
-  // A captured pinch has its fingers' start and end; drawn as both. A body-mode holder's is in the frame's points, not
-  // the picture's: none. Mutations: drop the pinch case, swap start and end, or draw the frame's.
-  it('marks a pinch with both fingers, and no step in the frame\'s points', () => {
+  // A captured pinch has its fingers' start and end; drawn as both. Mutations: drop the pinch case, swap start and end.
+  it('marks a pinch with both fingers', () => {
     const pinch = { ...base, kind: 'pinch', start: [[0.4, 0.45], [0.6, 0.55]], end: [[0.2, 0.35], [0.8, 0.65]], durationMs: 300 }
     expect(markOf(pinch as unknown as RawStep)).toEqual({
       kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300,
     })
-    expect(markOf({ ...pinch, space: 'frame' } as unknown as RawStep)).toBeNull()
-    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame' } as unknown as RawStep)).toBeNull()
-    expect(markOf({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200, space: 'frame' } as unknown as RawStep)).toBeNull()
+  })
+
+  // An Android body-mode holder's step is in the video frame's own points (`space: 'frame'`), and none was drawn: every
+  // Android replay showed no touch. Over the replay's mirror, which is that frame, it is drawn as it is, however the
+  // body is turned; on a screenshot, turned into the screen by the recorded frame-to-screen map, and not without one.
+  // Mutations: draw the mirror's turned, skip the turn on a screenshot, or drop the no-map case.
+  describe('a step in the frame\'s own points', () => {
+    const chrome = (streamRotation: number | undefined, bodyRotation = 0) => ({ bodyRotation, ...(streamRotation === undefined ? {} : { streamRotation }) })
+    const tap = (c: object) => ({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame', chrome: c }) as unknown as RawStep
+    const swipe = (c: object) => ({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200, space: 'frame', chrome: c }) as unknown as RawStep
+    const pinch = (c: object) => ({ ...base, kind: 'pinch', start: [[0.4, 0.45], [0.6, 0.55]], end: [[0.2, 0.35], [0.8, 0.65]], durationMs: 300, space: 'frame', chrome: c }) as unknown as RawStep
+
+    it('draws it as it is over the mirror, marked as the frame\'s, even with the body turned', () => {
+      expect(markOf(tap(chrome(0)), 'frame')).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(tap(chrome(90, 90)), 'frame')).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(swipe(chrome(0)), 'frame')).toEqual({ kind: 'swipe', from: { x: 0.1, y: 0.8 }, to: { x: 0.1, y: 0.2 }, durationMs: 200, inFrame: true })
+      expect(markOf(pinch(chrome(0)), 'frame')).toEqual({
+        kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300, inFrame: true,
+      })
+    })
+
+    // The mirror copies the frame: a frame's mark goes over it however the body is turned; a screen's is carried into
+    // the frame by the inverse of Android's frame-to-screen map, and with none, drawn only upright.
+    // Mutations: skip the conversion, turn it the wrong way, or drop the upright check.
+    it('is drawn over the mirror whatever the turn, and a screen\'s mark carried into the frame', () => {
+      const turned = { bodyRotation: 90, streamRotation: 90 } as unknown as ChromePayload
+      const frameMark = markOf(tap(turned), 'frame')!
+      expect(mirrorMark(frameMark, turned)).toBe(frameMark)
+      const screenTap = { kind: 'tap', point: { x: 0.2, y: 0.3 } } as const
+      expect(mirrorMark(screenTap, { bodyRotation: 0 } as unknown as ChromePayload)).toBe(screenTap)
+      expect(mirrorMark(screenTap, null)).toBe(screenTap)
+      // Upright, but the frame a quarter off the screen (an unfolded foldable): the screen's (0.2, 0.3) is the frame's
+      // (0.3, 0.8), which the screenshot path turns back (`toScreen`, frame turn 90: (1 - y, x)).
+      const foldable = { bodyRotation: 0, streamRotation: 90 } as unknown as ChromePayload
+      expect(mirrorMark(screenTap, foldable)).toEqual({ kind: 'tap', point: { x: 0.3, y: 0.8 }, inFrame: true })
+      expect(markOf({ ...tap(foldable), point: [0.3, 0.8] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark({ kind: 'swipe', from: { x: 0.2, y: 0.3 }, to: { x: 0.5, y: 0.5 }, durationMs: 100 }, foldable))
+        .toEqual({ kind: 'swipe', from: { x: 0.3, y: 0.8 }, to: { x: 0.5, y: 0.5 }, durationMs: 100, inFrame: true })
+      expect(mirrorMark({ kind: 'pinch', from: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], durationMs: 100 }, foldable))
+        .toEqual({ kind: 'pinch', from: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], durationMs: 100, inFrame: true })
+      // Turned, with the app turning too: a map of 0, the frame is the screen, and the mark is drawn as it is.
+      expect(mirrorMark(screenTap, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload))
+        .toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      // A recorded screen-space step: over the mirror, `mirrorMark` decides by the map, not `markOf` by the turn; on a
+      // screenshot the upright check stays.
+      const turnedStep = { ...base, kind: 'tap', point: [0.2, 0.3], chrome: { bodyRotation: 90, streamRotation: 0 } } as unknown as RawStep
+      const recorded = markOf(turnedStep, 'frame')
+      expect(recorded).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark(recorded!, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(turnedStep)).toBeNull()
+      // Turned with no map from the frame (an older agent): the screen may not be the frame, and nothing is drawn.
+      expect(mirrorMark(screenTap, { bodyRotation: 90 } as unknown as ChromePayload)).toBeNull()
+    })
+
+    it('turns it into the screen on a screenshot, and draws none with no map', () => {
+      expect(markOf(tap(chrome(0)))).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      // A folded foldable: upright body, frame a quarter off the screen.
+      expect(markOf(tap(chrome(90)))).toEqual({ kind: 'tap', point: { x: 0.7, y: 0.2 } })
+      expect(markOf(swipe(chrome(270)))).toEqual({ kind: 'swipe', from: { x: 0.8, y: 0.9 }, to: { x: 0.2, y: 0.9 }, durationMs: 200 })
+      expect(markOf(tap(chrome(undefined)))).toBeNull()
+      expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame' } as unknown as RawStep)).toBeNull()
+      // The replay turns the device to the range's start before its screenshots, so a turned body's step is turned too.
+      expect(markOf(tap(chrome(90, 90)))).toEqual({ kind: 'tap', point: { x: 0.7, y: 0.2 } })
+      // A screen's step on a turned body is still not drawn: its points are not the picture's.
+      expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], chrome: chrome(0, 90) } as unknown as RawStep)).toBeNull()
+    })
   })
 
   it('marks nothing on a turned device, whose points are in another frame than its picture', () => {

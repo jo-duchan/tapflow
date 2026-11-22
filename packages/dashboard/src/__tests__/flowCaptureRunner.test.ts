@@ -223,6 +223,30 @@ describe('matchRange', () => {
     expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 } }]])
   })
 
+  // An Android body-mode step is in the frame's own points, which the replay's mirror is: drawn as it is, and said so.
+  it('says an Android body-mode step\'s touch is in the frame the mirror shows', async () => {
+    const onTouch = vi.fn()
+    const lease = new PauseLease(tap)
+    const at = { ...base, kind: 'tap', point: [0.25, 0.75], space: 'frame', chrome: { bodyRotation: 90, streamRotation: 90 } } as unknown as RawStep
+    await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 }, inFrame: true }]])
+  })
+
+  // `replayStep` sends nothing for these, so a touch drawn for one shows a tap the device never had (CodeRabbit on #1216).
+  // Mutations: drop any one of the three conditions.
+  it('says no touch for a step the replay does not send', async () => {
+    const onTouch = vi.fn()
+    const lease = new PauseLease(tap)
+    const refused = { ...base, kind: 'tap', point: [0.1, 0.1], outcome: 'refused', space: 'frame', chrome: { bodyRotation: 0, streamRotation: 0 } } as unknown as RawStep
+    const dropped = { ...base, kind: 'tap', point: [0.2, 0.2], dropped: true } as unknown as RawStep
+    const key = { ...base, kind: 'keyboardKey', point: [0.3, 0.3] } as unknown as RawStep
+    const sent = { ...base, kind: 'tap', point: [0.4, 0.4] } as unknown as RawStep
+    await matchRange(tap, channel, lease, [refused, dropped, key, sent, textStep], { start: 0, end: 5 }, null, { ...hooks(), onTouch })
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.4, y: 0.4 } }]])
+  })
+
   // #1125: the tree cannot say what covers an element on the device, so the device is asked about the screen the step is
   // about to act on — before it is replayed, which changes that screen.
   it('asks the device where a touch on the tapped element lands, before replaying it, and matches with the answer', async () => {

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { UIElement } from '@tapflowio/agent-core'
 import { parseFlow } from '../schema'
 import { matchSelector } from '../selector'
-import { suggestSelectors } from '../suggest'
+import { selectorFor, suggestSelectors } from '../suggest'
 
 // B2: when `tapOn` finds nothing (or too much), the tree the runner failed to match is the evidence for a fix. Every
 // suggestion has to be one a person can paste into the flow and have it tap the element it names — nothing looser.
@@ -31,6 +31,18 @@ describe('suggestSelectors', () => {
     const tree = [el('hunter2', { role: 'other', secure: true, identifier: 'pw' }), el('Sign in')]
     const s = suggestSelectors(tree, { id: 'pw2' })
     expect(s[0]).toEqual({ yaml: 'tapOn: { id: "pw" }', element: { role: 'other', label: '', identifier: 'pw' } })
+  })
+
+  // The wdio demo app's tab bar: each tab's label is an icon font's glyph, which selects the tab and reads as a box in
+  // the flow. By its id, or not by name at all.
+  it('never names an element by a label nobody can read', () => {
+    const glyph = '\uE88A'
+    expect(suggestSelectors([el(glyph, { identifier: 'tab.home' }), el('Sign in')], { id: 'tab.homee' })[0]!.yaml).toBe('tapOn: { id: "tab.home" }')
+    const tree = [el(glyph, { identifier: 'tab.home' }), el('Sign in')]
+    expect(selectorFor(tree, tree[0]!)).toEqual({ id: 'tab.home' })
+    // The tree's own member: `selectorFor` resolves to the target by identity, and any other object reads as null.
+    const bare = [el(glyph), el('Sign in')]
+    expect(selectorFor(bare, bare[0]!)).toBeNull()
   })
 
   it('treats case, spacing and punctuation as the same label', () => {

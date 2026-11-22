@@ -1862,6 +1862,11 @@ describe('touch reports', () => {
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true, role: 'button' })
       expect(recordedSelector(obs({ element: { label: 'Truck', traits: 0 } }))).toEqual({ label: 'Truck', exact: true })
+      // An icon font's glyph selects the tab but reads as a box in the flow: by the id alone, or not named.
+      expect(recordedSelector(obs({ element: { label: '\uE88A', traits: 1 } }))).toBeNull()
+      // A resource id rows share, whose label is a glyph: by the id alone the search stops at the first row, so none.
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/tab', label: '\uE88A', traits: 1 } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { identifier: 'tab.home', label: '\uE88A', traits: 1 } }))).toEqual({ id: 'tab.home' })
       // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
       const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
       expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
