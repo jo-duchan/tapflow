@@ -348,15 +348,18 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   if (reads.length === 0) return steps
   let i = 0
   let previousEnd = -Infinity
-  // The step before stayed on the home screen: placed there, and the first read asked after it ended, and before the
-  // next step began, says home too — a page turned, a folder opened. Not one that left it (the icon's own tap, whose
-  // next read is of the app starting). Answered late is fine (the measured case's was, 18 ms after the tap lifted);
-  // asked late is not: a read after a later trip home would vouch for the icon's tap (CodeRabbit on #1225).
+  // The step before stayed on the home screen: not a tap, placed there, and the first read asked after it ended, and
+  // before the next step began, says home too — a page turned. Answered late is fine (the measured case's was, 18 ms
+  // after the tap lifted); asked late is not: a read after a later trip home would vouch for the icon's tap. Never a
+  // tap: an app takes a moment to come up, so the read right after the icon's tap still says home, and the tap after it
+  // could be a permission alert's Allow (CodeRabbit on #1225, twice). A folder opened by a tap leaves its icon's tap
+  // unknown, as before this rule: the range warns, and the person moves the start.
   let stayedHome = false
   return steps.map((s, n) => {
     const placed = place(s, n)
     const nextAt = steps[n + 1]?.at ?? Infinity
-    stayedHome = placed.onHome === true && reads.find((r) => r.requestedAt >= s.endAt && r.requestedAt < nextAt)?.keyboard.onHome === true
+    stayedHome = placed.onHome === true && s.kind !== 'tap'
+      && reads.find((r) => r.requestedAt >= s.endAt && r.requestedAt < nextAt)?.keyboard.onHome === true
     return placed
   })
 

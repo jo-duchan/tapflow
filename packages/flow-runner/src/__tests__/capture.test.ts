@@ -934,6 +934,22 @@ describe('defaultRange', () => {
       expect(defaultRange(steps).start).toBe(2)
     })
 
+    // CodeRabbit on #1225, second pass: an app takes a moment to come up, so the read right after the icon's tap still
+    // says home. A tap is never vouched for as having stayed home: it may be the one that opened the app. Costs a folder
+    // opened by a tap, whose icon tap is left unknown as before this rule (the range warns and the person moves it).
+    it('does not take a tap as having stayed home, though the read right after it says home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      // Asked right after the icon's tap, answered while the app was still coming up.
+      r.entries.push({ at: r.t + 180, kind: 'keyboard', requestedAt: r.t + 10, keyboard: IOS_HOME, settled: false })
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBe(true)
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
     // The same recording, one fact changed each: either is enough to leave the tap unknown, as before.
     const iconRun = (before: KeyboardState, firstSeq: number) => {
       const r = new Rec().install()
