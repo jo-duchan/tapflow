@@ -118,6 +118,15 @@ function thumbnailUrl(sessionId: string, snapshot: CaptureSnapshot, step: RawSte
   return `/api/v1/sessions/${sessionId}/capture/snapshot/thumbnails/${encodeURIComponent(key)}`
 }
 
+/** Why `step` has no picture: the relay's reason, else a plain "none kept". Nothing from a relay that keeps none. */
+function noPictureWhy(snapshot: CaptureSnapshot, step: RawStep): string | null {
+  if (!snapshot.thumbnails) return null
+  const key = step.thumbnailKey
+  if (key && snapshot.thumbnails.includes(key)) return null
+  const refused = key ? snapshot.thumbnailRefusals?.[key] : undefined
+  return refused ? copy.noPicture[refused] : copy.noPicture.none
+}
+
 function initFrom(snapshot: CaptureSnapshot): CaptureState {
   const { steps, range } = stepsOf(snapshot)
   return reduce(initialState, { type: 'loaded', steps, range, name: '' })
@@ -260,7 +269,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
           <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback}
-            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} />
+            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} noPictureWhy={(step) => noPictureWhy(snapshot, step)} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen

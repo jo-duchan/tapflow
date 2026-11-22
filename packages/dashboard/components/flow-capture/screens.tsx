@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
-import { ChevronRight, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, ImageOff, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
   type RawStep, type ScreenRect, type Selector, type StepExpect,
@@ -77,11 +77,13 @@ function Notice({ title, children }: { title: string; children?: React.ReactNode
 
 // ── Range ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf }: {
+export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf, noPictureWhy }: {
   state: CaptureState
   platform: string
   /** Where the screen a step began on can be read (1b-3b), or `null` when the relay holds no picture of it. */
   thumbnailOf?: (step: RawStep) => string | null
+  /** Why a step has no picture, or `null` to say nothing (a relay that keeps none). */
+  noPictureWhy?: (step: RawStep) => string | null
   dispatch: Dispatch<CaptureEvent>
   bundleId: string | null
   onContinue: () => void
@@ -119,7 +121,7 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
             onClick={() => dispatch({ type: 'set-range', range: { start: range.start, end: range.end - 1 } })}>{copy.dropLast}</Button>
         </span>
       </div>
-      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
+      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} noPictureWhy={noPictureWhy} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
       <div className="grid gap-4 sm:grid-cols-2">
         {/* `content-start`: the Tags column is a row taller with its hint, and a stretched grid shares that out. */}
         <div className="grid content-start gap-2">
@@ -209,10 +211,11 @@ const frameRight = (r: Range) => frameLeft(r) + (r.end - r.start) * STRIDE - GAP
  * The range as a frame over the steps, with a handle at each end — a video editor's trim. A step taken in or left out
  * slides into or out of the frame. Each handle is a slider for the keyboard, one step per arrow.
  */
-function RangeStrip({ steps, range, onChange, thumbnailOf }: {
+function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy }: {
   steps: RawStep[]
   range: Range
   thumbnailOf?: (step: RawStep) => string | null
+  noPictureWhy?: (step: RawStep) => string | null
   onChange: (range: Range) => void
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
@@ -330,7 +333,7 @@ function RangeStrip({ steps, range, onChange, thumbnailOf }: {
           </div>
           <ol aria-label={copy.rangeStrip}>
             {steps.map((s, i) => (
-              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} />
+              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} noPictureWhy={noPictureWhy?.(s) ?? null} />
             ))}
           </ol>
           {handle('start')}
@@ -347,9 +350,11 @@ const typedOnSoftKeyboard = (step: RawStep): boolean =>
   step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
 
 /** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
-function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
+function RangeTile({ step, index, inRange, left, picture, noPictureWhy }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null; noPictureWhy: string | null }) {
   // A tap left out before the replay is drawn as one outside the range, and says why.
   const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
+  // The keyboard tile already says what it is.
+  const why = !picture && !typedOnSoftKeyboard(step) && step.kind !== 'install' ? noPictureWhy : null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -365,7 +370,15 @@ function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; ind
           {/* The screen the step began on (1b-3b). Decorative: the item's own text names the step. A key on the soft
               keyboard has none by design — that screen shows what was just typed, a password's last character too — and
               says so, rather than looking like a picture that failed to load. */}
-          {picture
+          {/* An install's picture is of the moment its button was pressed, which says nothing of the step: what it is, as
+              the watch page's activity list draws an install. */}
+          {step.kind === 'install'
+            ? (
+              <span data-install className="flex h-[166px] w-full shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                <Download aria-hidden className="size-5" />
+              </span>
+            )
+            : picture
             ? <img src={picture} alt="" draggable={false} className="h-[166px] w-full shrink-0 rounded-md border bg-background object-contain" />
             : typedOnSoftKeyboard(step)
               ? (
@@ -374,11 +387,20 @@ function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; ind
                   {copy.keyboardTile}
                 </span>
               )
-              : <span aria-hidden className="h-[166px] w-full shrink-0 rounded-md border bg-background" />}
+              // No picture: why, in the tooltip and the item's text, where a cramped tile has no room to say it.
+              : (
+                <span data-no-picture={why ? '' : undefined} className="flex h-[166px] w-full shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                  {why && <ImageOff aria-hidden className="size-5" />}
+                </span>
+              )}
           <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
+          {why && <span className="sr-only">{why}</span>}
         </li>
       </TooltipTrigger>
-      <TooltipContent side="bottom" className="font-mono">{label}</TooltipContent>
+      <TooltipContent side="bottom">
+        <span className="block font-mono">{label}</span>
+        {why && <span className="block text-muted-foreground">{why}</span>}
+      </TooltipContent>
     </Tooltip>
   )
 }

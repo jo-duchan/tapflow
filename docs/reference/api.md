@@ -1271,7 +1271,7 @@ Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an 
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 
-Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none.
+Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none. The copy's `thumbnailRefusals` says, by `requestId`, why a step has none: `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, `typed` for an input begun right after typing. A relay that does not say leaves it out.
 
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 
