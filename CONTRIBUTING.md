@@ -62,6 +62,8 @@ Issues are not assigned in advance. Open a draft PR or post your findings on the
 
 Check the labels before you start. `requires: macOS` means the change must be tested on a real simulator or emulator, which requires a Mac with Xcode or the Android SDK. A `good first issue` without that label only requires Node.js and pnpm.
 
+Issues labeled `maintainers` need a design decision or touch work in progress, so maintainers handle them. To find something to work on, look at `good first issue` and `help wanted`.
+
 ## AI-assisted contributions
 
 tapflow is built with coding agents, and AI-assisted contributions are welcome. We hold all contributions to the same standard, regardless of how the code was written.
