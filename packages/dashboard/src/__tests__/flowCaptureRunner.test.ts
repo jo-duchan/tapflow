@@ -338,6 +338,30 @@ describe('matchRange', () => {
       expect(orientationOf()).toBeUndefined()
     })
 
+    // CodeRabbit on #1221: a multi-panel iOS chrome cannot say which way it is held (`scaleBasis`, #1116), so a target was
+    // waited for in vain. The step's orientation is its target either way.
+    it('does not wait for a target on a chrome that cannot say which way it is held', async () => {
+      const upright = { ...base, kind: 'rotate', to: { orientation: 'portrait' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { orientation: 'portrait' } } }] } as unknown as RawStep
+      const duo = { framePng: '', streamRotation: 90, scaleBasis: 2000, logicalWidth: 1, logicalHeight: 1, buttons: [] } as never
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(duo)
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [upright, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a turn that never showed in time leaves the base unknown; the next turn, counted from the base
+    // before it, then took the first one's late report (90) as its own while the device was at 180.
+    it('leaves out the turns after one that never showed, whose late report would read as theirs', async () => {
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.filter((l) => l === 'replay rotate').length < 2 ? held(0) : held(90)))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, rotate, textStep], { start: 0, end: 3 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    })
+
     // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
     // the sideways one the recording ended on. Any change from it was taken, and the late upright chrome named the
     // turn portrait. Only the turn it should reach counts: never seen, the step is left out, not given a wrong name.

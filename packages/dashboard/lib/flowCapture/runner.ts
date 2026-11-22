@@ -221,7 +221,9 @@ async function chromeAfterTurn(
     signal.throwIfAborted()
     const now = await chromeNow(channel, tap)
     const turn = heldTurn(now)
-    const shown = target !== undefined ? !!now && chromeOrientation(now) === target
+    // A target on a chrome that cannot say which way it is held (a multi-panel iOS device, #1116) is not waited for: the
+    // step is named by its target whatever the chrome says (CodeRabbit on #1221).
+    const shown = target !== undefined ? !!now && (chromeOrientation(now) === undefined || chromeOrientation(now) === target)
       : turn !== undefined && (want === undefined ? turn !== from : turn === want)
     if (shown) return now
     if (clock.now() >= until) return null
@@ -436,11 +438,11 @@ export async function matchRange(
   const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal, clock)
   hooks.onReset?.(reset)
   hooks.signal.throwIfAborted()
-  // The reset stood the device up, and `resetDevice` waited for the chrome to say so. Still not said, every turn read
-  // from it is counted from the recording's last one, which can name a turn wrongly: until a chrome shows upright, a
-  // rotate is left out rather than measured (review).
+  // Where the device is held, unknown: the reset stood it up and the chrome has yet to say so (`resetDevice` waited), or
+  // a turn never showed in time (below). A turn counted from such a base can take an earlier turn's late chrome for its
+  // own and name it wrongly, so while it is unknown a rotate is left out rather than measured (reviews).
   const afterReset = reset?.done.includes('orientation') ? heldTurn(await chromeNow(channel, tap)) : undefined
-  let uprightUnseen = afterReset !== undefined && afterReset !== 0
+  let heldUnknown = afterReset !== undefined && afterReset !== 0
   let turnLeftOut = false
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
   await alignment.align()
@@ -796,15 +798,18 @@ export async function matchRange(
       if (settled && TYPING.has(raw.kind)) ctx.treeAfter = settled.elements
       if (after) shot = await shoot()
     }
-    // Cleared only before a turn has been left out: after one, a base read upright may predate where it landed, and its
-    // late chrome would read as the next turn's (CodeRabbit on #1221). The rest of the run's turns are left out too.
-    if (uprightUnseen && !turnLeftOut && heldTurn(chrome) === 0) uprightUnseen = false
+    // Known again only by the reset's upright, and only before any turn has gone unmeasured: after one, a base read
+    // upright may predate where it landed, and its late chrome would read as the next turn's (CodeRabbit on #1221). The
+    // rest of the run's turns are left out instead.
+    if (heldUnknown && !turnLeftOut && heldTurn(chrome) === 0) heldUnknown = false
     // Not sent again (refused when recorded, or left out of the replay): no turn comes to wait for.
     const turnSent = raw.kind === 'rotate' && raw.outcome !== 'refused' && !raw.dropped
-    if (turnSent && uprightUnseen) turnLeftOut = true
-    if (turnSent && !uprightUnseen) {
+    if (turnSent && heldUnknown) turnLeftOut = true
+    if (turnSent && !heldUnknown) {
       // `chrome` was read before the turn was sent: the turn it held.
       const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), turnAskedFor(raw), hooks.signal, clock)
+      // Never shown in time: where it landed is unknown, as after a reset not yet seen upright (CodeRabbit on #1221).
+      if (!turned) { heldUnknown = true; turnLeftOut = true }
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }
