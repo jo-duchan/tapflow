@@ -194,15 +194,11 @@ function heldTurn(chrome: ChromePayload | null): number | undefined {
   return 'framePng' in chrome ? chrome.streamRotation : (chrome as AndroidChrome).bodyRotation
 }
 
-/** The quarter turn a recorded rotate asked for, as both agents turn: clockwise adds 90 (`AndroidAgent`'s body turn,
- *  iOS's `PhysicalOrientation.turned`). Absent for an older viewer's target (`orientation`). */
-function rotateDirection(raw: RawStep): 'clockwise' | 'counterclockwise' | undefined {
-  for (const { msg } of raw.messages) {
-    if (msg.type !== 'input:rotate') continue
-    const d = (msg.payload as { direction?: unknown } | undefined)?.direction
-    if (d === 'clockwise' || d === 'counterclockwise') return d
-  }
-  return undefined
+/** What a recorded rotate asked for: a quarter turn, as both agents turn it — clockwise adds 90 (`AndroidAgent`'s body
+ *  turn, iOS's `PhysicalOrientation.turned`) — or an older viewer's target orientation. */
+type Turn = { direction: 'clockwise' | 'counterclockwise' } | { orientation: 'portrait' | 'landscape' }
+function turnAskedFor(raw: RawStep): Turn | undefined {
+  return raw.kind === 'rotate' && raw.to ? raw.to : undefined
 }
 
 /**
@@ -210,21 +206,24 @@ function rotateDirection(raw: RawStep): 'clockwise' | 'counterclockwise' | undef
  * is a quarter turn, not a target, so its orientation is read after it — and read at once, it was the one before it,
  * on every turn of an Android emulator. Waited for is the turn it should reach from `from`, not any other: a chrome the
  * reset sent late (standing the device up) differs from a stale `from` too, and taken it named the wrong orientation
- * (review). With no direction, any turn away from `from`; with no `from` (an agent that sends no turn), the chrome as
- * it is.
+ * (review). A target is waited for as itself, so a device already holding it is not waited on (CodeRabbit on #1221);
+ * with nothing asked, any turn away from `from`; with no `from` (an agent that sends no turn), the chrome as it is.
  */
 async function chromeAfterTurn(
-  channel: DashboardSessionChannel, tap: CaptureTap, from: number | undefined, direction: 'clockwise' | 'counterclockwise' | undefined, signal: AbortSignal,
+  channel: DashboardSessionChannel, tap: CaptureTap, from: number | undefined, asked: Turn | undefined, signal: AbortSignal,
   clock: Clock,
 ): Promise<ChromePayload | null> {
   if (from === undefined) return chromeNow(channel, tap)
-  const want = direction === undefined ? undefined : (from + (direction === 'clockwise' ? 90 : 270)) % 360
+  const want = asked && 'direction' in asked ? (from + (asked.direction === 'clockwise' ? 90 : 270)) % 360 : undefined
+  const target = asked && 'orientation' in asked ? asked.orientation : undefined
   const until = clock.now() + ROTATE_SETTLE_MS
   for (;;) {
     signal.throwIfAborted()
     const now = await chromeNow(channel, tap)
     const turn = heldTurn(now)
-    if (turn !== undefined && (want === undefined ? turn !== from : turn === want)) return now
+    const shown = target !== undefined ? !!now && chromeOrientation(now) === target
+      : turn !== undefined && (want === undefined ? turn !== from : turn === want)
+    if (shown) return now
     if (clock.now() >= until) return null
     await clock.sleep(ROTATE_POLL_MS)
   }
@@ -442,6 +441,7 @@ export async function matchRange(
   // rotate is left out rather than measured (review).
   const afterReset = reset?.done.includes('orientation') ? heldTurn(await chromeNow(channel, tap)) : undefined
   let uprightUnseen = afterReset !== undefined && afterReset !== 0
+  let turnLeftOut = false
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
   await alignment.align()
   const orientation = rangeStartOrientation(steps, range)
@@ -796,10 +796,15 @@ export async function matchRange(
       if (settled && TYPING.has(raw.kind)) ctx.treeAfter = settled.elements
       if (after) shot = await shoot()
     }
-    if (uprightUnseen && heldTurn(chrome) === 0) uprightUnseen = false
-    if (raw.kind === 'rotate' && !uprightUnseen) {
+    // Cleared only before a turn has been left out: after one, a base read upright may predate where it landed, and its
+    // late chrome would read as the next turn's (CodeRabbit on #1221). The rest of the run's turns are left out too.
+    if (uprightUnseen && !turnLeftOut && heldTurn(chrome) === 0) uprightUnseen = false
+    // Not sent again (refused when recorded, or left out of the replay): no turn comes to wait for.
+    const turnSent = raw.kind === 'rotate' && raw.outcome !== 'refused' && !raw.dropped
+    if (turnSent && uprightUnseen) turnLeftOut = true
+    if (turnSent && !uprightUnseen) {
       // `chrome` was read before the turn was sent: the turn it held.
-      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), rotateDirection(raw), hooks.signal, clock)
+      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), turnAskedFor(raw), hooks.signal, clock)
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }

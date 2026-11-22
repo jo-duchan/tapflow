@@ -223,7 +223,8 @@ describe('matchRange', () => {
   // before it (Pixel_9_tapflow: landscape, upside-down, landscape, portrait came out portrait, landscape, unknown,
   // landscape).
   describe('a rotate\'s orientation, from the chrome once the turn shows', () => {
-    const rotate = { ...base, kind: 'rotate', messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'clockwise' } } }] } as unknown as RawStep
+    // As `segment` makes it: the payload as `to`, and the message it replays.
+    const rotate = { ...base, kind: 'rotate', to: { direction: 'clockwise' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'clockwise' } } }] } as unknown as RawStep
     const held = (body: number) => ({ buttons: [], streamType: 'h264', bodyRotation: body, streamRotation: 0 }) as never
     // A clock that moves only when the wait sleeps: an 8 s wait runs at once (AGENTS.md "Test Hygiene").
     const clock = { t: 0, now: () => clock.t, sleep: async (ms: number) => { clock.t += ms } }
@@ -244,7 +245,7 @@ describe('matchRange', () => {
     })
 
     it('waits for a counterclockwise turn to show as one', async () => {
-      const back = { ...rotate, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'counterclockwise' } } }] } as unknown as RawStep
+      const back = { ...rotate, to: { direction: 'counterclockwise' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'counterclockwise' } } }] } as unknown as RawStep
       let after = 0
       const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
         if (!log.includes('replay rotate')) return held(0)
@@ -296,6 +297,45 @@ describe('matchRange', () => {
       await lease.stop()
       chromeSpy.mockRestore()
       expect(orientationOf()).toBe('landscape')
+    })
+
+    // CodeRabbit on #1221: an older viewer's rotate names its target, which the device may already hold, so no turn
+    // shows; waiting for one cost the full wait. Waited for is the target, and a device already there is not waited on.
+    it('does not wait for a target the device already shows', async () => {
+      const upright = { ...base, kind: 'rotate', to: { orientation: 'portrait' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { orientation: 'portrait' } } }] } as unknown as RawStep
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(held(0))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [upright, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a rotate the device refused when it was recorded is not sent again, so no turn comes.
+    it('does not wait for a rotate that is not sent', async () => {
+      const refused = { ...rotate, outcome: 'refused' } as unknown as RawStep
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(held(0))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [refused, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a turn left out is not waited for, so the next one's base can be read before it lands — the
+    // reset's late upright (0) — and the left-out turn's own late chrome (90) then reads as the next turn's. Once a turn
+    // has been left out, the turns after it are too.
+    it('leaves out the turns after one it left out, whose landing it never saw', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        const sent = log.filter((l) => l === 'replay rotate').length
+        return sent === 0 ? held(270) : sent === 1 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, rotate, textStep], { start: 0, end: 3 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
     })
 
     // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
