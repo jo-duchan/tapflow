@@ -13,7 +13,7 @@ import type { TapflowClient } from '../client.js'
 async function connect(): Promise<{ client: Client; tools: { name: string }[]; listBytes: number }> {
   const server = new McpServer({ name: 'tapflow', version: SERVER_VERSION }, { instructions: INSTRUCTIONS })
   // Only what the register wrapper calls before every tool; the guide tool touches nothing else.
-  registerTools(server, { reconnectIfRotated: async () => {}, releasedByReconnect: () => undefined } as unknown as TapflowClient)
+  registerTools(server, { reconnectIfClosed: async () => {}, releasedByReconnect: () => undefined } as unknown as TapflowClient)
   const [a, b] = InMemoryTransport.createLinkedPair()
   await server.connect(a)
   const client = new Client({ name: 'test', version: '0' })
