@@ -222,6 +222,23 @@ async function chromeAfterTurn(
   }
 }
 
+/**
+ * Until the chrome shows the device upright, for up to `ROTATE_SETTLE_MS`. The reset stands it up and reports done
+ * before Android's chrome says so (0.6–3.6 s), and every turn after it is read against that chrome: the start
+ * orientation's `setOrientation`, which returns at once when the chrome already says the target, and a replayed
+ * rotate, whose turn is counted from it (review). A chrome that cannot say which way it is held is not waited for.
+ */
+async function chromeUpright(channel: DashboardSessionChannel, sessionId: string, signal?: AbortSignal): Promise<void> {
+  const until = Date.now() + ROTATE_SETTLE_MS
+  for (;;) {
+    signal?.throwIfAborted()
+    const chrome = await channel.chrome(sessionId, 1)
+    const o = chrome ? chromeOrientation(chrome) : undefined
+    if (o === undefined || o === 'portrait' || Date.now() >= until) return
+    await new Promise((resolve) => setTimeout(resolve, ROTATE_POLL_MS))
+  }
+}
+
 function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefined {
   // Android body mode sends points in the frame's space; its `streamRotation` is the turn from that frame to the screen.
   if (!chrome || 'framePng' in chrome) return undefined
@@ -380,9 +397,12 @@ function swipeBeforeNamedTap(slice: RawStep[], offset: number, frameTurn?: 0 | 9
  * keychain, privacy grants, clipboard and simulated location reset, the network back online and the device upright.
  * An agent that cannot do it gets the app's data cleared, as before, and `null` says the rest was not.
  */
-export async function resetDevice(channel: DashboardSessionChannel, sessionId: string, bundleId: string | null): Promise<HeldResetReport | null> {
+export async function resetDevice(channel: DashboardSessionChannel, sessionId: string, bundleId: string | null, signal?: AbortSignal): Promise<HeldResetReport | null> {
   const report = await channel.runReset(sessionId, bundleId ? [bundleId] : [])
-  if (report !== undefined) return report
+  if (report !== undefined) {
+    if (report?.done.includes('orientation')) await chromeUpright(channel, sessionId, signal)
+    return report
+  }
   if (bundleId) await channel.clearState(sessionId, bundleId)
   return null
 }
@@ -401,7 +421,7 @@ export async function matchRange(
   const slice = steps.slice(range.start, range.end)
   await lease.start()
   // Apart from the report: `onReset?.(await …)` skips the reset itself when nobody listens.
-  const reset = await resetDevice(channel, sessionId, bundleId)
+  const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal)
   hooks.onReset?.(reset)
   hooks.signal.throwIfAborted()
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)

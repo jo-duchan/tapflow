@@ -250,6 +250,23 @@ describe('matchRange', () => {
       expect(orientationOf()).toBe('landscape')
     })
 
+    // The reset stands the device up and reports it done before Android's chrome says so (0.6–3.6 s later). Waited for,
+    // the turn after it is read from upright; not waited for, from the sideways chrome the recording ended on.
+    it('reads the first turn from the upright the reset left, once the chrome shows it', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      let resetAt = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (log.includes('replay rotate')) return held(90)
+        if (!resetAt && log.some((l) => l.startsWith('reset'))) resetAt = Date.now()
+        return resetAt && Date.now() - resetAt > 600 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    }, 20_000)
+
     // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
     // the sideways one the recording ended on. Any change from it was taken, and the late upright chrome named the
     // turn portrait. Only the turn it should reach counts: never seen, the step is left out, not given a wrong name.
