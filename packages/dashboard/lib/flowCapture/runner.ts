@@ -174,6 +174,36 @@ async function chromeNow(channel: DashboardSessionChannel, tap: CaptureTap): Pro
   return channel.chrome(tap.sessionId, 1)
 }
 
+/** How long Match waits for the chrome to show a replayed rotate: Android re-sends it once the display settles, which
+ *  takes 0.6–3.6 s after the turn (`AndroidAgent`, `input:rotate`). */
+export const ROTATE_SETTLE_MS = 5_000
+const ROTATE_POLL_MS = 200
+
+/** The turn a chrome says the device is held at — iOS's `streamRotation`, Android's `bodyRotation` — by value, since a
+ *  turn from one landscape to the other changes no orientation's name. */
+function heldTurn(chrome: ChromePayload | null): number | undefined {
+  if (!chrome) return undefined
+  return 'framePng' in chrome ? chrome.streamRotation : (chrome as AndroidChrome).bodyRotation
+}
+
+/**
+ * The chrome once it shows a turn away from `from`, or `null` if it never does in `ROTATE_SETTLE_MS`. A recorded rotate
+ * is a quarter turn, not a target, so its orientation is read after it — and read at once, it was the one before it,
+ * on every turn of an Android emulator. With no turn to compare (`from` unknown), the chrome as it is.
+ */
+async function chromeAfterTurn(channel: DashboardSessionChannel, tap: CaptureTap, from: number | undefined, signal: AbortSignal): Promise<ChromePayload | null> {
+  if (from === undefined) return chromeNow(channel, tap)
+  const until = Date.now() + ROTATE_SETTLE_MS
+  for (;;) {
+    signal.throwIfAborted()
+    const now = await chromeNow(channel, tap)
+    const turn = heldTurn(now)
+    if (turn !== undefined && turn !== from) return now
+    if (Date.now() >= until) return null
+    await new Promise((resolve) => setTimeout(resolve, ROTATE_POLL_MS))
+  }
+}
+
 function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefined {
   // Android body mode sends points in the frame's space; its `streamRotation` is the turn from that frame to the screen.
   if (!chrome || 'framePng' in chrome) return undefined
@@ -709,7 +739,8 @@ export async function matchRange(
       if (after) shot = await shoot()
     }
     if (raw.kind === 'rotate') {
-      const turned = await chromeNow(channel, tap)
+      // `chrome` was read before the turn was sent: the turn it held.
+      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), hooks.signal)
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }

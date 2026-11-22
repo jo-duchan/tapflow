@@ -214,6 +214,53 @@ describe('matchRange', () => {
     expect(shots).toEqual([''])
   })
 
+  // A recorded rotate is a quarter turn, not a target, so the flow's `setOrientation` is read from the chrome after it.
+  // Android sends that chrome only once the display settles (0.6–3.6 s): read at once, every turn was given the one
+  // before it (Pixel_9_tapflow: landscape, upside-down, landscape, portrait came out portrait, landscape, unknown,
+  // landscape).
+  describe('a rotate\'s orientation, from the chrome once the turn shows', () => {
+    const rotate = { ...base, kind: 'rotate', messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'clockwise' } } }] } as unknown as RawStep
+    const held = (body: number) => ({ buttons: [], streamType: 'h264', bodyRotation: body, streamRotation: 0 }) as never
+    const orientationOf = () => (matchedWith.find((c) => (c as { orientationAfter?: unknown }).orientationAfter !== undefined) as { orientationAfter?: string } | undefined)?.orientationAfter
+
+    it('waits for the chrome to show the turn, rather than taking the one from before it', async () => {
+      let after = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (!log.includes('replay rotate')) return held(0)
+        return after++ < 2 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
+    // Landscape to the other landscape: the same word, another turn. Compared by the turn, it is seen to have happened.
+    it('sees a turn from one landscape to the other', async () => {
+      let after = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (!log.includes('replay rotate')) return held(90)
+        return after++ < 1 ? held(90) : held(270)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+      expect(after).toBeGreaterThan(1)
+    })
+
+    it('says nothing when the chrome never shows the turn: left out, not given the old orientation', async () => {
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(held(0))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    }, 15_000)
+  })
+
   it('says where each step touches before it is replayed, for drawing on the device', async () => {
     const onTouch = vi.fn()
     const lease = new PauseLease(tap)
