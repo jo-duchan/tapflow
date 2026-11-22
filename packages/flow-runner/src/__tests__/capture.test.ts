@@ -888,6 +888,92 @@ describe('defaultRange', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
     })
 
+    // #1224, measured on iOS 26.5 (Food Truck): home-screen pages turned faster than the reads, so no read placed the
+    // icon's tap — the one before it was asked before the last swipe ended, the next answered just after the tap lifted.
+    // The app's first report after it still says which tap opened it, as long as the step before was home.
+    it('leaves out the icon\'s tap no read placed, after a step read as home, when the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.3, 0.68], [0.88, 0.68]])
+      // Asked after the swipe ended and before the tap began, answered 18 ms after the tap lifted: it places neither the
+      // tap nor anything after it, but says the swipe stayed on the home screen.
+      const asked = r.t
+      r.wait(60).touch([[0.19, 0.48]])
+      r.entries.push({ at: r.t + 18, kind: 'keyboard', requestedAt: asked, keyboard: IOS_HOME, settled: false })
+      read(r.wait(100), { shown: null }).touch([[0.42, 0.84], [0.42, 0.5]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.3, 0.42]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'swipe', 'tap', 'swipe', 'tap'])
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 3, end: 5 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    })
+
+    // Pre-PR review: a permission alert the app raised as it started, its Allow tapped before any read placed it, then the
+    // app's first touch. The step before is the icon's tap, which left home: Allow is kept.
+    it('keeps an unplaced tap right after the icon\'s, which left home, though the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      // The app coming up: the next read can say nothing of home.
+      read(r, { shown: null }).touch([[0.5, 0.62]])
+      read(r.wait(100), APP).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false])
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // CodeRabbit on #1225: the read that says the step before stayed home must be one asked before this step began. A
+    // read asked after a later trip home (icon, Allow, the app's first touch, Home) would vouch for the icon's tap.
+    it('does not take a read asked after the next step began as the step before staying home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      read(r.wait(400), IOS_HOME)
+      const steps = r.steps()
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // CodeRabbit on #1225, second pass: an app takes a moment to come up, so the read right after the icon's tap still
+    // says home. A tap is never vouched for as having stayed home: it may be the one that opened the app. Costs a folder
+    // opened by a tap, whose icon tap is left unknown as before this rule (the range warns and the person moves it).
+    it('does not take a tap as having stayed home, though the read right after it says home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      // Asked right after the icon's tap, answered while the app was still coming up.
+      r.entries.push({ at: r.t + 180, kind: 'keyboard', requestedAt: r.t + 10, keyboard: IOS_HOME, settled: false })
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBe(true)
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // The same recording, one fact changed each: either is enough to leave the tap unknown, as before.
+    const iconRun = (before: KeyboardState, firstSeq: number) => {
+      const r = new Rec().install()
+      read(r, before).touch([[0.3, 0.68], [0.88, 0.68]])
+      const asked = r.t
+      r.wait(60).touch([[0.19, 0.48]])
+      r.entries.push({ at: r.t + 18, kind: 'keyboard', requestedAt: asked, keyboard: before, settled: false })
+      read(r.wait(100), { shown: null }).touch([[0.42, 0.84], [0.42, 0.5]]).touched({ moving: false, seq: firstSeq })
+      read(r, APP).touch([[0.3, 0.42]]).touched({ moving: false, seq: firstSeq + 1 })
+      return r.steps()
+    }
+
+    it('leaves a tap no read placed unknown when the step before it was not read as home either', () => {
+      const steps = iconRun({ shown: null }, 1)
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(1)
+    })
+
+    it('leaves a tap no read placed unknown when the app\'s next report is not its first', () => {
+      const steps = iconRun(IOS_HOME, 2)
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false, false])
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
     // A touch no app reported between them (a permission alert's Allow, SpringBoard's) leaves the first unknown.
     it('does not take a tap for the icon\'s when another unreported touch comes before the app\'s first', () => {
       const r = new Rec().install()
