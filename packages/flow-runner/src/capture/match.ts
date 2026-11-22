@@ -34,7 +34,8 @@ export interface MatchContext {
 
 export type SkipReason =
   | 'refused' | 'hold-drag' | 'held-button' | 'too-long' | 'no-pinch'
-  /** The device did not say which way a rotate left it (no chrome showed the turn). */
+  /** The device did not say which way a rotate left it: no chrome showed the turn in time, or its chrome cannot say
+   *  (a multi-panel iOS device, Android without a body turn). */
   | 'orientation-unknown'
   /** The device ended up upside down, which a flow's `setOrientation` cannot turn it to. */
   | 'orientation-upside-down'

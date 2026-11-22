@@ -267,6 +267,19 @@ describe('matchRange', () => {
       expect(orientationOf()).toBe('landscape')
     }, 20_000)
 
+    // Review of the wait: past it, the chrome may still say the sideways turn the recording ended on (270), and a
+    // clockwise turn from there is expected at 0 — which the reset's late upright chrome then shows. Named portrait, the
+    // device at 90. Until a chrome shows upright, a rotate is left out instead.
+    it('leaves a turn out while the reset\'s upright has not shown, rather than count it from the recording\'s last', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.includes('replay rotate') ? held(0) : held(270)))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    }, 20_000)
+
     // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
     // the sideways one the recording ended on. Any change from it was taken, and the late upright chrome named the
     // turn portrait. Only the turn it should reach counts: never seen, the step is left out, not given a wrong name.

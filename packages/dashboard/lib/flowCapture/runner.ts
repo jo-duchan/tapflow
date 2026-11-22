@@ -424,6 +424,11 @@ export async function matchRange(
   const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal)
   hooks.onReset?.(reset)
   hooks.signal.throwIfAborted()
+  // The reset stood the device up, and `resetDevice` waited for the chrome to say so. Still not said, every turn read
+  // from it is counted from the recording's last one, which can name a turn wrongly: until a chrome shows upright, a
+  // rotate is left out rather than measured (review).
+  const afterReset = reset?.done.includes('orientation') ? heldTurn(await chromeNow(channel, tap)) : undefined
+  let uprightUnseen = afterReset !== undefined && afterReset !== 0
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
   await alignment.align()
   const orientation = rangeStartOrientation(steps, range)
@@ -776,8 +781,9 @@ export async function matchRange(
       if (settled && TYPING.has(raw.kind)) ctx.treeAfter = settled.elements
       if (after) shot = await shoot()
     }
-    if (raw.kind === 'rotate') {
-      // `chrome` was read before the turn was sent: the turn it held, unless a reset's own turn has yet to show in it.
+    if (uprightUnseen && heldTurn(chrome) === 0) uprightUnseen = false
+    if (raw.kind === 'rotate' && !uprightUnseen) {
+      // `chrome` was read before the turn was sent: the turn it held.
       const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), rotateDirection(raw), hooks.signal)
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
