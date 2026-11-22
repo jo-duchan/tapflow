@@ -401,6 +401,8 @@ export function reasonAdvice(reason: string | undefined): string {
 export class TapflowClient {
   private ws: WebSocket | null = null
   private lastClose: { code: number; reason: string } | null = null
+  /** Why the last reconnect after a close failed, named by a tool that then finds no socket; cleared on connect. */
+  private reconnectFailure: string | null = null
   /** One identity per process, so a reconnect re-joins its own sessions instead of contending with the
    *  socket it replaces. Minted here rather than supplied: nothing outside this process shares it. */
   private readonly clientId = randomUUID()
@@ -474,8 +476,9 @@ export class TapflowClient {
   private reconnecting: Promise<void> | null = null
   /** Sessions joined on this socket. */
   private readonly held = new Set<string>()
-  /** Sessions held on a socket a reconnect replaced: the relay released them when that socket closed. */
-  private readonly released = new Set<string>()
+  /** Sessions held on a socket a reconnect replaced, each with how that reconnect came about: the relay released
+   *  them when that socket closed. */
+  private readonly released = new Map<string, string>()
   /** Leaves per session, so an input still sending (a swipe's hold) can tell that its session was left mid-way. */
   private readonly leaves = new Map<string, number>()
   /** Where a swipe this client opened has its finger now, so a leave can lift it instead of leaving it down. Each
@@ -483,27 +486,54 @@ export class TapflowClient {
    *  record of a newer swipe on the same session (CodeRabbit on #1190). */
   private readonly openTouches = new Map<string, { x: number; y: number }>()
 
+  /** How long an opening handshake may take. Without it a relay host that accepts the connection and never answers
+   *  (asleep, a dropped route) would hold the tool call that reconnects for as long as the OS keeps the socket. */
+  private readonly handshakeTimeoutMs: number
+
   constructor(
     private readonly relayUrl: string,
     token: string | TokenSource,
+    opts: { handshakeTimeoutMs?: number } = {},
   ) {
+    this.handshakeTimeoutMs = opts.handshakeTimeoutMs ?? 10_000
     this.tokens = typeof token === 'string' ? fixedToken(token, relayUrl) : token
   }
 
   /**
-   * After the relay closed this socket for its credential (1008 — a revoked or expired token is closed within the
-   * heartbeat), re-read the token and reconnect once **if it changed**. Checked on the next tool call rather than at
-   * the close, because a rotation is "the relay closes, then the person writes the file": at close time the file
-   * still holds the old one. The relay releases a browser-role socket's sessions at once — there is no reconnect
-   * grace for them — so they are not re-joined silently; a tool on one says to call connect_device again.
+   * After the relay closed this socket — it restarted, crashed or slept, the network dropped, the heartbeat ended it,
+   * or it revoked the token — reconnect once, on the next tool call (#1213). Not in the background: a tool call is
+   * the only thing that needs the socket, and the relay releases a browser-role socket's sessions as it closes — there
+   * is no reconnect grace for them — so an early socket would restore nothing. They are not re-joined silently
+   * either; a tool on one says to call connect_device again.
+   *
+   * A credential close (1008) reconnects only once the token changed, re-read here rather than at the close: a
+   * rotation is "the relay closes, then the person writes the file", so at close time the file still holds the old
+   * one, and the old one would only be refused again. A close this client asked for (`disconnect()`) is not
+   * recorded, so it is not undone here.
+   *
+   * The call that failed on the close is not re-sent by anyone: its input may already have reached the device.
    */
-  async reconnectIfRotated(): Promise<void> {
-    if (this.ws || this.lastClose?.code !== 1008) return
+  async reconnectIfClosed(): Promise<void> {
+    const close = this.lastClose
+    if (this.ws || !close) return
     this.reconnecting ??= (async () => {
+      // Re-read for every close, not only a credential one: a token written while the connection was down is the one
+      // the relay will accept.
       this.tokens.refresh()
-      if (this.tokens.token === this.connectedWith) return
-      await this.connect()
-      for (const id of this.held) this.released.add(id)
+      let how: string
+      if (close.code === 1008) {
+        if (this.tokens.token === this.connectedWith) return
+        how = 'with the new token'
+      } else {
+        how = `after the connection closed (relay closed ${close.code}${close.reason ? `: ${close.reason}` : ''})`
+      }
+      try {
+        await this.connect()
+      } catch (e) {
+        this.reconnectFailure = (e as Error).message || (e as { code?: string }).code || String(e)
+        throw e
+      }
+      for (const id of this.held) this.released.set(id, how)
       this.held.clear()
     })().finally(() => { this.reconnecting = null })
     await this.reconnecting
@@ -526,9 +556,10 @@ export class TapflowClient {
 
   /** Why a session this client held is not held any more, when a reconnect is the reason. */
   releasedByReconnect(sessionId: string): string | undefined {
-    return this.released.has(sessionId)
-      ? `reconnected to the relay with the new token, and the relay released session ${sessionId} when the old connection closed — call connect_device again`
-      : undefined
+    const how = this.released.get(sessionId)
+    return how === undefined
+      ? undefined
+      : `reconnected to the relay ${how}, and session ${sessionId} went with the old connection: the relay releases a closed connection's sessions — call connect_device again`
   }
 
   connect(): Promise<void> {
@@ -537,7 +568,9 @@ export class TapflowClient {
       // unless the token has `view`. REST needs the token everywhere, loopback included.
       const auth = authHeader(this.tokens)
       const headers = auth.Authorization ? auth : undefined
-      this.connectedWith = this.tokens.token
+      // Recorded once the socket opens: a try that never reached the relay says nothing about the token, so a 1008
+      // close followed by a failed reconnect with the new token tries it again (CodeRabbit on #1222).
+      const token = this.tokens.token
       // One identity for the process, so a reconnect re-joins its own sessions rather than contending
       // with the socket it is replacing. The relay mints one per connection when this is absent, which is
       // the same behaviour a socket had before ownership moved off it.
@@ -546,10 +579,12 @@ export class TapflowClient {
       // remotely it is paired with the token's user (see `ownerKeyFor` in the relay).
       const url = new URL(this.relayUrl)
       url.searchParams.set('client', this.clientId)
-      const ws = new WebSocket(url.toString(), { headers })
+      const ws = new WebSocket(url.toString(), { headers, handshakeTimeout: this.handshakeTimeoutMs })
       ws.once('open', () => {
         this.ws = ws
+        this.connectedWith = token
         this.lastClose = null
+        this.reconnectFailure = null
         resolve()
       })
       ws.once('error', reject)
@@ -800,10 +835,24 @@ export class TapflowClient {
     this.ws.send(JSON.stringify(msg))
   }
 
+  /** True once the socket open now has closed or been replaced: a gesture that waits between frames must not send the
+   *  rest of them on a socket another tool call reconnected meanwhile (#1213), where its session is not held. */
+  private socketWatch(): () => boolean {
+    const ws = this.ws
+    return () => this.ws !== ws || ws?.readyState !== WebSocket.OPEN
+  }
+
+  private droppedDuring(sessionId: string, gesture: string): Error {
+    return this.failed(sessionId,
+      `Could not confirm the input reached the device: the relay connection dropped during the ${gesture}${this.closeDetail()}. ` +
+        'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
+  }
+
   private closeDetail(): string {
     const c = this.lastClose
     if (!c) return ''
-    return c.reason ? ` (relay closed ${c.code}: ${c.reason})` : ` (relay closed ${c.code})`
+    const failed = this.reconnectFailure ? `; reconnecting failed: ${this.reconnectFailure}` : ''
+    return c.reason ? ` (relay closed ${c.code}: ${c.reason}${failed})` : ` (relay closed ${c.code}${failed})`
   }
 
   private waitFor(
@@ -1167,9 +1216,7 @@ export class TapflowClient {
     const stop = (): Error => {
       if (left()) return leftError(sessionId)
       release()
-      return this.failed(sessionId,
-      `Could not confirm the input reached the device: the relay connection dropped during the swipe${this.closeDetail()}. ` +
-        'Do not repeat the input — part of it may have landed. Check the device state (screenshot or ui_tree) before deciding what to do next.')
+      return this.droppedDuring(sessionId, 'swipe')
     }
     const at = (point: { x: number; y: number }) => {
       if (left() || lost()) throw stop()
@@ -1255,8 +1302,10 @@ export class TapflowClient {
       throw this.failed(sessionId, `long press duration must be a positive finite number no greater than ${MAX_GESTURE_MS}ms`)
     }
     const payload = { x, y }
+    const lost = this.socketWatch()
     this.send({ type: 'input:touch:start', sessionId, payload })
     await delay(durationMs)
+    if (lost()) throw this.droppedDuring(sessionId, 'long press')
     const requestId = randomUUID()
     this.send({ type: 'input:touch:end', sessionId, requestId, payload })
     await this.awaitInputAck(sessionId, requestId, durationMs)
@@ -1282,9 +1331,11 @@ export class TapflowClient {
       f0: { x: start[0][0] + (end[0][0] - start[0][0]) * t, y: start[0][1] + (end[0][1] - start[0][1]) * t },
       f1: { x: start[1][0] + (end[1][0] - start[1][0]) * t, y: start[1][1] + (end[1][1] - start[1][1]) * t },
     })
+    const lost = this.socketWatch()
     this.send({ type: 'input:pinch:start', sessionId, payload: at(0) })
     for (let i = 1; i <= STEPS; i++) {
       await delay(interval)
+      if (lost()) throw this.droppedDuring(sessionId, 'pinch')
       this.send({ type: 'input:pinch:move', sessionId, payload: at(i / STEPS) })
     }
     const requestId = randomUUID()

@@ -241,11 +241,11 @@ function err(text: string): ToolResult {
 }
 
 export function registerTools(server: McpServer, client: TapflowClient): void {
-  // Every tool first gives a rotated token its one reconnect (`reconnectIfRotated`), and a tool aimed at a session
-  // the relay released because of it says so instead of failing for a reason it cannot name.
+  // Every tool first gives a socket the relay closed its one reconnect (`reconnectIfClosed`), and a tool aimed at a
+  // session the relay released because of it says so instead of failing for a reason it cannot name.
   const register = ((name: string, config: unknown, cb: (...args: unknown[]) => unknown) =>
     server.registerTool(name, config as never, (async (...args: unknown[]) => {
-      await client.reconnectIfRotated().catch(() => { /* the tool reports the closed socket itself */ })
+      await client.reconnectIfClosed().catch(() => { /* the tool reports the closed socket itself */ })
       // Only a tool whose schema has a sessionId gets its input as the first argument; a schema-less one gets the
       // SDK's request context there, whose own `sessionId` is a transport's, not a device's.
       const takesSession = (config as { inputSchema?: Record<string, unknown> }).inputSchema?.['sessionId'] !== undefined

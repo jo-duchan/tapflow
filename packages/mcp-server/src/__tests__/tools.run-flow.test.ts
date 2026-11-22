@@ -33,7 +33,7 @@ function fakeClient(calls: string[]): TapflowClient {
     pressKey: vi.fn(),
     openUrl: vi.fn(async () => {}),
     reach: vi.fn(async (_s: string, targets: unknown[]) => targets.map(() => ({ state: 'unknown', reason: 'fake client' }))),
-    reconnectIfRotated: vi.fn(async () => {}),
+    reconnectIfClosed: vi.fn(async () => {}),
     releasedByReconnect: vi.fn(() => undefined),
     activity: vi.fn(),
     lookupBuild: vi.fn(async () => ({ kind: 'unknown', reason: 'no token' })),

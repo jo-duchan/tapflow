@@ -27,7 +27,7 @@ function client(reach: (target: UIElement) => ReachResult, tree: UIElement[] = [
     tap: vi.fn(async () => {}),
     longPress: vi.fn(async () => {}),
     screenshot: vi.fn(async () => Buffer.from('png')),
-    reconnectIfRotated: vi.fn(async () => {}),
+    reconnectIfClosed: vi.fn(async () => {}),
     releasedByReconnect: vi.fn(() => undefined),
     activity: vi.fn(),
   } as unknown as TapflowClient

@@ -16,7 +16,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 /** A relay: HTTP answers by `rest`, the socket answers `agents:list` and `session:start`, and every handshake's
  *  bearer is recorded. `refuseSocket` closes the socket 1008 right after the upgrade, as the relay does. */
-function relay(opts: { rest?: (auth: string | undefined) => number; refuseSocket?: (auth: string | undefined) => boolean; closeCode?: number } = {}) {
+function relayOn(port: number) { return relay({}, port) }
+
+function relay(opts: { rest?: (auth: string | undefined) => number; refuseSocket?: (auth: string | undefined) => boolean; closeCode?: number } = {}, port = 0) {
   const auths: (string | undefined)[] = []
   const sockets: WebSocket[] = []
   const server = http.createServer((req, res) => {
@@ -35,7 +37,7 @@ function relay(opts: { rest?: (auth: string | undefined) => number; refuseSocket
     })
   })
   return new Promise<{ port: number; auths: typeof auths; sockets: typeof sockets; close: () => Promise<void> }>((resolve) => {
-    server.listen(0, '127.0.0.1', () => resolve({
+    server.listen(port, '127.0.0.1', () => resolve({
       port: (server.address() as { port: number }).port,
       auths,
       sockets,
@@ -77,13 +79,13 @@ describe('TapflowClient after the relay closes it for its token', () => {
     await gone
 
     // Still the old token: nothing to reconnect with, and no loop.
-    await client.reconnectIfRotated()
+    await client.reconnectIfClosed()
     expect(r.auths).toEqual(['Bearer tflw_pat_old'])
 
     store(r.port, 'tflw_pat_new')
     // Two tools at once: the second waits for the one reconnect rather than running on no socket.
-    const first = client.reconnectIfRotated()
-    await client.reconnectIfRotated()
+    const first = client.reconnectIfClosed()
+    await client.reconnectIfClosed()
     expect(await client.listDevices()).toEqual([])
     await first
     expect(r.auths).toEqual(['Bearer tflw_pat_old', 'Bearer tflw_pat_new'])
@@ -95,26 +97,11 @@ describe('TapflowClient after the relay closes it for its token', () => {
     await r.close()
   })
 
-  it('does not reconnect after a close that was not for a credential', async () => {
-    const r = await relay()
-    store(r.port, 'tflw_pat_old')
-    const tokens = resolveToken({ relayUrl: `ws://localhost:${r.port}`, env: { TAPFLOW_TOKEN_FILE: file } })
-    const client = new TapflowClient(`ws://localhost:${r.port}`, tokens)
-    await client.connect()
-    const gone = closed(client)
-    r.sockets[0]!.close(1001, 'going away')
-    await gone
-    store(r.port, 'tflw_pat_new')
-    await client.reconnectIfRotated()
-    expect(r.auths).toHaveLength(1)
-    await r.close()
-  })
-
   it('does not read a schema-less tool\'s request context as a session', async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<{ content: { text: string }[]; isError?: boolean }>>()
     const server = { registerTool: (name: string, _c: unknown, cb: never) => { handlers.set(name, cb) } } as unknown as McpServer
     const fake = {
-      reconnectIfRotated: vi.fn(async () => {}),
+      reconnectIfClosed: vi.fn(async () => {}),
       releasedByReconnect: () => 'released',
       listDevices: vi.fn(async () => []),
     } as unknown as TapflowClient
@@ -129,7 +116,7 @@ describe('TapflowClient after the relay closes it for its token', () => {
     const server = { registerTool: (name: string, _c: unknown, cb: never) => { handlers.set(name, cb) } } as unknown as McpServer
     const tap = vi.fn()
     const fake = {
-      reconnectIfRotated: vi.fn(async () => {}),
+      reconnectIfClosed: vi.fn(async () => {}),
       releasedByReconnect: (id: string) => (id === 's1' ? 'released — call connect_device again' : undefined),
       tap,
     } as unknown as TapflowClient
@@ -138,7 +125,136 @@ describe('TapflowClient after the relay closes it for its token', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]!.text).toBe('tap failed: released — call connect_device again')
     expect(tap).not.toHaveBeenCalled()
-    expect(fake.reconnectIfRotated).toHaveBeenCalled()
+    expect(fake.reconnectIfClosed).toHaveBeenCalled()
+  })
+})
+
+describe('TapflowClient after the relay closes it for any other reason (#1213)', () => {
+  it('reconnects on the next call after the relay drops the socket, once, and says which close released the sessions', async () => {
+    const r = await relay()
+    const client = new TapflowClient(`ws://localhost:${r.port}`, 'tflw_pat_x')
+    await client.connect()
+    await client.connectDevice('s1')
+    const gone = closed(client)
+    r.sockets[0]!.terminate()
+    await gone
+
+    const first = client.reconnectIfClosed()
+    await client.reconnectIfClosed()
+    await first
+    expect(r.auths).toHaveLength(2)
+    expect(await client.listDevices()).toEqual([])
+    expect(client.releasedByReconnect('s1')).toBe(
+      "reconnected to the relay after the connection closed (relay closed 1006), and session s1 went with the old connection: the relay releases a closed connection's sessions — call connect_device again",
+    )
+
+    await client.connectDevice('s1')
+    expect(client.releasedByReconnect('s1')).toBeUndefined()
+    // Open again: nothing to do.
+    await client.reconnectIfClosed()
+    expect(r.auths).toHaveLength(2)
+    client.disconnect()
+    await r.close()
+  })
+
+  it('reconnects after a relay going away (1001), as one restarting does', async () => {
+    const r = await relay()
+    const client = new TapflowClient(`ws://localhost:${r.port}`, 'tflw_pat_x')
+    await client.connect()
+    const gone = closed(client)
+    r.sockets[0]!.close(1001, 'going away')
+    await gone
+    await client.reconnectIfClosed()
+    expect(r.auths).toHaveLength(2)
+    expect(await client.listDevices()).toEqual([])
+    client.disconnect()
+    await r.close()
+  })
+
+  it('while the relay is down, a call names the failed reconnect; once it is back, the next call reconnects', async () => {
+    const r = await relay()
+    const port = r.port
+    const client = new TapflowClient(`ws://localhost:${port}`, 'tflw_pat_x')
+    await client.connect()
+    const gone = closed(client)
+    await r.close()
+    await gone
+
+    await expect(client.reconnectIfClosed()).rejects.toThrow()
+    await expect(client.listDevices()).rejects.toThrow(/^Not connected to relay \(relay closed 1006; reconnecting failed: .*ECONNREFUSED/)
+
+    const back = await relayOn(port)
+    await client.reconnectIfClosed()
+    expect(await client.listDevices()).toEqual([])
+    // The failure belonged to that outage: a later close does not repeat it.
+    const again = closed(client)
+    back.sockets[0]!.terminate()
+    await again
+    await expect(client.listDevices()).rejects.toThrow(/^Not connected to relay \(relay closed 1006\)$/)
+    client.disconnect()
+    await back.close()
+  })
+
+  // CodeRabbit on #1222: a reconnect with the new token that failed on the network must stay eligible — the token
+  // was never refused.
+  it('after a credential close, retries the new token once the relay is back, when the first try could not reach it', async () => {
+    const r = await relay()
+    const port = r.port
+    store(port, 'tflw_pat_old')
+    const tokens = resolveToken({ relayUrl: `ws://localhost:${port}`, env: { TAPFLOW_TOKEN_FILE: file } })
+    const client = new TapflowClient(`ws://localhost:${port}`, tokens)
+    await client.connect()
+    const gone = closed(client)
+    r.sockets[0]!.close(1008, 'token revoked')
+    await gone
+    await r.close()
+    store(port, 'tflw_pat_new')
+    await expect(client.reconnectIfClosed()).rejects.toThrow()
+
+    const back = await relayOn(port)
+    await client.reconnectIfClosed()
+    expect(back.auths).toEqual(['Bearer tflw_pat_new'])
+    expect(await client.listDevices()).toEqual([])
+    client.disconnect()
+    await back.close()
+  })
+
+  // CodeRabbit on #1222: a token written while the connection was down is the one the reconnect carries.
+  it('reconnects after a drop with the token written meanwhile', async () => {
+    const r = await relay()
+    store(r.port, 'tflw_pat_old')
+    const tokens = resolveToken({ relayUrl: `ws://localhost:${r.port}`, env: { TAPFLOW_TOKEN_FILE: file } })
+    const client = new TapflowClient(`ws://localhost:${r.port}`, tokens)
+    await client.connect()
+    const gone = closed(client)
+    r.sockets[0]!.terminate()
+    await gone
+    store(r.port, 'tflw_pat_new')
+    await client.reconnectIfClosed()
+    expect(r.auths).toEqual(['Bearer tflw_pat_old', 'Bearer tflw_pat_new'])
+    client.disconnect()
+    await r.close()
+  })
+
+  it('does not reconnect a client that disconnected itself', async () => {
+    const r = await relay()
+    const client = new TapflowClient(`ws://localhost:${r.port}`, 'tflw_pat_x')
+    await client.connect()
+    client.disconnect()
+    await client.reconnectIfClosed()
+    expect(r.auths).toHaveLength(1)
+    await r.close()
+  })
+
+  it('gives up on a relay that accepts the connection and never answers the upgrade', async () => {
+    const sockets: import('net').Socket[] = []
+    const silent = (await import('net')).createServer((s) => { sockets.push(s) })
+    await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()))
+    const port = (silent.address() as { port: number }).port
+    const client = new TapflowClient(`ws://localhost:${port}`, 'tflw_pat_x', { handshakeTimeoutMs: 50 })
+    await expect(client.connect()).rejects.toThrow(/timed out/i)
+    for (const s of sockets) s.destroy()
+    await new Promise<void>((r) => silent.close(() => r()))
   })
 })
 

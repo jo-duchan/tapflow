@@ -282,17 +282,21 @@ describe('a session-scoped failure carries what the client knows about the sessi
 
       it.runIf(ownsWaiters)('the input-ack wrapper reads the record', () => {
         const lines = src.split('\n')
-        const at = lines.findIndex((l) => /(Could not confirm|was not confirmed)/.test(l))
-        expect(at, `${path} no longer builds an unconfirmed-input message`).toBeGreaterThan(-1)
-        const fn = enclosingFn(lines, at)
-        expect(
-          // Either it reads the record itself (`mcp-server`) or it interpolates the wrapped error's own
-          // message, which already carries the note from whichever rejection source produced it
-          // (`flow-runner`, which declines to append a second copy and says so beside the code).
-          /this\.sessionNote\(|\$\{[^}]*\bmessage\b/.test(lines.slice(fn.start, at + 3).join('\n')),
-          `${path}:${at + 1} — the unconfirmed-input message neither reads the record nor carries the ` +
-          'wrapped error that already did, so what the relay said about the session reaches nobody',
-        ).toBe(true)
+        // Every place that builds one, not the first: the first used to be the wrapper by position alone, and a
+        // helper written above it (#1222's `droppedDuring`) became the only one judged. Comments are not messages.
+        const sites = lines.flatMap((l, i) => (/(Could not confirm|was not confirmed)/.test(l) && !/^\s*(\*|\/\/)/.test(l) ? [i] : []))
+        expect(sites.length, `${path} no longer builds an unconfirmed-input message`).toBeGreaterThan(0)
+        for (const at of sites) {
+          const fn = enclosingFn(lines, at)
+          expect(
+            // It reads the record itself (`sessionNote`, or `failed`, which appends it — `mcp-server`), or it
+            // interpolates the wrapped error's own message, which already carries the note from whichever rejection
+            // source produced it (`flow-runner`, which declines to append a second copy and says so beside the code).
+            /this\.sessionNote\(|this\.failed\(|\$\{[^}]*\bmessage\b/.test(lines.slice(fn.start, at + 3).join('\n')),
+            `${path}:${at + 1} — the unconfirmed-input message neither reads the record nor carries the ` +
+            'wrapped error that already did, so what the relay said about the session reaches nobody',
+          ).toBe(true)
+        }
       })
 
       it('the self-describing list is not a way to opt out quietly', () => {

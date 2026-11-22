@@ -657,6 +657,34 @@ describe('TapflowClient', () => {
       expect(Date.now() - started).toBeLessThan(500)
     })
 
+    // CodeRabbit on #1222: a long press and a pinch wait between frames too, and another tool call can reconnect in the
+    // meantime (#1213). Their remaining frames must not go out on the replacement socket.
+    it('a long press whose socket was replaced while it held sends no end on the new one, and is unconfirmed', async () => {
+      const press = client.longPress('sess-1', 0.5, 0.5, 400).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const before = relay.sentMessages().length
+      expect(String(await press)).toMatch(/could not confirm the input reached the device: the relay connection dropped during the long press/i)
+      await client.tap('sess-2', 0.1, 0.1)
+      const after = relay.sentMessages().slice(before).filter((m) => m['sessionId'] === 'sess-1')
+      expect(after).toEqual([])
+    })
+
+    it('a pinch whose socket was replaced mid-way sends no further move or end on the new one, and is unconfirmed', async () => {
+      const pinch = client.pinch('sess-1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 800).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const before = relay.sentMessages().length
+      expect(String(await pinch)).toMatch(/could not confirm the input reached the device: the relay connection dropped during the pinch/i)
+      await client.tap('sess-2', 0.1, 0.1)
+      const after = relay.sentMessages().slice(before).filter((m) => m['sessionId'] === 'sess-1')
+      expect(after).toEqual([])
+    })
+
     it('a leave with no swipe open sends the leave alone', async () => {
       client.disconnectDevice('sess-1')
       await client.tap('sess-2', 0.1, 0.1)
