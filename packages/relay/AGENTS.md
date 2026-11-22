@@ -390,8 +390,14 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   total), cookie-only and owner-only (404 to anyone else), gone with the capture's seal, its trim and the person turning
   capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
   keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
-  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
-  iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
+  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`) is
+  no picture, not a guess. Two exceptions, both decided for a person who turned capturing on (it is off until they
+  do) and whose pictures stay in memory, theirs alone: a touch iOS made with the app under test off the screen (the last
+  read `shown: null, onHome: true` — the home screen or another app, which the runner cannot read a keyboard on) is kept,
+  as a QA Session's recording and screenshots keep that screen unmasked, unless the read after it has a keyboard up (the
+  last read can predate the app coming up, the touch already on a field it focused); and a touch only unsaying reads came before (an
+  app still starting) is off the keyboard when the read after it has the keyboard down, since a key leaves it up. Why a
+  picture was refused (`keyboard`, `typed`) goes to the dialog in the snapshot (`thumbnailRefusals`). A key inside a typed run keeps
   none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
   field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
   Android).

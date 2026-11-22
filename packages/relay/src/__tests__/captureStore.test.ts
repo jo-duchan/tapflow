@@ -743,9 +743,77 @@ describe('CaptureStore — thumbnails', () => {
       const { s } = store()
       record(s, ...touchAt('t', 0.2))
       expect(s.putThumbnail('s', '1', 't', jpeg(10))).toBe('keyboard')
+      // Reads that cannot say before it: the read after decides (`touchOnKeys`), and it cannot say either.
       const unknown = await withKeyboard([{ shown: null }])
       record(unknown, ...touchAt('u', 0.2))
+      expect(unknown.putThumbnail('s', '1', 'u', jpeg(10))).toBe('not-yet')
+      await vi.advanceTimersByTimeAsync(50)
       expect(unknown.putThumbnail('s', '1', 'u', jpeg(10))).toBe('keyboard')
+    })
+
+    // iOS reads no keyboard while the app under test is not in front (`shown: null, onHome: true`): the home screen or
+    // another app. Such a screen is kept as a QA Session's recording or screenshot keeps it, which nothing masks either:
+    // capturing steps is off until the person turns it on, and these pictures stay in memory, theirs alone.
+    it('keeps one for a touch made while the app was not in front, once the read after it is back', async () => {
+      const s = await withKeyboard([{ shown: null, onHome: true }])
+      record(s, ...touchAt('home', 0.8))
+      expect(s.putThumbnail('s', '1', 'home', jpeg(10))).toBe('not-yet')
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'home', jpeg(10))).toBe('kept')
+    })
+
+    // Pre-PR review: reads go one at a time and no input waits for one, so the last read before a touch can be from
+    // before the app came up — the touch already in it, on a field its first screen focused. The read after says so.
+    it('keeps none for a touch the last read placed off the app, when the keyboard was up right after it', async () => {
+      const s = await withKeyboard([{ shown: null, onHome: true }, UP])
+      record(s, ...touchAt('field', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'field', jpeg(10))).toBe('keyboard')
+    })
+
+    // Session 1cef3852 (iOS 26.5): the app's first touch came while it was still starting, when no read could say
+    // anything; the read after it had the keyboard down. A key leaves the keyboard up, and the one key that closes it
+    // shows no character.
+    it('keeps one for a touch no read before could judge, when the keyboard was down right after it', async () => {
+      const s = await withKeyboard([{ shown: null }, { shown: false }])
+      record(s, ...touchAt('first', 0.8))
+      expect(s.putThumbnail('s', '1', 'first', jpeg(10))).toBe('not-yet')
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'first', jpeg(10))).toBe('kept')
+    })
+
+    it('keeps none for such a touch when the keyboard was up right after it', async () => {
+      const s = await withKeyboard([{ shown: null }, UP])
+      record(s, ...touchAt('key', 0.2))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'key', jpeg(10))).toBe('keyboard')
+    })
+
+    // The same session's next tap came within 2 s of that one, and lost its picture to "typed just before".
+    it('does not count such a touch as typing for the step after it', async () => {
+      const s = await withKeyboard([{ shown: null }, { shown: false }])
+      record(s, ...touchAt('first', 0.8))
+      await vi.advanceTimersByTimeAsync(50)
+      record(s, ...touchAt('next', 0.4))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'next', jpeg(10))).toBe('kept')
+    })
+
+    // Design review: an agent that never reads the keyboard has no read after either. Not asked again for one.
+    it('answers at once for a touch with no read at all', () => {
+      const { s } = store()
+      record(s, ...touchAt('t', 0.2))
+      expect(s.putThumbnail('s', '1', 't', jpeg(10))).toBe('keyboard')
+    })
+
+    // The dialog says why a step has no picture (Range's tile): the reasons a person can act on, kept with the snapshot.
+    it('says in the snapshot why a step has no picture, and nothing of one that has', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('a', 0.2), ...touchAt('k', 0.8))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'a', jpeg(10))).toBe('kept')
+      expect(s.putThumbnail('s', '1', 'k', jpeg(10))).toBe('keyboard')
+      expect(s.takeSnapshot('s', '1')!.thumbnailRefusals).toEqual({ k: 'keyboard' })
     })
 
     // Measured on Android: the read before a first key said the keyboard was down while it slid up; the read after it
@@ -769,6 +837,8 @@ describe('CaptureStore — thumbnails', () => {
       tick(100)
     }
     expect(['a', 'caps', 'b', 'enter', 'c'].map((id) => s.putThumbnail('s', '1', id, jpeg(10)))).toEqual(['kept', 'keyboard', 'keyboard', 'kept', 'kept'])
+    // Design review: a key inside a run is no step of its own, so no tile says anything about it.
+    expect(s.takeSnapshot('s', '1')!.thumbnailRefusals).toBeUndefined()
   })
 
   // A password field can show the character just typed for 1.5 s: the next input's screen would carry it.
@@ -792,6 +862,7 @@ describe('CaptureStore — thumbnails', () => {
         record(s, ...touchAt('signIn', 0.2))
         await vi.advanceTimersByTimeAsync(50)
         expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
+        expect(s.takeSnapshot('s', '1')!.thumbnailRefusals).toEqual({ signIn: 'typed' })
       }
     })
 

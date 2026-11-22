@@ -1273,7 +1273,7 @@ Query:
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 
-복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다.
+복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다. 복사본의 `thumbnailRefusals`는 그림을 남기지 않은 이유를 `requestId`별로 알려 줍니다. 값은 `keyboard`(키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치)나 `typed`(글자를 친 직후에 시작한 입력)이고 이유를 알려 주지 않는 릴레이에서는 이 필드가 없습니다.
 
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 

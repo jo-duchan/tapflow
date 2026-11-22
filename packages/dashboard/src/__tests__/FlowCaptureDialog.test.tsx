@@ -7,6 +7,7 @@ import type { CapturedStep } from '@tapflowio/flow-runner/browser'
 import FlowCaptureDialog from '@/components/flow-capture/FlowCaptureDialog'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from '@/components/flow-capture/screens'
 import { initialState, reduce } from '@/lib/flowCapture/machine'
+import { copy } from '@/lib/flowCapture/copy'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { withQuery } from './withQuery'
 
@@ -240,6 +241,48 @@ describe('RangeScreen', () => {
     expect(pictures[0]).toHaveAttribute('alt', '')
     // A key, and a run typed with keys on it; not a run typed on the computer's keyboard.
     expect(screen.getAllByText('On-screen keyboard')).toHaveLength(2)
+  })
+
+  // A tile with no picture says why, in its tooltip and its list item, with ImageOff where the picture would be. Not the
+  // keyboard tile, which says what it is already.
+  it('says why a step has no picture, and nothing of one that has or of a key on the soft keyboard', () => {
+    const pictured = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 4 }, name: 'login',
+      steps: [
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 't' },
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 'u' },
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 'v' },
+        { ...base, kind: 'keyboardKey', point: [0.3, 0.8], thumbnailKey: 'k' },
+      ] as never,
+    })
+    const why: Record<string, string> = { u: copy.noPicture.keyboard, v: copy.noPicture.none }
+    const { container } = render(
+      <RangeScreen state={pictured} dispatch={vi.fn()} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }}
+        thumbnailOf={(step) => (step.thumbnailKey === 't' ? '/pic/t' : null)}
+        noPictureWhy={(step) => (step.thumbnailKey === 't' ? null : why[step.thumbnailKey!] ?? copy.noPicture.none)} />,
+    )
+    const tiles = [...container.querySelectorAll('ol[aria-label] > li')]
+    expect(tiles.map((t) => !!t.querySelector('[data-no-picture]'))).toEqual([false, true, true, false])
+    expect(tiles[1]!.textContent).toContain(copy.noPicture.keyboard)
+    expect(tiles[2]!.textContent).toContain(copy.noPicture.none)
+    expect(tiles[0]!.textContent).not.toContain('No picture')
+    expect(tiles[3]!.textContent).not.toContain('No picture')
+  })
+
+  // An install's picture is of the moment the button was pressed, which says nothing: the tile shows what the step is.
+  it('draws an install as an install, whatever picture it has', () => {
+    const pictured = reduce(initialState, {
+      type: 'loaded', range: { start: 1, end: 2 }, name: 'login',
+      steps: [{ ...base, kind: 'install', buildId: 2, thumbnailKey: 'i' }, { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 't' }] as never,
+    })
+    const { container } = render(
+      <RangeScreen state={pictured} dispatch={vi.fn()} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }}
+        thumbnailOf={(step) => `/pic/${step.thumbnailKey}`} noPictureWhy={() => null} />,
+    )
+    const tiles = [...container.querySelectorAll('ol[aria-label] > li')]
+    expect(tiles[0]!.querySelector('img')).toBeNull()
+    expect(tiles[0]!.querySelector('[data-install]')).not.toBeNull()
+    expect(tiles[1]!.querySelector('img')).toHaveAttribute('src', '/pic/t')
   })
 
   it('asks for the password, hidden, and holds Continue until it is given', async () => {

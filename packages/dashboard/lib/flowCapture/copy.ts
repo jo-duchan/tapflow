@@ -20,6 +20,12 @@ export const copy = {
   rangeHelp: 'Starts at your first step in the app, ends at your last step. Drag the handles to change it.',
   /** A key pressed on the on-screen keyboard: no picture is kept of it, since that screen shows what was just typed. */
   keyboardTile: 'On-screen keyboard',
+  /** Why a Range tile has no picture (the relay's `thumbnailRefusals`): said in its tooltip and its list item. */
+  noPicture: {
+    keyboard: 'No picture: the keyboard may have been up.',
+    typed: 'No picture: typed just before, and a password could still show.',
+    none: 'No picture was kept for this step.',
+  },
   rangeStrip: 'Steps',
   rangeStart: 'Start of the flow',
   rangeEnd: 'End of the flow',

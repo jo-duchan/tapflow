@@ -49,4 +49,8 @@ export interface CaptureSnapshot {
   /** The `requestId`s of the inputs whose screen the relay holds a picture of (1b-3b), read one at a time from
    *  `GET …/capture/snapshot/thumbnails/:requestId`. Absent from a relay that keeps none. */
   thumbnails?: string[]
+  /** Why the relay kept no picture of an input, by its `requestId`, for the reasons a person can act on: `keyboard`, the
+   *  reads could not show the touch was off the soft keyboard; `typed`, it began right after typing into a field not
+   *  known to show its text. Absent from a relay that does not say, and for an input with a picture or none sent. */
+  thumbnailRefusals?: Record<string, 'keyboard' | 'typed'>
 }
