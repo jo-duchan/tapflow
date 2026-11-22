@@ -291,6 +291,13 @@ describe('the touches drawn', () => {
       // Turned, with the app turning too: a map of 0, the frame is the screen, and the mark is drawn as it is.
       expect(mirrorMark(screenTap, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload))
         .toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      // A recorded screen-space step: over the mirror, `mirrorMark` decides by the map, not `markOf` by the turn; on a
+      // screenshot the upright check stays.
+      const turnedStep = { ...base, kind: 'tap', point: [0.2, 0.3], chrome: { bodyRotation: 90, streamRotation: 0 } } as unknown as RawStep
+      const recorded = markOf(turnedStep, 'frame')
+      expect(recorded).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark(recorded!, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(turnedStep)).toBeNull()
       // Turned with no map from the frame (an older agent): the screen may not be the frame, and nothing is drawn.
       expect(mirrorMark(screenTap, { bodyRotation: 90 } as unknown as ChromePayload)).toBeNull()
     })

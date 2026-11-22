@@ -17,13 +17,15 @@ export type StepMark = StillTouch & { durationMs?: number; inFrame?: boolean }
  * was drawn and Android's replays showed no touch at all. On a screenshot it is turned into the screen by the frame's
  * map there (`AndroidChrome.streamRotation`, recorded with the step), whichever way the body was held — the replay
  * turns the device to the range's start before its screenshots (`rangeStartOrientation`) — and with no map, not
- * drawn. Any other step only while the device was upright: its points are the screen's, which a turned body's frame
- * is not, and a mark in the wrong place says more than none.
+ * drawn. Any other step on a screenshot only while the device was upright: its points are the screen's, which a
+ * turned body's frame is not, and a mark in the wrong place says more than none. Over the mirror that is left to
+ * `mirrorMark`, which knows the frame's map now: a turned body whose app turns with it has frame and screen the same
+ * (CodeRabbit on #1216).
  */
 export function markOf(raw: RawStep, into: 'frame' | 'screen' = 'screen'): StepMark | null {
   const chrome = typeof raw.chrome === 'object' && raw.chrome !== null ? raw.chrome as ChromePayload : undefined
   const inFrame = 'space' in raw && raw.space === 'frame'
-  if (!inFrame) {
+  if (!inFrame && into === 'screen') {
     const orientation = chrome ? chromeOrientation(chrome) : undefined
     if (orientation !== undefined && orientation !== 'portrait') return null
   }
