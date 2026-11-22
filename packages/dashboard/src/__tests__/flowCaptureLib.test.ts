@@ -288,7 +288,10 @@ describe('the touches drawn', () => {
         .toEqual({ kind: 'swipe', from: { x: 0.3, y: 0.8 }, to: { x: 0.5, y: 0.5 }, durationMs: 100, inFrame: true })
       expect(mirrorMark({ kind: 'pinch', from: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], durationMs: 100 }, foldable))
         .toEqual({ kind: 'pinch', from: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], durationMs: 100, inFrame: true })
-      // Turned with no map from the frame (iOS, an older agent): the screen is not the frame, and nothing is drawn.
+      // Turned, with the app turning too: a map of 0, the frame is the screen, and the mark is drawn as it is.
+      expect(mirrorMark(screenTap, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload))
+        .toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      // Turned with no map from the frame (an older agent): the screen may not be the frame, and nothing is drawn.
       expect(mirrorMark(screenTap, { bodyRotation: 90 } as unknown as ChromePayload)).toBeNull()
     })
 

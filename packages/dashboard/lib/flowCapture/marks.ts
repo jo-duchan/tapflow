@@ -49,12 +49,13 @@ export function markOf(raw: RawStep, into: 'frame' | 'screen' = 'screen'): StepM
  * the frame's own points is drawn as it is. One in the screen's — a named tap, Verify's steps — is carried into the frame
  * on Android by the inverse of the frame-to-screen map (`streamRotation`): an upright unfolded foldable, or an app locked
  * to landscape, has a turn there, and the point drawn as it is lands a quarter off (adversarial review; CodeRabbit on
- * #1216). With no such turn, only while the device is upright, the frame then being the screen.
+ * #1216). A map of 0 — an app turning with a turned body — carries it as it is. With no map (iOS, the scrcpy path, an
+ * older agent), only while the device is upright, the frame then being the screen.
  */
 export function mirrorMark(mark: StepMark, chrome: ChromePayload | null): StepMark | null {
   if (mark.inFrame) return mark
   const turn = chrome && !('framePng' in chrome) ? (chrome as AndroidChrome).streamRotation : undefined
-  if (turn !== undefined && turn !== 0) {
+  if (turn !== undefined) {
     const f = (p: { x: number; y: number }) => { const [x, y] = toFramePoint(turn, [p.x, p.y]); return { x, y } }
     switch (mark.kind) {
       case 'tap': return { ...mark, point: f(mark.point), inFrame: true }
