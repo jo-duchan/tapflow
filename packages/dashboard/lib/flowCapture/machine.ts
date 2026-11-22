@@ -1,5 +1,5 @@
 import {
-  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep, type ScreenRect, type Selector, type StepExpect,
+  askedValues, defaultRange, leaveOut, noResponseTaps, stepsBeforeRange, toFlowSteps, type CapturedFlow, type CapturedStep, type DropReason, type FlowResult, type RawStep, type ScreenRect, type Selector, type StepExpect,
   type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import type { AfterTouch } from './runner'
@@ -36,6 +36,9 @@ export interface MatchProgress {
 export interface CaptureState {
   phase: Phase
   steps: RawStep[]
+  /** Steps left out before the replay (`RawStep.dropped`) that the person put back (#1170), by index into `steps`: the
+   *  reason each was left out, for leaving it out again. Their `dropped` is cleared in `steps`, so Match replays them. */
+  putBack: Record<number, DropReason>
   range: StepRange
   name: string
   tags: string
@@ -126,6 +129,8 @@ export type CaptureEvent =
   | { type: 'set-name'; name: string }
   | { type: 'set-tags'; tags: string }
   | { type: 'set-asked'; index: number; value: string }
+  | { type: 'replay-dropped'; index: number }
+  | { type: 'drop-again'; index: number }
   | { type: 'match-started'; total: number }
   | { type: 'step-matched'; step: CapturedStep; screenshot?: string; inserted?: boolean }
   | { type: 'match-finished'; captured: CapturedFlow }
@@ -162,7 +167,7 @@ export type CaptureEvent =
   | { type: 'to-export' }
 
 export const initialState: CaptureState = {
-  phase: 'loading', steps: [], range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
+  phase: 'loading', steps: [], putBack: {}, range: { start: 0, end: 0 }, name: '', tags: '', progress: { done: 0, total: 0 },
   matched: [], screenshots: [], captured: null, removed: [], renamed: {}, made: {}, after: {}, expected: {}, verify: null, error: null,
   matchedRange: null, reached: 0, asked: {}, insertedTail: 0, kept: [],
 }
@@ -183,12 +188,29 @@ const edited = (state: CaptureState) => ({ verify: null, reached: Math.min(state
 
 export function reduce(state: CaptureState, event: CaptureEvent): CaptureState {
   switch (event.type) {
-    case 'loaded': return { ...state, phase: 'range', steps: event.steps, range: event.range, name: event.name, error: null, asked: {}, kept: [] }
+    case 'loaded': return { ...state, phase: 'range', steps: event.steps, putBack: {}, range: event.range, name: event.name, error: null, asked: {}, kept: [] }
     case 'load-failed': return { ...state, phase: 'failed', error: event.error }
     case 'set-range': return { ...state, range: event.range, moved: undefined }
     case 'set-name': return { ...state, name: event.name }
     case 'set-tags': return { ...state, tags: event.tags }
     case 'set-asked': return { ...state, asked: { ...state.asked, [event.index]: event.value } }
+    case 'replay-dropped': {
+      const step = state.steps[event.index]
+      if (!step?.dropped) return state
+      const { dropped, ...replayedAgain } = step
+      const steps = state.steps.slice()
+      steps[event.index] = replayedAgain as RawStep
+      return { ...state, steps, putBack: { ...state.putBack, [event.index]: dropped } }
+    }
+    case 'drop-again': {
+      const reason = state.putBack[event.index]
+      const step = state.steps[event.index]
+      if (!reason || !step) return state
+      const steps = state.steps.slice()
+      steps[event.index] = { ...step, dropped: reason }
+      const { [event.index]: _, ...putBack } = state.putBack
+      return { ...state, steps, putBack }
+    }
     case 'match-started': {
       // A secret made in Edit is the replay's step, and goes with it; so does a rename of it, or the next replay's own
       // secret of that name would take it.

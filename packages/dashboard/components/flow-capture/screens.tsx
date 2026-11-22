@@ -121,7 +121,8 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
             onClick={() => dispatch({ type: 'set-range', range: { start: range.start, end: range.end - 1 } })}>{copy.dropLast}</Button>
         </span>
       </div>
-      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} noPictureWhy={noPictureWhy} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
+      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} noPictureWhy={noPictureWhy} onChange={(next) => dispatch({ type: 'set-range', range: next })}
+        putBack={state.putBack} onReplay={(index) => dispatch({ type: 'replay-dropped', index })} onDropAgain={(index) => dispatch({ type: 'drop-again', index })} />
       <div className="grid gap-4 sm:grid-cols-2">
         {/* `content-start`: the Tags column is a row taller with its hint, and a stretched grid shares that out. */}
         <div className="grid content-start gap-2">
@@ -198,6 +199,10 @@ const SHIFT = EDGE + 8
 const FRAME_Y = 12
 const INNER_Y = 10
 const ROW_H = FRAME_Y + INNER_Y + TILE_H + INNER_Y + FRAME_Y
+/** The row of Put back / Leave out buttons under the tiles (#1170): there only while a step in the strip has one, and it
+ *  stays once a step is put back, so the strip does not jump. 8 px over a 28 px button: the step's name sits on an 11 px
+ *  line, so this reads as the gap between the tile's number and its picture (user, 2026-11-23). */
+const BUTTON_ROW = 36
 /** Shared by the tiles, the frame and the handles, so they move as one. Off under reduced motion. */
 const SLIDE = 'duration-200 ease-out motion-reduce:transition-none'
 
@@ -211,9 +216,12 @@ const frameRight = (r: Range) => frameLeft(r) + (r.end - r.start) * STRIDE - GAP
  * The range as a frame over the steps, with a handle at each end — a video editor's trim. A step taken in or left out
  * slides into or out of the frame. Each handle is a slider for the keyboard, one step per arrow.
  */
-function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy }: {
+function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy, putBack = {}, onReplay, onDropAgain }: {
   steps: RawStep[]
   range: Range
+  putBack?: Record<number, unknown>
+  onReplay?: (index: number) => void
+  onDropAgain?: (index: number) => void
   thumbnailOf?: (step: RawStep) => string | null
   noPictureWhy?: (step: RawStep) => string | null
   onChange: (range: Range) => void
@@ -226,6 +234,7 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy }: {
    *  the press that starts a drag, which is when the name is most wanted. */
   const [named, setNamed] = useState<Edge | null>(null)
   const total = steps.length
+  const buttons = steps.some((s) => s.dropped) || Object.keys(putBack).length > 0
 
   // Opened on a range that starts further in, the strip starts there. Only once: after that the strip is where the
   // person put it. A ref callback, not an effect: an effect on opening alone would need its dependencies suppressed,
@@ -323,7 +332,7 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy }: {
     // the page under the dialog, which showed the device through the overlay.
     <TooltipProvider delayDuration={300}>
       <div ref={attachScroller} className="overflow-x-auto overscroll-x-contain">
-        <div ref={row} className="relative" style={{ width: frameRight({ start: 0, end: total }) + PAD_X, height: ROW_H }}>
+        <div ref={row} className="relative" style={{ width: frameRight({ start: 0, end: total }) + PAD_X, height: ROW_H + (buttons ? BUTTON_ROW : 0) }}>
           <div
             aria-hidden
             className={cn('absolute rounded-xl bg-foreground transition-[left,width]', SLIDE)}
@@ -333,7 +342,8 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy }: {
           </div>
           <ol aria-label={copy.rangeStrip}>
             {steps.map((s, i) => (
-              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} noPictureWhy={noPictureWhy?.(s) ?? null} />
+              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} noPictureWhy={noPictureWhy?.(s) ?? null}
+                buttons={buttons} putBack={i in putBack} onReplay={() => onReplay?.(i)} onDropAgain={() => onDropAgain?.(i)} />
             ))}
           </ol>
           {handle('start')}
@@ -350,7 +360,10 @@ const typedOnSoftKeyboard = (step: RawStep): boolean =>
   step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
 
 /** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
-function RangeTile({ step, index, inRange, left, picture, noPictureWhy }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null; noPictureWhy: string | null }) {
+function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons, putBack, onReplay, onDropAgain }: {
+  step: RawStep; index: number; inRange: boolean; left: number; picture: string | null; noPictureWhy: string | null
+  buttons: boolean; putBack: boolean; onReplay: () => void; onDropAgain: () => void
+}) {
   // A tap left out before the replay is drawn as one outside the range, and says why.
   const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
   // The keyboard tile already says what it is.
@@ -359,13 +372,16 @@ function RangeTile({ step, index, inRange, left, picture, noPictureWhy }: { step
     <Tooltip>
       <TooltipTrigger asChild>
         <li
-          className={cn('absolute flex flex-col gap-1 p-2 text-xs transition-[left,opacity]', SLIDE, (!inRange || step.dropped) && 'opacity-50')}
-          style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
+          className={cn('absolute flex flex-col p-2 text-xs transition-[left,opacity]', SLIDE, !inRange && 'opacity-50')}
+          style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H + (buttons ? BUTTON_ROW : 0) }}
         >
+          {/* A step left out is dimmed as one outside the range, but not its button, which is how it comes back. */}
+          <div className={cn('flex flex-col gap-1', step.dropped && 'opacity-50')}>
           {/* A tap left out says so in the tile, not only in the tooltip its cut-short name has (CodeRabbit on #1167). */}
           <span className="flex h-4 items-center justify-between gap-1 leading-4">
             <span className="text-muted-foreground">#{index + 1}</span>
             {step.dropped && <span className="truncate text-[11px] font-medium text-warning-foreground">{copy.droppedShort}</span>}
+            {putBack && <span className="truncate text-[11px] font-medium text-muted-foreground">{copy.putBackShort}</span>}
           </span>{' '}
           {/* The screen the step began on (1b-3b). Decorative: the item's own text names the step. A key on the soft
               keyboard has none by design — that screen shows what was just typed, a password's last character too — and
@@ -394,7 +410,25 @@ function RangeTile({ step, index, inRange, left, picture, noPictureWhy }: { step
                 </span>
               )}
           <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
+          </div>
           {why && <span className="sr-only">{why}</span>}
+          {/* One button in one place either way, so focus stays on it as it turns from Put back into Leave out. Never wider
+              than the tile, and never wrapped: the tile is 80 px inside (user, 2026-11-23). */}
+          {buttons && (
+            <div data-row="buttons" className="mt-auto pt-2">
+              {(step.dropped || putBack) && (
+                <Button
+                  variant="outline"
+                  className="h-7 w-full min-w-0 max-w-full whitespace-nowrap px-2 text-xs"
+                  aria-label={putBack ? copy.leaveOutTile(index + 1) : copy.putBackTile(index + 1)}
+                  onClick={putBack ? onDropAgain : onReplay}
+                >
+                  {/* Words only: with an icon the label left no room for the button's own padding (user, 2026-11-23). */}
+                  {putBack ? copy.leaveOut : copy.putBack}
+                </Button>
+              )}
+            </div>
+          )}
         </li>
       </TooltipTrigger>
       <TooltipContent side="bottom">
@@ -457,7 +491,7 @@ function Busy() {
   return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
 }
 
-export function MatchScreen({ state, tap, touch, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf }: {
+export function MatchScreen({ state, tap, touch, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf, onPutBackAndMatch }: {
   state: CaptureState
   tap: CaptureTap
   touch: MachineTouch | null
@@ -470,9 +504,11 @@ export function MatchScreen({ state, tap, touch, onStop, onRestart, onTakeWhatMa
   onContinueToEdit: () => void
   onKeep: (step: number, kept: boolean) => void
   thumbnailOf: (step: RawStep) => string | null
+  /** Put the named steps left out before the replay back, and match again from the range's start (#1170). */
+  onPutBackAndMatch: (indices: number[]) => void
 }) {
   if (state.diverged) {
-    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} continueRef={stopRef} />
+    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} onPutBackAndMatch={onPutBackAndMatch} continueRef={stopRef} />
   }
   if (state.review) {
     return <ReviewView state={state} review={state.review} tap={tap} touch={touch} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
@@ -585,11 +621,12 @@ function ReviewView({ state, review, tap, touch, onRestart, onContinue, onKeep, 
  * by. The buttons keep their places and their emphasis whatever happened, since people press them from habit: going on is
  * the primary, where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
  */
-function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, continueRef }: {
+function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, onPutBackAndMatch, continueRef }: {
   state: CaptureState
   onTakeWhatMatched: () => void
   onBackToRange: () => void
   onContinueAnyway: () => void
+  onPutBackAndMatch: (indices: number[]) => void
   continueRef: RefObject<HTMLButtonElement | null>
 }) {
   const d = state.diverged!
@@ -600,8 +637,9 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
   const dropped: number[] = []
   for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
   const stepOf = (index: number) => index - state.range.start + 1
+  // What was left out, apart from the rest: its own button puts it back (#1170, user: one group, spaced from the next).
+  const droppedFact = dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null
   const facts = [
-    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
     before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, startMoves) : null,
     done > 0 ? copy.divergedMatched(done) : null,
     d.carried ? copy.divergedCarried(d.carried.count, d.carried.from === d.index ? null : stepOf(d.carried.from)) : null,
@@ -628,9 +666,20 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
               ? copy.divergedMostly(stepOf(d.index), state.progress.total)
               : copy.divergedPlaces(stepOf(d.index), state.progress.total, boxes.length)}
           </p>
-          {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
-          {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
-          <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
+          {droppedFact && (
+            <div className="flex flex-col items-start gap-2 pb-3">
+              <p className="text-sm text-muted-foreground">{droppedFact}</p>
+              <Button variant="outline" size="sm" onClick={() => onPutBackAndMatch(dropped)}>
+                <RotateCcw aria-hidden className="size-3.5" />
+                {copy.putBackAndMatch}
+              </Button>
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
+            {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
+            <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
+          </div>
         </div>
       </div>
       <Footer>

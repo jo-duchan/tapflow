@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A flow's video on the Flow Runs page draws the touches the runner sent**: taps, swipes, pinches and long presses, in blue, where the runner sent them and at the moment it sent them. Seeking back shows a touch again, and pausing holds it. Only videos recorded by a runner from this release have touches.
 - **The mouse pointer stays visible over the device on the session watch page and in a flow's video.** It was hidden there as it is in a QA Session, where a touch disc stands in for it, but those pages take no input and show no disc.
 - **Flow Capture shows in Edit which steps were not compared.** When Match stops on a screen that is mostly different and you choose Continue anyway, that step is not compared again in later Matches of the same capture. Edit now marks it **fragile** and says its screen was not compared, so a flow that was waved through no longer looks as checked as one that matched. A step already fragile for another reason shows both reasons.
+- **A tap Flow Capture left out before Match can be put back.** Flow Capture does not replay a tap made while a list was still moving, nor the first of two taps on the same element when the screen did not change between them. When that judgement is wrong, press **Put back** under its tile in Range, or **Put back and match again** where Match stopped and named it, and the tap is replayed. **Leave out** takes it out again.
 
 ### Fixed
 

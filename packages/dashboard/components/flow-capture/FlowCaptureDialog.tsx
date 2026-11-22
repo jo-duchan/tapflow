@@ -166,16 +166,17 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
   const continueToEdit = () => dispatch({ type: 'review-continued' })
 
-  const startMatch = () => {
+  // From `from`, not the render's `state`, when a change dispatched just now has not rendered yet (Put back, #1170).
+  const startMatch = (from: CaptureState = state) => {
     const opened = session.current
     if (!opened) return
     const { channel, lease, run } = opened
     const signal = run.begin()
-    remembered.begin(state.range.start)
-    dispatch({ type: 'match-started', total: state.range.end - state.range.start })
+    remembered.begin(from.range.start)
+    dispatch({ type: 'match-started', total: from.range.end - from.range.start })
     setTouch(null)
     setBusy(true)
-    matchRange(tap, channel, lease, withAsked(state), state.range, bundleId, {
+    matchRange(tap, channel, lease, withAsked(from), from.range, bundleId, {
       signal,
       onTouch,
       onReset: (report) => dispatch({ type: 'device-reset', report }),
@@ -198,15 +199,24 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       carried: (index, step, masks, turn) => remembered.carried(index, step, thumbnailUrl(tap.sessionId, snapshot, step), masks, turn, signal),
       onDiverged: (index, { cells: _, ...divergence }) => {
         run.keep(divergence.nowUrl)
-        const step = state.steps[index]
+        const step = from.steps[index]
         dispatch({ type: 'diverged', index, ...divergence, recordedUrl: step ? thumbnailUrl(tap.sessionId, snapshot, step) : null })
         return run.decide(signal)
       },
     }, keyboard)
       // A run a later one replaced answers into nothing: its failure would be shown on the new one, its end would end it.
-      .then((matched) => { if (run.isCurrent(signal)) finishMatch(matched) })
+      .then((matched) => { if (run.isCurrent(signal)) dispatch(matchEnded(from.steps, matched)) })
       .catch((e: unknown) => { if (run.isCurrent(signal)) dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }) })
       .finally(() => { if (run.isCurrent(signal)) setBusy(false) })
+  }
+
+  const putBackAndMatch = (indices: number[]) => {
+    let next = state
+    for (const index of indices) {
+      dispatch({ type: 'replay-dropped', index })
+      next = reduce(next, { type: 'replay-dropped', index })
+    }
+    startMatch(next)
   }
 
   // Without the steps the replay added at the end (a tap on the field the next, unmatched step types into): on their own
@@ -268,13 +278,13 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       />
       <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
-          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback}
+          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={() => startMatch()} onCancel={close} continueRef={fallback}
             thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} noPictureWhy={(step) => noPictureWhy(snapshot, step)} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen
             state={state} tap={tap} touch={touch}
-            onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched}
+            onStop={() => session.current?.run.abort()} onRestart={() => startMatch()} onTakeWhatMatched={takeWhatMatched} onPutBackAndMatch={putBackAndMatch}
             onBackToRange={backToRange} onContinueAnyway={continueAnyway} stopRef={fallback}
             onContinueToEdit={continueToEdit} onKeep={(step, kept) => dispatch({ type: 'set-kept', step, kept })}
             thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)}

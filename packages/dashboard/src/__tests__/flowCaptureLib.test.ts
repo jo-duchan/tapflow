@@ -49,6 +49,41 @@ describe('the dialog\'s states', () => {
 })
 
 // #1140: a password typed on the soft keyboard, its value given by the person before Match.
+// #1170: a step left out before Match by a heuristic (a tap that only stopped a list, the first of a retried pair) can be
+// put back, and left out again with the reason it had.
+describe('a step put back in the replay', () => {
+  const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
+  const steps = [
+    { ...base, kind: 'launch', buildId: 1 },
+    { ...base, kind: 'tap', point: [0.5, 0.5], dropped: 'retried' },
+    { ...base, kind: 'tap', point: [0.5, 0.5] },
+  ] as unknown as RawStep[]
+  const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: 'x' })
+
+  it('replays it, and remembers why it was left out', () => {
+    const back = reduce(loaded, { type: 'replay-dropped', index: 1 })
+    expect(back.steps[1]!.dropped).toBeUndefined()
+    expect(back.putBack).toEqual({ 1: 'retried' })
+    expect(back.steps[2]).toBe(loaded.steps[2])
+  })
+
+  it('leaves it out again with that reason', () => {
+    const out = reduce(reduce(loaded, { type: 'replay-dropped', index: 1 }), { type: 'drop-again', index: 1 })
+    expect(out.steps[1]!.dropped).toBe('retried')
+    expect(out.putBack).toEqual({})
+  })
+
+  it('changes nothing for a step that was not left out, or one never put back', () => {
+    expect(reduce(loaded, { type: 'replay-dropped', index: 2 })).toBe(loaded)
+    expect(reduce(loaded, { type: 'drop-again', index: 1 })).toBe(loaded)
+  })
+
+  it('forgets what was put back when a capture loads', () => {
+    const back = reduce(loaded, { type: 'replay-dropped', index: 1 })
+    expect(reduce(back, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: 'x' }).putBack).toEqual({})
+  })
+})
+
 describe('the passwords the person gives', () => {
   const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
   const steps = [
