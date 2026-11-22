@@ -280,6 +280,17 @@ describe('matchRange', () => {
       expect(orientationOf()).toBeUndefined()
     }, 20_000)
 
+    // A chrome that carries no turn (an older agent) has no upright to wait for: its rotates are read as before.
+    it('reads a turn at once where the chrome cannot say which way the device is held', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.includes('replay rotate') ? held(90) : null as never))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, hooks())
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
     // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
     // the sideways one the recording ended on. Any change from it was taken, and the late upright chrome named the
     // turn portrait. Only the turn it should reach counts: never seen, the step is left out, not given a wrong name.
