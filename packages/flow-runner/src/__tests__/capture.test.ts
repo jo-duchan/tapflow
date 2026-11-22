@@ -921,6 +921,19 @@ describe('defaultRange', () => {
       expect(defaultRange(steps).start).toBe(2)
     })
 
+    // CodeRabbit on #1225: the read that says the step before stayed home must be one asked before this step began. A
+    // read asked after a later trip home (icon, Allow, the app's first touch, Home) would vouch for the icon's tap.
+    it('does not take a read asked after the next step began as the step before staying home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      read(r.wait(400), IOS_HOME)
+      const steps = r.steps()
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
     // The same recording, one fact changed each: either is enough to leave the tap unknown, as before.
     const iconRun = (before: KeyboardState, firstSeq: number) => {
       const r = new Rec().install()
