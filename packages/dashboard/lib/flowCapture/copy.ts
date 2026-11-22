@@ -124,6 +124,7 @@ export const copy = {
   putBackStep: (label: string) => `Put ${label} back in the flow`,
   stepDetails: (label: string) => `Details of ${label}`,
   fragile: 'fragile',
+  notComparedReason: 'Its screen was not compared: you chose Continue anyway when most of it was different.',
   auto: 'auto',
   skipped: 'not in the flow',
   secret: 'secret',

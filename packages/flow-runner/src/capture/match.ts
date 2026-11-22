@@ -82,6 +82,10 @@ export interface CapturedStep {
   step: Step | null
   skipped?: SkipReason
   fragile?: FragileReason
+  /** Its screen was not compared, at the person's word: Match stopped on it as mostly different and they went on, then
+   *  or in an earlier Match of the same capture (#1178). Set by the dashboard's Match; nothing here reads it. Apart from
+   *  `fragile`, which holds one reason, since a step can be both. */
+  notCompared?: true
   /** Typed into a field that hides its text, or one whose kind could not be read: kept out of the flow as a secret. */
   secret?: { value: string; known: boolean }
   /** Turned into a step that says what the person meant (`scroll { until }`). */
@@ -670,7 +674,8 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     if (list && listAxis(swipe.tree, list, swipe.screenAspect) !== axis) continue
     const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
     if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
-    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
+    // A trace Match left on the swipe goes with it (#1178): the scroll is the same gesture, still not compared.
+    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true, ...(swipe.notCompared ? { notCompared: true as const } : {}) }
   }
 
   const secrets: Record<string, string> = {}

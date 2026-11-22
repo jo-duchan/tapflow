@@ -583,6 +583,8 @@ export async function matchRange(
     // A tap made while the screen the tap before it brought was still coming (`madeMidTransition`), looking unlike its
     // recording: its picture is of the screen before that tap acted, which the replay never sees. Not a stop.
     let midTransition = false
+    // Its screen was let go without comparing, at the person's word (#1178): Edit says so.
+    let notCompared = false
     // The app did nothing with it when it was recorded: not sent, as nothing came of it then — sent now it would land
     // on the screen the tap before it brought. Matched all the same, so the review of taps the app ignored offers it
     // (`noResponseTaps`), left out by default.
@@ -644,6 +646,7 @@ export async function matchRange(
         const rest = carry === 'skip' ? null : withoutAreas(d.cells, carry.areas)
         if (carry === 'skip' || !rest || rest.share <= SCREEN_DIFF_THRESHOLD) {
           URL.revokeObjectURL(d.nowUrl)
+          if (carry === 'skip') notCompared = true
           return null
         }
         return { ...d, cells: rest, areas: diffAreas(rest), masks: [...d.masks, ...carry.areas], carried: { count: carry.areas.length, from: carry.from } }
@@ -673,7 +676,7 @@ export async function matchRange(
         const now = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
         URL.revokeObjectURL(differs.nowUrl)
-        if (now) await hooks.onDiverged(range.start + offset, now)
+        if (now) await stopAt(now)
         return
       }
       if (retry === 'pressed' && prevTap) {
@@ -688,10 +691,16 @@ export async function matchRange(
         }
         const still = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
-        if (still) await hooks.onDiverged(range.start + offset, still)
+        if (still) await stopAt(still)
         return
       }
-      await hooks.onDiverged(range.start + offset, differs)
+      await stopAt(differs)
+    }
+    // Waits for the person. Going on from a screen mostly different lets the step go uncompared: no place was set aside
+    // that the rest of it was compared around, as Continue anyway on one different in places does.
+    const stopAt = async (d: ScreenDivergence): Promise<void> => {
+      await hooks.onDiverged!(range.start + offset, d)
+      if (d.mostly) notCompared = true
     }
     // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
     // `pressed`: tapped again; `waited`: looked again a moment later and did not; `not-asked`: neither.
@@ -755,7 +764,8 @@ export async function matchRange(
     if (named) {
       const { tapped, scrolled } = await runNamed(named)
       if (tapped) {
-        const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements }
+        // Not reachable marked today (a named tap is not compared), carried for the rule that each step built here is.
+        const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements, ...(notCompared ? { notCompared: true as const } : {}) }
         matched.push(step)
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
         if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
@@ -815,9 +825,10 @@ export async function matchRange(
     }
     const matchedStep = matchStep(raw, ctx)
     // What it did when it was recorded is not known: kept, and marked for the person to judge in Edit.
-    const step: CapturedStep = midTransition && actedWhenRecorded !== true && !matchedStep.fragile
+    const marked: CapturedStep = midTransition && actedWhenRecorded !== true && !matchedStep.fragile
       ? { ...matchedStep, fragile: 'mid-transition' }
       : matchedStep
+    const step: CapturedStep = notCompared ? { ...marked, notCompared: true } : marked
     matched.push(step)
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }

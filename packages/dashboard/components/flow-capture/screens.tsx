@@ -834,7 +834,11 @@ function EditRow({
     change()
     requestAnimationFrame(() => details.current?.querySelector<HTMLElement>('input, button')?.focus())
   }
-  const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
+  // A step left out says only why; any other says each thing to check, its own fragile reason first (#1178).
+  const reasons = step.skipped
+    ? [copy.skipReasons[step.skipped]]
+    : [step.fragile ? copy.fragileReasons[step.fragile] : null, step.notCompared ? copy.notComparedReason : null, !step.fragile && step.auto ? copy.autoReason : null]
+        .filter((r): r is string => r !== null)
   return (
     // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
     // reason 8 px under it with 4 px below.
@@ -853,7 +857,7 @@ function EditRow({
         </button>
         {!canExpect && expected.filter((sel) => !leftOut(sel)).length > 0 && <Badge variant="outline" className="shrink-0">{copy.expectedCount(expected.filter((sel) => !leftOut(sel)).length)}</Badge>}
         {byPosition(step) && <Badge variant="outline" className="shrink-0 border-dashed text-muted-foreground" title={copy.byPositionHint}>{copy.byPosition}</Badge>}
-        {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
+        {!step.skipped && (step.fragile || step.notCompared) && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
         {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
         {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
         {(secretName || typed) && (
@@ -877,7 +881,7 @@ function EditRow({
             </Button>
           )}
       </div>
-      {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
+      {reasons.map((r, i) => <p key={i} className="pb-1 pt-2 text-xs text-muted-foreground">{r}</p>)}
       {canExpect && (
         <div className="relative z-10 mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
           <span className="mr-1 text-xs text-muted-foreground">{copy.expected}</span>
