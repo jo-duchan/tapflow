@@ -5,11 +5,13 @@ import { getAdbPath } from './sdk.js'
 export const APP_LOG_CHUNK_LIMIT = 8192
 export const APP_LOG_SOCKET_BUFFER_LIMIT = 512 * 1024
 export const APP_LOG_TARGET_CHECK_INTERVAL_MS = 1_000
+export const APP_LOG_TARGET_FAILURE_LIMIT = 3
 
 interface AppLogStreamOptions {
   spawnProcess?: typeof spawn
   isTargetAlive?: () => Promise<boolean>
   targetCheckIntervalMs?: number
+  startTime?: string
 }
 
 export class AppLogStream {
@@ -20,6 +22,8 @@ export class AppLogStream {
   private targetCheckInFlight = false
   private processClosed = false
   private stopped = false
+  private stopRequested = false
+  private targetCheckFailures = 0
 
   constructor(
     serial: string,
@@ -30,12 +34,12 @@ export class AppLogStream {
   ) {
     this.process = (options.spawnProcess ?? spawn)(
       getAdbPath(),
-      ['-s', serial, 'logcat', `--uid=${uid}`, '-v', 'raw'],
+      ['-s', serial, 'logcat', `--uid=${uid}`, ...(options.startTime ? ['-T', options.startTime] : []), '-v', 'raw'],
       { stdio: ['ignore', 'pipe', 'ignore'] }
     )
     this.process.stdout?.setEncoding('utf8')
     this.process.stdout?.on('data', (text: string) => {
-      if (this.stopped) return
+      if (this.stopped || this.processClosed) return
       let chunk = ''
       let bytes = 0
       for (const character of text) {
@@ -59,10 +63,14 @@ export class AppLogStream {
       this.processClosed = true
       this.clearTargetCheck()
       if (code !== null && code !== 0 && !this.stopped) {
-        this.stop()
+        this.stopped = true
+        this.stopRequested = false
+        this.flush()
         onError(new Error(`Android app logcat exited with code ${code}`))
       } else if (!this.stopped) {
-        this.stop(true) // Natural exit: drain the queue
+        this.stopRequested = true
+        this.stopped = true
+        this.flush() // Natural exit: drain all output received before close.
       }
     })
 
@@ -76,20 +84,20 @@ export class AppLogStream {
   }
 
   stop(drain = false): void {
-    if (this.stopped) return
-    this.stopped = true
+    if (this.stopped || (this.stopRequested && drain)) return
     this.clearTargetCheck()
 
-    if (!this.processClosed && this.process.exitCode === null && !this.process.killed) {
-      this.process.kill('SIGTERM')
-    }
-
     if (drain) {
-      this.flush()
+      this.stopRequested = true
+      if (!this.processClosed && this.process.exitCode === null && !this.process.killed) this.process.kill('SIGTERM')
+      if (this.processClosed) {
+        this.stopped = true
+        this.flush()
+      }
     } else {
-      if (this.drainTimer) clearInterval(this.drainTimer)
-      this.drainTimer = null
-      this.queue.length = 0
+      this.stopped = true
+      if (!this.processClosed && this.process.exitCode === null && !this.process.killed) this.process.kill('SIGTERM')
+      this.flush()
     }
   }
 
@@ -97,10 +105,15 @@ export class AppLogStream {
     if (this.stopped || this.processClosed || this.targetCheckInFlight) return
     this.targetCheckInFlight = true
     try {
-      if (!(await isTargetAlive())) this.stop(true)
+      const alive = await isTargetAlive()
+      if (alive) this.targetCheckFailures = 0
+      else this.stop(true)
     } catch (error) {
-      onError(error instanceof Error ? error : new Error(String(error)))
-      this.stop()
+      this.targetCheckFailures++
+      if (this.targetCheckFailures >= APP_LOG_TARGET_FAILURE_LIMIT) {
+        onError(error instanceof Error ? error : new Error(String(error)))
+        this.stop(true)
+      }
     } finally {
       this.targetCheckInFlight = false
     }
@@ -112,6 +125,12 @@ export class AppLogStream {
   }
 
   private flush(): void {
+    if (this.stopped && !this.stopRequested) {
+      if (this.drainTimer) clearInterval(this.drainTimer)
+      this.drainTimer = null
+      this.queue.length = 0
+      return
+    }
     while (this.queue.length > 0) {
       if (this.onText(this.queue[0]!) === false) {
         // Keep the child pipe paused until the WebSocket accepts more data.

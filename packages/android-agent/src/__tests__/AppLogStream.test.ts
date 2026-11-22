@@ -23,11 +23,11 @@ describe('Android app log stream', () => {
     }) as unknown as ChildProcess
     const spawnProcess = vi.fn(() => child) as unknown as typeof import('child_process').spawn
     const onText = vi.fn()
-    const stream = new AppLogStream('emulator-5554', 10123, onText, vi.fn(), { spawnProcess })
+    const stream = new AppLogStream('emulator-5554', 10123, onText, vi.fn(), { spawnProcess, startTime: '11-22 12:34:56.789' })
 
     expect(spawnProcess).toHaveBeenCalledWith(
       'adb',
-      ['-s', 'emulator-5554', 'logcat', '--uid=10123', '-v', 'raw'],
+      ['-s', 'emulator-5554', 'logcat', '--uid=10123', '-T', '11-22 12:34:56.789', '-v', 'raw'],
       { stdio: ['ignore', 'pipe', 'ignore'] }
     )
     const text = `${'y'.repeat(8191)}🚀\nnext`
@@ -76,7 +76,7 @@ describe('Android app log stream', () => {
     }
   })
 
-  it('drops stdout chunks delivered after the stream stops', () => {
+  it('drains stdout delivered during stop until the child closes', () => {
     const stdout = Object.assign(new EventEmitter(), {
       setEncoding: vi.fn(),
       pause: vi.fn(),
@@ -95,10 +95,13 @@ describe('Android app log stream', () => {
     const spawnProcess = vi.fn(() => child) as unknown as typeof import('child_process').spawn
     const stream = new AppLogStream('emulator-5554', 10123, onText, vi.fn(), { spawnProcess })
 
-    stream.stop()
+    stream.stop(true)
     stdout.emit('data', 'buffered after stop')
+    child.emit('close', 0, null)
 
-    expect(onText).not.toHaveBeenCalled()
+    expect(onText).toHaveBeenCalledWith('buffered after stop')
+    stdout.emit('data', 'after close')
+    expect(onText).toHaveBeenCalledOnce()
   })
 
   it('reports an unsuccessful logcat exit while capture is active', () => {
@@ -123,7 +126,7 @@ describe('Android app log stream', () => {
     stream.stop()
   })
 
-  it('stops and reports an error when PID ownership cannot be checked', async () => {
+  it('keeps capture after transient PID check failures and stops after three consecutive failures', async () => {
     vi.useFakeTimers()
     try {
       const stdout = Object.assign(new EventEmitter(), {
@@ -148,10 +151,36 @@ describe('Android app log stream', () => {
         isTargetAlive: vi.fn().mockRejectedValue(error),
       })
 
-      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.advanceTimersByTimeAsync(3_000)
 
       expect(onError).toHaveBeenCalledWith(error)
       expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+      stream.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resets the PID check failure count after a successful check', async () => {
+    vi.useFakeTimers()
+    try {
+      const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+      const child = Object.assign(new EventEmitter(), { stdout, exitCode: null, killed: false, kill: vi.fn() }) as unknown as ChildProcess
+      const failure = new Error('adb timeout')
+      const isTargetAlive = vi.fn()
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValueOnce(true)
+      const spawnProcess = vi.fn(() => child) as unknown as typeof import('child_process').spawn
+      const onError = vi.fn()
+      const stream = new AppLogStream('emulator-5554', 10123, vi.fn(), onError, { spawnProcess, isTargetAlive })
+
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      expect(onError).not.toHaveBeenCalled()
+      expect(child.kill).not.toHaveBeenCalled()
       stream.stop()
     } finally {
       vi.useRealTimers()

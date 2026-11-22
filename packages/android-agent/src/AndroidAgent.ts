@@ -944,8 +944,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     serial: string,
     bundleId: string,
     launchId: string,
+    logStartTime: string | undefined,
     generation: number
   ): Promise<void> {
+    if (!logStartTime) {
+      logger.warn(`not capturing app logs for ${bundleId}: could not read device time before launch`)
+      return
+    }
     const deadline = Date.now() + APP_LOG_DISCOVERY_TIMEOUT_MS
     let lastError: unknown
     const isCurrent = () => state.appLogGeneration === generation && this.deviceStates.get(sessionId) === state
@@ -988,6 +993,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
               },
               (error) => logger.warn('app log stream failed:', error.message),
               {
+                startTime: logStartTime,
                 isTargetAlive: async () => {
                   if (!isCurrent()) return false
                   const currentPackages = await this.adb.getPackagesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
@@ -3204,9 +3210,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const appLogGeneration = this.stopAppLogStream(state!)
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
-          .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
+          .then(async () => {
+            phase = `launching (clears took ${Date.now() - started}ms)`
+            let logStartTime: string | undefined
+            const applied = await this.adb.launchApp(serial, bundleId, options, defaultsOnly === true, (deviceTime) => { logStartTime = deviceTime })
+            return { applied, logStartTime }
+          })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => {
+          .then(({ applied, logStartTime }) => {
             // The app under test once it launched: a launch that failed leaves the one before, and one overtaken by a
             // later launch does not take it back (CodeRabbit on #1187).
             if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
@@ -3215,7 +3226,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
               state!.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId) === state
             ) {
-              void this.startAppLogStreamAfterLaunch(sessionId, state!, serial, bundleId, requestId, appLogGeneration)
+              void this.startAppLogStreamAfterLaunch(sessionId, state!, serial, bundleId, requestId, logStartTime, appLogGeneration)
                 .catch((error: unknown) => logger.warn('could not start app log stream:', error instanceof Error ? error.message : String(error)))
             }
             respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })

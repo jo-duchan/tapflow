@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import type { BrowserInbound } from '@/lib/types'
 
@@ -21,6 +21,7 @@ vi.mock('@/lib/decoders/pickDecoder', async (importOriginal) => ({
 }))
 
 const { DeviceViewer } = await import('@/components/DeviceViewer')
+let frames: FrameRequestCallback[] = []
 
 const CHROME = {
   framePng: 'iVBORw0KGgo=',
@@ -40,7 +41,15 @@ describe('DeviceViewer app log feed', () => {
   beforeEach(() => {
     send.mockClear()
     deliver = null
+    frames = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
+  afterEach(() => vi.unstubAllGlobals())
+  const flushFrames = () => act(() => frames.splice(0).forEach((callback) => callback(0)))
 
   it('renders only its current launch logs for its own session in arrival order', () => {
     render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
@@ -73,6 +82,7 @@ describe('DeviceViewer app log feed', () => {
       deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'second\t🚀' })
     })
 
+    flushFrames()
     const log = screen.getByRole('log', { name: 'App log output' })
     expect(log.textContent).toBe('first\nsecond\t🚀')
   })
@@ -98,12 +108,14 @@ describe('DeviceViewer app log feed', () => {
       deliver!({ type: 'app:launch-done', sessionId: 'mine', requestId: launch.requestId })
       deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'previous app output' })
     })
+    flushFrames()
     expect(screen.getByRole('log', { name: 'App log output' }).textContent).toBe('previous app output')
 
     act(() => {
       screen.getByLabelText('Launch app').click()
     })
     const nextLaunch = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:launch')!
+    flushFrames()
     expect(screen.getByRole('log', { name: 'App log output' }).textContent).toMatch(/Waiting for app logs/)
 
     act(() => {

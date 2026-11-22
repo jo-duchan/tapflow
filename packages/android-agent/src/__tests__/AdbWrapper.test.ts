@@ -413,9 +413,11 @@ describe('AdbWrapper', () => {
         if (args.includes('am')) throw killed
         return ''
       })
-      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
-      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
-      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      const onStart = vi.fn()
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG, undefined, false, onStart)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : c.includes('date') ? 'date' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [2_000, 'date'], [12_000, 'am']])
+      expect(onStart).toHaveBeenCalledWith(undefined)
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 

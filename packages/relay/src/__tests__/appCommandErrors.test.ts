@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { WebSocket } from 'ws'
-import { RelayServer } from '../RelayServer'
+import { APP_LOG_BACKPRESSURE_BYTES, RelayServer } from '../RelayServer'
 import { initDb, closeDb, getDb } from '../db'
 import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type { AgentRegistered } from '@tapflowio/protocol'
@@ -140,6 +140,47 @@ describe('app command failures reach the caller (#445)', () => {
     expect(msg.sessionId).toBe(sessionId)
 
     agent.close(); browser.close()
+  })
+
+  it('keeps app logs on the holder that launched them', async () => {
+    const { agent, browser, sessionId } = await connectAgentAndBrowser(['app-logs'])
+    const buildId = insertBuild('com.example.logs')
+    const launchPromise = waitForType(agent, 'app:launch')
+    browser.send(JSON.stringify({ type: 'app:launch', requestId: 'launch-owner', sessionId, buildId }))
+    await launchPromise
+
+    const firstLaunchDone = waitForType(browser, 'app:launch-done')
+    agent.send(JSON.stringify({ type: 'app:launch-done', requestId: 'launch-owner', sessionId }))
+    await firstLaunchDone
+    const receivedLog = waitForType(browser, 'app:log')
+    agent.send(JSON.stringify({ type: 'app:log', launchId: 'launch-owner', sessionId, text: 'first holder' }))
+    expect((await receivedLog).text).toBe('first holder')
+
+    const relayHolder = (server as unknown as {
+      sessions: { get(id: string): { browserSocket: WebSocket | null } | undefined }
+    }).sessions.get(sessionId)!.browserSocket!
+    Object.defineProperty(relayHolder, 'bufferedAmount', { configurable: true, value: APP_LOG_BACKPRESSURE_BYTES + 1 })
+    agent.send(JSON.stringify({ type: 'app:log', launchId: 'launch-owner', sessionId, text: 'backed up log' }))
+    await barrier(agent)
+    await barrier(browser)
+    expect(await waitForTypeOrNull(browser, 'app:log', 0)).toBeNull()
+    Object.defineProperty(relayHolder, 'bufferedAmount', { configurable: true, value: 0 })
+
+    browser.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    const listed = waitForType(browser, 'agents:listed')
+    browser.send(JSON.stringify({ type: 'agents:list' }))
+    await listed
+    const nextHolder = new WebSocket(`ws://localhost:${port}`)
+    await waitForOpen(nextHolder)
+    const nextJoined = waitForType(nextHolder, 'session:joined')
+    nextHolder.send(JSON.stringify({ type: 'session:start', sessionId }))
+    await nextJoined
+    agent.send(JSON.stringify({ type: 'app:log', launchId: 'launch-owner', sessionId, text: 'secret from old holder' }))
+    await barrier(agent)
+    await barrier(nextHolder)
+    expect(await waitForTypeOrNull(nextHolder, 'app:log', 0)).toBeNull()
+
+    agent.close(); browser.close(); nextHolder.close()
   })
 
   // Losing the agent takes the session with it — the relay drops every session that agent owned —

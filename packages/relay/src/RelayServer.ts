@@ -55,6 +55,21 @@ import {
 import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 
 const logger = createLogger('relay')
+export const APP_LOG_BACKPRESSURE_BYTES = 512 * 1024
+const APP_LOG_DROP_WARN_INTERVAL_MS = 1_000
+
+function createAppLogDropWarn(sessionId: string): () => void {
+  let lastWarnAt = Number.NEGATIVE_INFINITY
+  let dropped = 0
+  return () => {
+    dropped++
+    const now = Date.now()
+    if (now - lastWarnAt < APP_LOG_DROP_WARN_INTERVAL_MS) return
+    logger.warn(`ws backpressure: ${dropped} app log chunk(s) dropped [${sessionId}]`)
+    lastWarnAt = now
+    dropped = 0
+  }
+}
 
 // True when a remote IP is public — i.e. not loopback, private LAN, or link-local. Used to pick the
 // downscale tier (external viewers are bandwidth-constrained). Behind a reverse proxy the relay sees
@@ -371,6 +386,8 @@ export class RelayServer {
   private dropHandlers = new Map<string, () => void>()
   // Per-session throttled drop-warn for audio (kept separate so audio drops don't mask video drops in logs).
   private audioDropHandlers = new Map<string, () => void>()
+  /** The holder request that owns each current app log stream, plus its drop warning budget. */
+  private readonly appLogLaunches = new Map<string, { requestId: string; holder: WebSocket; onDrop: () => void }>()
   // Per-session keyframe-aware sender: drops to the next keyframe under backpressure (no H.264 P-frame tearing).
   private droppers = new Map<string, KeyframeAwareSender>()
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
@@ -1172,6 +1189,7 @@ export class RelayServer {
     this.dropHandlers.delete(sessionId)
     this.dropHandlers.delete(`${sessionId} watchers`)
     this.audioDropHandlers.delete(sessionId)
+    this.appLogLaunches.delete(sessionId)
     this.droppers.delete(sessionId)
     this.idrRequesters.delete(sessionId)
     this.networkStateRequesters.get(sessionId)?.dispose()
@@ -1941,10 +1959,15 @@ export class RelayServer {
       }
       case 'app:log': {
         const session = this.sessions.get(msg.sessionId)
-        if (session?.agentSocket !== ws) break
-        if (session.browserSocket?.readyState === WebSocket.OPEN) {
-          session.browserSocket.send(JSON.stringify(raw))
+        const launch = this.appLogLaunches.get(msg.sessionId)
+        if (session?.agentSocket !== ws || !launch || launch.requestId !== msg.launchId || launch.holder !== session.browserSocket) break
+        const browserSocket = session.browserSocket
+        if (browserSocket?.readyState !== WebSocket.OPEN) break
+        if (browserSocket.bufferedAmount >= APP_LOG_BACKPRESSURE_BYTES) {
+          launch.onDrop()
+          break
         }
+        browserSocket.send(JSON.stringify(raw))
         break
       }
       case 'app:install-done':
@@ -2093,6 +2116,7 @@ export class RelayServer {
         // The dashboard shuts the device down on Back and when it unmounts, and that cancels the countdown the wait would
         // have ended on — so the capture ends here, not only when the countdown runs out.
         this.captures.seal(target.session.id)
+        this.appLogLaunches.delete(target.session.id)
         target.session.agentSocket.send(JSON.stringify(msg))
         break
       }
@@ -2141,6 +2165,7 @@ export class RelayServer {
         // are the same two lines.
         const target = this.dispatchTarget(ws, msg.sessionId)
         if (target.ok) {
+          this.appLogLaunches.delete(target.session.id)
           target.session.agentSocket.send(JSON.stringify(msg))
           this.captures.recordInput(target.session.id, captureHolder(target.session), msg)
           this.tellWatchersAction(msg.sessionId, { kind: 'clear-state' })
@@ -3828,6 +3853,7 @@ export class RelayServer {
     // Whatever was on the device is uninstalled first, so the record goes now rather than when this one lands.
     this.forgetInstall(session, 'Replaced by another install on this device')
     session.pendingInstall = { ...thisBuild, requestId, waiters: [] }
+    this.appLogLaunches.delete(sessionId)
     this.sendTo(session.agentSocket, {
       type: 'app:install',
       sessionId,
@@ -3962,6 +3988,11 @@ export class RelayServer {
       sessionId,
       requestId,
       payload: { bundleId: build.bundle_id, ...options, ...(merged.defaultsOnly ? { defaultsOnly: true } : {}) },
+    })
+    this.appLogLaunches.set(sessionId, {
+      requestId,
+      holder: ws,
+      onDrop: createAppLogDropWarn(sessionId),
     })
     this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'launch' })

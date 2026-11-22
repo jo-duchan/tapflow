@@ -224,7 +224,7 @@ interface AndroidAgentInternals {
   sendChrome(state: TestState): void
   reconcileSerial(state: TestState, serial: string, w: number, h: number, skin: SkinRotation | null): Promise<boolean>
   startAppLogStreamAfterLaunch(
-    sessionId: string, state: TestState, serial: string, bundleId: string, launchId: string, generation: number
+    sessionId: string, state: TestState, serial: string, bundleId: string, launchId: string, logStartTime: string | undefined, generation: number
   ): Promise<void>
 }
 const internals = (agent: AndroidAgent): AndroidAgentInternals =>
@@ -4293,11 +4293,15 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-1', payload: { bundleId: 'com.example.app' } })
         await done
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false, expect.any(Function))
       })
 
       it('answers app:launch before process discovery completes', async () => {
         let releaseUidLookup!: (uid: number | null) => void
+        vi.spyOn(adb, 'launchApp').mockImplementation(async (...args) => {
+          args[4]?.('11-22 12:34:56.789')
+          return undefined
+        })
         const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(() => new Promise((resolve) => {
           releaseUidLookup = resolve
         }))
@@ -4335,7 +4339,7 @@ describe('AndroidAgent', () => {
 
         try {
           await internals(agent).startAppLogStreamAfterLaunch(
-            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'launch-deadline', 1
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'launch-deadline', '11-22 12:34:56.789', 1
           )
 
           expect(getAppUidSpy).toHaveBeenCalledOnce()
@@ -4369,7 +4373,7 @@ describe('AndroidAgent', () => {
 
         try {
           await internals(agent).startAppLogStreamAfterLaunch(
-            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'shared-uid', 1
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'shared-uid', '11-22 12:34:56.789', 1
           )
 
           expect(packagesSpy).toHaveBeenCalledOnce()
@@ -4388,7 +4392,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-2', payload: { bundleId: 'com.example.app', arguments: { flag: true } } })
         expect((await done)['applied']).toEqual({ arguments: ['flag'], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false, expect.any(Function))
       })
 
       // The relay's defaults the device could not take are reported as not applied, which is what a run record shows.
@@ -4397,7 +4401,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-5', payload: { bundleId: 'com.example.app', arguments: { flag: true }, defaultsOnly: true } })
         expect((await done)['applied']).toEqual({ arguments: [], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true, expect.any(Function))
       })
 
       it('refuses options the shared check refuses, without launching', async () => {

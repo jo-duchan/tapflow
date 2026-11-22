@@ -1,13 +1,44 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
+import { appendAppLogText } from '@/lib/appLogs'
+
+export type AppLogHandler = (text: string | null) => void
 
 interface AppLogViewerProps {
-  text: string
+  handlerRef: MutableRefObject<AppLogHandler | null>
   supported: boolean
 }
 
-export function AppLogViewer({ text, supported }: AppLogViewerProps) {
+export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
+  const [text, setText] = useState('')
+  const pendingTextRef = useRef('')
+  const animationFrameRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
+
+  useEffect(() => {
+    const handleText: AppLogHandler = (chunk) => {
+      if (chunk === null) {
+        pendingTextRef.current = ''
+        if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+        setText('')
+        return
+      }
+      pendingTextRef.current += chunk
+      if (animationFrameRef.current !== null) return
+      animationFrameRef.current = requestAnimationFrame(() => {
+        animationFrameRef.current = null
+        setText((current) => appendAppLogText(current, pendingTextRef.current))
+        pendingTextRef.current = ''
+      })
+    }
+    handlerRef.current = handleText
+    return () => {
+      if (handlerRef.current === handleText) handlerRef.current = null
+      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
+    }
+  }, [handlerRef])
 
   useLayoutEffect(() => {
     const container = containerRef.current

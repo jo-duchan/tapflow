@@ -2,7 +2,6 @@
 
 import { skeletonSize } from '@/lib/deviceSkeleton';
 import { framelessChrome } from '@/lib/framelessChrome';
-import { appendAppLogText } from '@/lib/appLogs';
 
 import type { BootRefusalReason, BrowserToRelay, FormFactor, SessionTerminatedReason } from '@tapflowio/protocol'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -155,7 +154,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [appLogState, setAppLogState] = useState({ sessionId, text: '' });
+  const appLogHandlerRef = useRef<((text: string | null) => void) | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   // Set while the relay holds this viewer's boot behind another on the same Mac; cleared by anything that
   // ends the wait — the boot starting, finishing or failing.
@@ -284,15 +283,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'app:log') {
       if (msg.launchId !== appLogLaunchIdRef.current) return;
-      setAppLogState((previous) => ({
-        sessionId,
-        text: appendAppLogText(previous.sessionId === sessionId ? previous.text : '', msg.text),
-      }));
+      appLogHandlerRef.current?.(msg.text);
       return;
     }
 
     if (msg.type === 'session:joined') {
       appLogLaunchIdRef.current = null;
+      appLogHandlerRef.current?.(null);
       // A join starts a boot cycle of its own (socket blip, re-entry). Any rebind still waiting for
       // a `device:ready` will never get one, and leaving it pending would make this cycle's ready
       // look like a rebind — suppressing installs for the rest of the mount.
@@ -317,7 +314,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:agent-away') {
       appLogLaunchIdRef.current = null;
-      setAppLogState({ sessionId, text: '' });
+      appLogHandlerRef.current?.(null);
       // Everything on screen describes an agent that is no longer there. Drop the frame so the
       // status card is what the tester sees — a picture that has simply stopped updating is the
       // thing #426 was opened about.
@@ -330,13 +327,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:terminated') {
       appLogLaunchIdRef.current = null;
-      setAppLogState({ sessionId, text: '' });
+      appLogHandlerRef.current?.(null);
       onSessionEnded?.(msg.reason);
       return;
     }
     if (msg.type === 'session:rebound') {
       appLogLaunchIdRef.current = null;
-      setAppLogState({ sessionId, text: '' });
+      appLogHandlerRef.current?.(null);
       // The agent restarted under us. Nothing is streaming, but until the new agent answers, every
       // flag here still describes the old one — and the relay cannot tell a viewer to stop, since
       // its own "agent offline" check sees a live socket (the new agent's). So tear down first,
@@ -467,7 +464,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'device:booting') {
       appLogLaunchIdRef.current = null;
-      setAppLogState({ sessionId, text: '' });
+      appLogHandlerRef.current?.(null);
       setBootWaiting(null);
       setServicesOff(false);
       setDeviceReady(false);
@@ -720,7 +717,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     if (buildId === undefined) return;
     const requestId = newRequestId();
     appLogLaunchIdRef.current = requestId;
-    setAppLogState({ sessionId, text: '' });
+    appLogHandlerRef.current?.(null);
     appLaunchIdsRef.current.add(requestId);
     setLaunching(true);
     sendRef.current({ type: 'app:launch', sessionId, requestId, buildId });
@@ -810,7 +807,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const appLogsSupported = agentCapabilities.includes('app-logs');
   const commonProps = {
     sessionId, buildId, send, openUrl, launchApp, connected, joined,
-    appLogText: appLogState.sessionId === sessionId ? appLogState.text : '',
+    appLogHandlerRef,
     deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
     launching,
     binaryFrameHandlerRef,
@@ -888,7 +885,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
           </div>
           <SimulatorInfoCard
             joined={joined} fps={0} connected={connected}
-            appLogText={appLogState.sessionId === sessionId ? appLogState.text : ''}
+            appLogHandlerRef={appLogHandlerRef}
             appLogsSupported={appLogsSupported}
             deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
             installing={installing} installError={installError}
