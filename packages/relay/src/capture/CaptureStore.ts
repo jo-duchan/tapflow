@@ -656,8 +656,8 @@ export class CaptureStore {
    * - The last read before says iOS had the app under test off the screen (`shown: null, onHome: true`): the home screen
    *   or another app, where the runner reads no keyboard. Kept as a QA Session's recording and screenshots keep such a
    *   screen, which nothing masks either: capturing steps is off until the person turns it on, and these pictures stay
-   *   in the relay's memory, theirs alone. Not when the read after it has the app's keyboard up: inside the app under
-   *   test the rules below still hold.
+   *   in the relay's memory, theirs alone. Only when the read after it has the keyboard down or the app still off the
+   *   screen: inside the app under test the rules below still hold.
    * - Only reads that could not say came before it (an app still starting), and the read after has the keyboard down: a
    *   key leaves the keyboard up, and the one key that closes it shows no character (session 1cef3852, iOS 26.5).
    * No read at all before it (an agent that reads no keyboard) is `on`: no read after will come to say otherwise.
@@ -672,10 +672,15 @@ export class CaptureStore {
       if (e.keyboard.shown !== null) before = e.keyboard
     }
     const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
-    // Off the app as last read, unless the read after it has a keyboard up: reads go one at a time and no input waits
-    // for one, so that last read can be from before the app came up, the touch already on a field it focused (pre-PR
-    // review). By the time the read after is back, any read asked before the touch is back too.
-    if (latest?.shown === null && latest.onHome === true) return !after ? 'not-yet' : after.keyboard.shown === true ? 'on' : 'off'
+    // Off the app as last read, and still so after it — the keyboard down, or the app still off the screen. Reads go one
+    // at a time and no input waits for one, so that last read can be from before the app came up, the touch already on
+    // a field it focused (pre-PR review); by the time the read after is back, any read asked before the touch is back
+    // too. A read after that cannot say is not `off`: iOS answers so for an app inactive with its keyboard up
+    // (CodeRabbit on #1226).
+    if (latest?.shown === null && latest.onHome === true) {
+      if (!after) return 'not-yet'
+      return after.keyboard.shown === false || (after.keyboard.shown === null && after.keyboard.onHome === true) ? 'off' : 'on'
+    }
     if (!latest || (before && !offKeyboard(touch, before))) return 'on'
     if (!after) return 'not-yet'
     if (!before) return after.keyboard.shown === false ? 'off' : 'on'

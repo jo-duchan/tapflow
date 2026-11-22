@@ -789,6 +789,15 @@ describe('CaptureStore — thumbnails', () => {
       expect(s.putThumbnail('s', '1', 'key', jpeg(10))).toBe('keyboard')
     })
 
+    // CodeRabbit on #1226: a read that cannot say (iOS answers `{ shown: null }` for an app inactive with its keyboard
+    // up) does not show the keyboard was down after a touch the last read placed off the app.
+    it('keeps none for a touch placed off the app when the read after it cannot say', async () => {
+      const s = await withKeyboard([{ shown: null, onHome: true }, { shown: null }])
+      record(s, ...touchAt('t', 0.8))
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 't', jpeg(10))).toBe('keyboard')
+    })
+
     // The same session's next tap came within 2 s of that one, and lost its picture to "typed just before".
     it('does not count such a touch as typing for the step after it', async () => {
       const s = await withKeyboard([{ shown: null }, { shown: false }])
