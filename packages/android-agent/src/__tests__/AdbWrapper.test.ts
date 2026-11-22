@@ -963,9 +963,13 @@ describe('AdbWrapper', () => {
     })
 
     // With uiautomator dump after it, both must fit the relay's 15 s tree deadline.
+    // The clock held still: what the server spent comes off the dump's cap in whole seconds, rounded up, so a runner
+    // slow enough to take 1 ms there made it 9 (CI, PR #1220).
     it('gives the jar a shorter cap than the dump it falls back to', async () => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
       const runner = dumper({ tree: '', stock: XML })
       await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554', 10)
+      clock.mockRestore()
       expect(ran(runner, 'app_process')[0]).toContain('4')
       expect(ran(runner, 'uiautomator')[0]).toContain('10')
     })
@@ -977,8 +981,10 @@ describe('AdbWrapper', () => {
     })
 
     it('runs uiautomator dump under the device-side timeout command', async () => {
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
       const runner = dumper({ tree: UNSUPPORTED, stock: XML })
       await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554')
+      clock.mockRestore()
       expect(ran(runner, 'uiautomator')[0]).toEqual([
         '-s', 'emulator-5554', 'exec-out',
         'timeout', '10', 'uiautomator', 'dump', '/dev/tty',

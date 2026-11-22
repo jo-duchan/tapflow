@@ -7,7 +7,7 @@ import type { UIElement } from '@tapflowio/agent-core'
 import type { FieldReadReason, FocusedField, KeyboardState, ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { toFramePoint } from '@tapflowio/protocol/screen'
 import { createLogger, PlatformError } from '@tapflowio/agent-core'
-import { parseTreeText, splitInterfaceTurn } from './xcuiTree.js'
+import { parseTreeTextWithAspect, splitInterfaceTurn } from './xcuiTree.js'
 
 const logger = createLogger('ios-agent:xcui-tree')
 const execFileAsync = promisify(execFile)
@@ -370,7 +370,7 @@ export class XCUITreeReader {
   }
 
   /** The tree with the app's interface turn the runner read beside it (`UiTreeResponse.interfaceTurn`). */
-  async readWithTurn(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
+  async readWithTurn(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270; aspect?: number }> {
     if (!bundleId) throw new PlatformError('UI tree query needs a foreground app — launch an app first')
     this.begin(udid)
     try {
@@ -380,7 +380,7 @@ export class XCUITreeReader {
     }
   }
 
-  private async readTree(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
+  private async readTree(udid: string, bundleId: string): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270; aspect?: number }> {
     const handle = await this.ensureRunner(udid)
     let text: string
     try {
@@ -404,8 +404,8 @@ export class XCUITreeReader {
     if (!body.includes('Element subtree:') && !body.includes('Application,')) {
       throw new PlatformError(`tree runner returned an unexpected response for ${bundleId} — is the app running in the foreground?`)
     }
-    const elements = parseTreeText(body)
-    return interfaceTurn === undefined ? { elements } : { elements, interfaceTurn }
+    const { elements, aspect } = parseTreeTextWithAspect(body)
+    return { elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}), ...(aspect !== undefined ? { aspect } : {}) }
   }
 
   /**

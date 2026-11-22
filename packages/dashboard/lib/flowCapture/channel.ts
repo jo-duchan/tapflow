@@ -81,7 +81,7 @@ export class DashboardSessionChannel extends SessionChannel {
   }
 
   /** The tree with the app's turn, over the browser's fetch and cookie; failures judged as `RelayClient` judges them. */
-  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn; aspect?: number }> {
     try {
       const res = await get(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal)
       if (!res.ok) throw new RelayHttpError(`ui-tree query failed: ${res.status}`, res.status)

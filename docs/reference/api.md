@@ -1203,13 +1203,16 @@ Return the UI elements on the session device's current screen.
       "enabled": true
     }
   ],
-  "interfaceTurn": 90
+  "interfaceTurn": 90,
+  "aspect": 0.46
 }
 ```
 
 `frame` is a 0–1 fraction of the screen size, measured on the screen as the app draws it. The error status codes match the screenshot endpoint, with a 15-second timeout.
 
 `interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
+
+`aspect` is the height divided by the width, in pixels, of the area the `frame` fractions are measured in: about `2.2` for a phone held upright and `0.46` for one turned sideways. Multiply a frame's height by it to compare its height with its width. When it is absent, the agent did not send it, which is the case for agents from before this field.
 
 Text fields (`role: "input"`) carry `secure`: `true` for a field that hides what is typed, such as a password, and `false` otherwise. Any other element that reports hiding its text has `secure: true` too. A text field without `secure` means the agent could not tell, so treat it as a password field. The field that is taking typing now has `focused: true`.
 

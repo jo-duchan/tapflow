@@ -772,6 +772,8 @@ export async function matchRange(
     const ctx: MatchContext = {
       tree: before?.elements ?? [],
       ...turns,
+      // From the read the tree came in, so the two cannot be of different screens (#1196).
+      ...(before?.aspect !== undefined ? { screenAspect: before.aspect } : {}),
       ...(reach ? { reach } : {}),
       postures: tap.postures().postures,
       platform: tap.platform,

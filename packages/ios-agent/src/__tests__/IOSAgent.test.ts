@@ -789,7 +789,7 @@ describe('IOSAgent', () => {
 
     it.each([[false, 270], [true, undefined]] as const)('multi-panel %s → interfaceTurn %s', async (multiPanel, expected) => {
       vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
-      vi.spyOn(XCUITreeReader.prototype, 'readWithTurn').mockResolvedValue({ elements: [], interfaceTurn: 270 })
+      vi.spyOn(XCUITreeReader.prototype, 'readWithTurn').mockResolvedValue({ elements: [], interfaceTurn: 270, aspect: 2.17 })
       const browser = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(browser)
       const agent = new IOSAgent({ intervalMs: 50 }, mockSimctl(true))
@@ -807,7 +807,7 @@ describe('IOSAgent', () => {
       }
       internals.lastBundleIds.set('dev-1', 'com.app')
       if (multiPanel) internals.multiPanelDevices.add('dev-1')
-      const sent: Array<{ type: string; interfaceTurn?: number }> = []
+      const sent: Array<{ type: string; interfaceTurn?: number; aspect?: number }> = []
       const real = internals.sendMsg.bind(agent)
       internals.sendMsg = (msg) => { sent.push(msg); real(msg as never) }
       internals.handleRelayMessage({ type: 'ui:tree:request', sessionId: agent.sessionId!, requestId: 'rq-t' })
@@ -815,6 +815,8 @@ describe('IOSAgent', () => {
       const reply = sent.find((m) => m.type === 'ui:tree:response')!
       expect(reply.interfaceTurn).toBe(expected)
       if (expected === undefined) expect(reply).not.toHaveProperty('interfaceTurn')
+      // The aspect is the tree's own space, right on a multi-panel device too, where the turn is not (#1196).
+      expect(reply.aspect).toBe(2.17)
 
       agent.disconnect()
       browser.close()

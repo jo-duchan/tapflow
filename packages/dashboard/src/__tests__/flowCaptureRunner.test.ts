@@ -10,7 +10,7 @@ import type { Carried } from '@/lib/flowCapture/remembered'
 const NO_CELLS: ScreenCells = { share: 1, cells: new Uint8Array([1]), gridWidth: 1, gridHeight: 1 }
 const log: string[] = []
 // What the screen reads as before each step: one test puts a field on it.
-const screen: { elements: unknown[]; interfaceTurn?: number } = { elements: [] }
+const screen: { elements: unknown[]; interfaceTurn?: number; aspect?: number } = { elements: [] }
 // One test has the device refuse what is replayed.
 const replay = { refuse: false }
 // What each step was matched with: one test reads the device's reach answers off it.
@@ -22,7 +22,10 @@ const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unkno
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
-  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements, ...(screen.interfaceTurn !== undefined ? { interfaceTurn: screen.interfaceTurn } : {}) } },
+  waitForStableScreen: async () => {
+    seq.push('settle')
+    return { elements: screen.elements, ...(screen.interfaceTurn !== undefined ? { interfaceTurn: screen.interfaceTurn } : {}), ...(screen.aspect !== undefined ? { aspect: screen.aspect } : {}) }
+  },
   replayStep: async (_c: unknown, _s: string, raw: RawStep) => {
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
@@ -102,6 +105,7 @@ beforeEach(() => {
   seq.length = 0
   screen.elements = []
   screen.interfaceTurn = undefined
+  screen.aspect = undefined
   replay.refuse = false
   pauseOk = true
   keyboardAnswers = ['done']
@@ -302,6 +306,18 @@ describe('matchRange', () => {
       chromeSpy.mockRestore()
       expect(orientationOf()).toBeUndefined()
     }, 20_000)
+  })
+
+  // #1196: the tree a swipe is matched against comes with its aspect, which the scroll rule reads a list's frame by.
+  it('matches a swipe with the aspect of the read its tree came in', async () => {
+    const lease = new PauseLease(tap)
+    screen.aspect = 0.45
+    const swipe = { ...base, kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } as unknown as RawStep
+    await matchRange(tap, channel, lease, [swipe, textStep], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    // After the turn the range starts with (`rangeStartOrientation`, landscape here), which is matched with no tree read.
+    expect(matchedWith[1]).toMatchObject({ screenAspect: 0.45 })
+    expect(matchedWith[0]).not.toHaveProperty('screenAspect')
   })
 
   it('says where each step touches before it is replayed, for drawing on the device', async () => {

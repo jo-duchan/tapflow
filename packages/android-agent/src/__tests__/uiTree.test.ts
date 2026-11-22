@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dumpRootFloats, parseUiAutomatorDump } from '../uiTree.js'
+import { dumpRootFloats, parseUiAutomatorDump, parseUiAutomatorTree } from '../uiTree.js'
 
 const attrs = (over: Record<string, string> = {}): string => {
   const base: Record<string, string> = {
@@ -289,3 +289,25 @@ describe('secure and focused', () => {
   })
 })
 
+
+// The tree's aspect (#1196): the height ÷ width of the size its frames were divided by, so a frame's own shape can be
+// read in pixels. The floating dialog has three different ratios — the screen's, the root's extents (x2/y2) and the
+// dialog's own — so a basis taken from the wrong one shows.
+describe('parseUiAutomatorTree aspect', () => {
+  it('is the root\'s, upright and turned', () => {
+    expect(parseUiAutomatorTree(wrap('')).aspect).toBeCloseTo(2400 / 1080, 4)
+    const landscape = wrap('').replace('[0,0][1080,2400]', '[0,0][2400,1080]')
+    expect(parseUiAutomatorTree(landscape).aspect).toBeCloseTo(1080 / 2400, 4)
+  })
+
+  it('is the screen\'s when a dialog floats and its elements are placed on the screen', () => {
+    const dialog =
+      `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<hierarchy rotation="0">\n` +
+      `<node ${attrs({ class: 'android.widget.FrameLayout', bounds: '[28,955][1052,1469]' })}>\n` +
+      `<node ${attrs({ class: 'android.widget.Button', text: 'OK', clickable: 'true', bounds: '[830,1290][1000,1410]' })} />\n` +
+      `</node>\n</hierarchy>`
+    const read = parseUiAutomatorTree(dialog, { width: 1080, height: 2424 })
+    expect(read.aspect).toBeCloseTo(2424 / 1080, 4)
+    expect(read.elements).toEqual(parseUiAutomatorDump(dialog, { width: 1080, height: 2424 }))
+  })
+})

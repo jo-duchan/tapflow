@@ -592,7 +592,7 @@ export class RelayClient extends SessionChannel {
   }
 
   /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
-  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn; aspect?: number }> {
     try {
       return parseUITreeResponse(await this.getJson<unknown>(`/api/v1/sessions/${sessionId}/ui-tree`, 'ui-tree query', signal))
     } catch (e) {
