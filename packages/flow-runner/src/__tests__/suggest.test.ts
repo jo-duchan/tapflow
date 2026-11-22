@@ -38,10 +38,11 @@ describe('suggestSelectors', () => {
   it('never names an element by a label nobody can read', () => {
     const glyph = '\uE88A'
     expect(suggestSelectors([el(glyph, { identifier: 'tab.home' }), el('Sign in')], { id: 'tab.homee' })[0]!.yaml).toBe('tapOn: { id: "tab.home" }')
-    expect(selectorFor([el(glyph, { identifier: 'tab.home' })], el(glyph, { identifier: 'tab.home' }))).toBeNull()
     const tree = [el(glyph, { identifier: 'tab.home' }), el('Sign in')]
     expect(selectorFor(tree, tree[0]!)).toEqual({ id: 'tab.home' })
-    expect(selectorFor([el(glyph), el('Sign in')], el(glyph))).toBeNull()
+    // The tree's own member: `selectorFor` resolves to the target by identity, and any other object reads as null.
+    const bare = [el(glyph), el('Sign in')]
+    expect(selectorFor(bare, bare[0]!)).toBeNull()
   })
 
   it('treats case, spacing and punctuation as the same label', () => {

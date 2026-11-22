@@ -211,7 +211,8 @@ points are of the frame** (`space: 'frame'`), and the relay passes that on: the 
 not through the screen's turn, which put them a quarter off. Flow Capture does the same over its replay's mirror, which
 copies that frame, and turns them into the screen by the recorded `streamRotation` on a step's screenshot
 (`markOf`'s `into`); with no map there it draws none. Until then it drew none for a frame-space step at all, so an
-Android emulator's Match, Edit and Verify showed no touch.
+Android emulator's Match, Edit and Verify showed no touch. A touch in the screen's points (a named tap, Verify's
+steps) is carried into the frame by the inverse of that map before it is drawn there (`mirrorMark`).
 **An Automation run's video draws the runner's touches** (#1205's follow-up). The runner writes each as a `touch`
 event in the video, on the frames' clock, at send time — **in the frame it was sent in**, after `SocketFlowDriver`
 turned the flow's points (`onInput`), so the player places it as the watch page places a `watch:action`; the flow's

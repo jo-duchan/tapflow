@@ -1,6 +1,6 @@
 import { toScreen, type RawStep } from '@tapflowio/flow-runner/browser'
 import type { AndroidChrome, ChromePayload } from '@tapflowio/protocol'
-import { chromeOrientation } from '@tapflowio/protocol/screen'
+import { chromeOrientation, toFramePoint } from '@tapflowio/protocol/screen'
 import type { MachineTouch, StillTouch } from '@/lib/touchMarks'
 
 /** Where a step touched the screen, as fractions of it — a point, or a stroke's two ends — and a swipe's own length.
@@ -45,16 +45,25 @@ export function markOf(raw: RawStep, into: 'frame' | 'screen' = 'screen'): StepM
 }
 
 /**
- * Whether a replayed touch can be drawn over the mirror, which copies the video frame. One in the frame's own points
- * always can. One in the screen's only where the frame is the screen: the device upright, and on Android no turn from
- * the frame to the screen (`streamRotation`) — an upright unfolded foldable, or an app locked to landscape, has one,
- * and a screen point drawn on that frame lands a quarter off (adversarial review).
+ * A replayed touch as it is drawn over the mirror, which copies the video frame, or `null` where it cannot be. One in
+ * the frame's own points is drawn as it is. One in the screen's — a named tap, Verify's steps — is carried into the frame
+ * on Android by the inverse of the frame-to-screen map (`streamRotation`): an upright unfolded foldable, or an app locked
+ * to landscape, has a turn there, and the point drawn as it is lands a quarter off (adversarial review; CodeRabbit on
+ * #1216). With no such turn, only while the device is upright, the frame then being the screen.
  */
-export function drawsOverMirror(mark: StepMark, chrome: ChromePayload | null): boolean {
-  if (mark.inFrame) return true
-  if (chrome && !('framePng' in chrome) && ((chrome as AndroidChrome).streamRotation ?? 0) !== 0) return false
+export function mirrorMark(mark: StepMark, chrome: ChromePayload | null): StepMark | null {
+  if (mark.inFrame) return mark
+  const turn = chrome && !('framePng' in chrome) ? (chrome as AndroidChrome).streamRotation : undefined
+  if (turn !== undefined && turn !== 0) {
+    const f = (p: { x: number; y: number }) => { const [x, y] = toFramePoint(turn, [p.x, p.y]); return { x, y } }
+    switch (mark.kind) {
+      case 'tap': return { ...mark, point: f(mark.point), inFrame: true }
+      case 'swipe': return { ...mark, from: f(mark.from), to: f(mark.to), inFrame: true }
+      case 'pinch': return { ...mark, from: [f(mark.from[0]), f(mark.from[1])], to: [f(mark.to[0]), f(mark.to[1])], inFrame: true }
+    }
+  }
   const o = chrome ? chromeOrientation(chrome) : undefined
-  return o === undefined || o === 'portrait'
+  return o === undefined || o === 'portrait' ? mark : null
 }
 
 /**

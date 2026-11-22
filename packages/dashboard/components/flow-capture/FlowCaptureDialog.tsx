@@ -14,7 +14,7 @@ import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, v
 import { compareWithRecording, recordedAlike, tapDidNothing } from '@/lib/flowCapture/screenCompare'
 import { Remembered } from '@/lib/flowCapture/remembered'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
-import { drawsOverMirror, touchOfMark, type StepMark } from '@/lib/flowCapture/marks'
+import { mirrorMark, touchOfMark, type StepMark } from '@/lib/flowCapture/marks'
 import type { MachineTouch } from '@/lib/touchMarks'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from './screens'
 
@@ -141,9 +141,10 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
   const [touch, setTouch] = useState<MachineTouch | null>(null)
   const markId = useRef(0)
-  // The mirror copies the video frame: a mark in the screen's points only while upright (`drawsOverMirror`).
-  const onTouch = (mark: StepMark) => {
-    if (!drawsOverMirror(mark, tap.chrome())) return
+  // The mirror copies the video frame: a mark in the screen's points is carried into it, or left out (`mirrorMark`).
+  const onTouch = (touched: StepMark) => {
+    const mark = mirrorMark(touched, tap.chrome())
+    if (!mark) return
     // The id is taken here, not in the updater, which React may run twice.
     const id = ++markId.current
     setTouch(touchOfMark(id, mark, performance.now()))

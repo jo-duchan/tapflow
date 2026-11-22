@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
 import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
-import { drawsOverMirror, markOf, touchOfMark } from '@/lib/flowCapture/marks'
+import { markOf, mirrorMark, touchOfMark } from '@/lib/flowCapture/marks'
 import type { ChromePayload } from '@tapflowio/protocol'
 
 // Flow Capture's dialog (#1125), the parts with no screen: the order of its states, and what Edit makes of the flow.
@@ -269,15 +269,27 @@ describe('the touches drawn', () => {
       })
     })
 
-    // The mirror copies the frame: a frame's mark goes over it however the body is turned, a screen's only upright.
-    it('is drawn over the mirror whatever the turn, where a screen\'s mark is not', () => {
+    // The mirror copies the frame: a frame's mark goes over it however the body is turned; a screen's is carried into
+    // the frame by the inverse of Android's frame-to-screen map, and with none, drawn only upright.
+    // Mutations: skip the conversion, turn it the wrong way, or drop the upright check.
+    it('is drawn over the mirror whatever the turn, and a screen\'s mark carried into the frame', () => {
       const turned = { bodyRotation: 90, streamRotation: 90 } as unknown as ChromePayload
-      expect(drawsOverMirror(markOf(tap(turned), 'frame')!, turned)).toBe(true)
-      expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, turned)).toBe(false)
-      expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, { bodyRotation: 0 } as unknown as ChromePayload)).toBe(true)
-      expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, null)).toBe(true)
-      // Upright, but the frame a quarter off the screen (an unfolded foldable): a screen's mark would land a quarter off.
-      expect(drawsOverMirror({ kind: 'tap', point: { x: 0.2, y: 0.3 } }, { bodyRotation: 0, streamRotation: 90 } as unknown as ChromePayload)).toBe(false)
+      const frameMark = markOf(tap(turned), 'frame')!
+      expect(mirrorMark(frameMark, turned)).toBe(frameMark)
+      const screenTap = { kind: 'tap', point: { x: 0.2, y: 0.3 } } as const
+      expect(mirrorMark(screenTap, { bodyRotation: 0 } as unknown as ChromePayload)).toBe(screenTap)
+      expect(mirrorMark(screenTap, null)).toBe(screenTap)
+      // Upright, but the frame a quarter off the screen (an unfolded foldable): the screen's (0.2, 0.3) is the frame's
+      // (0.3, 0.8), which the screenshot path turns back (`toScreen`, frame turn 90: (1 - y, x)).
+      const foldable = { bodyRotation: 0, streamRotation: 90 } as unknown as ChromePayload
+      expect(mirrorMark(screenTap, foldable)).toEqual({ kind: 'tap', point: { x: 0.3, y: 0.8 }, inFrame: true })
+      expect(markOf({ ...tap(foldable), point: [0.3, 0.8] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark({ kind: 'swipe', from: { x: 0.2, y: 0.3 }, to: { x: 0.5, y: 0.5 }, durationMs: 100 }, foldable))
+        .toEqual({ kind: 'swipe', from: { x: 0.3, y: 0.8 }, to: { x: 0.5, y: 0.5 }, durationMs: 100, inFrame: true })
+      expect(mirrorMark({ kind: 'pinch', from: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], durationMs: 100 }, foldable))
+        .toEqual({ kind: 'pinch', from: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], durationMs: 100, inFrame: true })
+      // Turned with no map from the frame (iOS, an older agent): the screen is not the frame, and nothing is drawn.
+      expect(mirrorMark(screenTap, { bodyRotation: 90 } as unknown as ChromePayload)).toBeNull()
     })
 
     it('turns it into the screen on a screenshot, and draws none with no map', () => {
