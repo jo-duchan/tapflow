@@ -232,8 +232,8 @@ protocol, sits in an area under active development (Flow Capture, as of 0.33), o
 Outside contributors read the labels, not the reasoning, so without it they offer to take exactly these:
 #1196 drew an offer that had to be turned down because its data source was an open design question.
 The issue still gets filed. Keeping it in `.work/` instead would break the parent's checklist and the
-rule above. Conversely, an issue a newcomer can finish without a design call gets `good first issue`
-or `help wanted`, so the decline has somewhere to point.
+rule above. Conversely, an issue that meets none of these and that a newcomer can finish gets
+`good first issue` or `help wanted`, so the decline has somewhere to point. No issue carries both.
 
 ### Design Principles (SOLID — priority subset)
 
