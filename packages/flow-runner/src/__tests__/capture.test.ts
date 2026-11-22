@@ -1350,6 +1350,30 @@ describe('toFlowSteps', () => {
       expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
     })
 
+    // #1196: a frame is fractions of the tree's space, so its shape needs that space's aspect. A list 0.3 wide and 0.5
+    // tall is taller than wide on a phone held upright (×2) and wider than tall in landscape (×0.45).
+    describe('by its frame, in the tree\'s own aspect', () => {
+      const one = el({ role: 'list', frame: { x: 0.35, y: 0.25, width: 0.3, height: 0.5 } })
+      const card = (n: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x: 0.37, y: 0.3, width: 0.26, height: 0.4 } })
+      const flowOf = (from: [number, number], to: [number, number], aspect?: number) => {
+        const [swipe, tap] = new Rec().touch([from, to]).touch([[0.5, 0.5]]).steps()
+        const extra = aspect === undefined ? {} : { screenAspect: aspect }
+        return toFlowSteps([matchStep(swipe!, ctxOf([one, card(1)], extra)), matchStep(tap!, ctxOf([one, card(2)], extra))])
+      }
+
+      it('is sideways in landscape: a sideways swipe in it is a scroll, a vertical one stays a swipe', () => {
+        expect(flowOf([0.6, 0.5], [0.4, 0.5], 0.45).steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+        expect(flowOf([0.5, 0.65], [0.5, 0.35], 0.45).steps[0]!.step?.type).toBe('swipe')
+      })
+
+      it('is vertical held upright, and with no aspect, as a phone held upright', () => {
+        for (const aspect of [2.2, undefined]) {
+          expect(flowOf([0.5, 0.65], [0.5, 0.35], aspect).steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+          expect(flowOf([0.6, 0.5], [0.4, 0.5], aspect).steps[0]!.step?.type).toBe('swipe')
+        }
+      })
+    })
+
     it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
       const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
       const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })

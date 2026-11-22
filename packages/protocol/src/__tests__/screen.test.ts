@@ -86,6 +86,25 @@ describe('ui:tree:response interfaceTurn', () => {
   })
 })
 
+// The tree's own aspect (#1196): what a list's frame is read by, sent with the tree it describes.
+describe('ui:tree:response aspect', () => {
+  const frame = (aspect: unknown) => ({ type: 'ui:tree:response', sessionId: 's', requestId: 'r', elements: [], aspect })
+
+  it('carries a positive aspect', () => {
+    const r = parseInbound(frame(0.45))
+    expect(r.ok && r.msg).toMatchObject({ aspect: 0.45 })
+  })
+
+  // As `interfaceTurn`: one bad value costs the field, never the tree.
+  it('drops a value that is not a positive number and keeps the tree', () => {
+    for (const bad of [0, -1, '2', Infinity, null]) {
+      const r = parseInbound(frame(bad))
+      expect(r.ok).toBe(true)
+      expect(r.ok && (r.msg as { aspect?: unknown }).aspect).toBeUndefined()
+    }
+  })
+})
+
 describe('ui:tree:response secure and focused', () => {
   const el = (extra: Record<string, unknown>) => ({
     type: 'ui:tree:response', sessionId: 's', requestId: 'r',

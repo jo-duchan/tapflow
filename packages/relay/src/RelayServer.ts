@@ -466,7 +466,7 @@ export class RelayServer {
   private readonly uiTreeTimeoutMs: number
   private pendingUITrees = new Map<string, {
     sessionId: string
-    resolve: (tree: { elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }) => void
+    resolve: (tree: { elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270; aspect?: number }) => void
     reject: (err: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>()
@@ -4048,12 +4048,12 @@ export class RelayServer {
 
       this.pendingUITrees.set(requestId, {
         sessionId,
-        resolve: ({ elements, interfaceTurn }) => {
+        resolve: ({ elements, interfaceTurn, aspect }) => {
           clearTimeout(timer)
           this.pendingUITrees.delete(requestId)
           // The app's turn rides beside the tree only when the agent sent one: absent is "no information", and a
           // client turns nothing then (`UiTreeResponse.interfaceTurn`).
-          json(res, 200, interfaceTurn === undefined ? { elements } : { elements, interfaceTurn })
+          json(res, 200, { elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}), ...(aspect !== undefined ? { aspect } : {}) })
           resolve()
         },
         reject: (err) => {
@@ -4143,7 +4143,11 @@ export class RelayServer {
   private handleUITreeResponse(msg: Inbound<'ui:tree:response'>): void {
     const pending = this.pendingUITrees.get(msg.requestId)
     if (!pending) return
-    pending.resolve(msg.interfaceTurn === undefined ? { elements: msg.elements } : { elements: msg.elements, interfaceTurn: msg.interfaceTurn })
+    pending.resolve({
+      elements: msg.elements,
+      ...(msg.interfaceTurn !== undefined ? { interfaceTurn: msg.interfaceTurn } : {}),
+      ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+    })
   }
 
   private handleUIReachResponse(ws: WebSocket, msg: Inbound<'ui:reach:response'>): void {

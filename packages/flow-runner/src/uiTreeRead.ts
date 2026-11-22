@@ -33,13 +33,19 @@ export function isUIElement(value: unknown): value is UIElement {
     && (x as number) + (width as number) <= 1 && (y as number) + (height as number) <= 1
 }
 
-/** A ui-tree body as the elements and the app's interface turn, or a permanent failure naming a body nothing can use. */
-export function parseUITreeResponse(body: unknown): { elements: UIElement[]; interfaceTurn?: InterfaceTurn } {
+/** A ui-tree body as the elements, the app's interface turn and the tree's aspect (`UiTreeResponse.aspect`), or a
+ *  permanent failure naming a body nothing can use. A turn or an aspect that is not one is dropped, never the tree. */
+export function parseUITreeResponse(body: unknown): { elements: UIElement[]; interfaceTurn?: InterfaceTurn; aspect?: number } {
   if (typeof body !== 'object' || body === null || Array.isArray(body) || !('elements' in body) || !Array.isArray(body.elements) || !body.elements.every(isUIElement)) {
     throw new RelayHttpError('ui-tree query returned an invalid response shape', 200, undefined, true)
   }
   const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
-  return interfaceTurn === undefined ? { elements: body.elements as UIElement[] } : { elements: body.elements as UIElement[], interfaceTurn }
+  const aspect = (body as { aspect?: unknown }).aspect
+  return {
+    elements: body.elements as UIElement[],
+    ...(interfaceTurn !== undefined ? { interfaceTurn } : {}),
+    ...(typeof aspect === 'number' && Number.isFinite(aspect) && aspect > 0 ? { aspect } : {}),
+  }
 }
 
 /**

@@ -67,6 +67,11 @@ export function dumpRootFloats(xml: string): boolean {
 }
 
 export function parseUiAutomatorDump(xml: string, screen?: { width: number; height: number } | null): UIElement[] {
+  return parseUiAutomatorTree(xml, screen).elements
+}
+
+/** The dump's elements, and the height ÷ width of the size their frames are fractions of (`UiTreeResponse.aspect`). */
+export function parseUiAutomatorTree(xml: string, screen?: { width: number; height: number } | null): { elements: UIElement[]; aspect?: number } {
   if (!xml.includes('<hierarchy')) {
     throw new PlatformError(`uiautomator dump did not return a UI hierarchy: ${xml.slice(0, 200).trim() || '(empty output)'}`)
   }
@@ -79,7 +84,7 @@ export function parseUiAutomatorDump(xml: string, screen?: { width: number; heig
     }
     nodes.push({ attrs, bounds: parseBounds(attrs['bounds']) })
   }
-  if (nodes.length === 0) return []
+  if (nodes.length === 0) return { elements: [] }
 
   // The root node spans the current display, so dumps normalize correctly in
   // any orientation without a separate `wm size` round-trip — unless a window floats over it (`dumpRootFloats`), when
@@ -157,5 +162,5 @@ export function parseUiAutomatorDump(xml: string, screen?: { width: number; heig
     if (attrs['selected'] === 'true') element.selected = true
     elements.push(element)
   }
-  return elements
+  return { elements, aspect: height / width }
 }

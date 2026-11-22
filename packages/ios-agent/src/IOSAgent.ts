@@ -3083,8 +3083,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         this.readUITreeWithTurn(state)
-          .then(({ elements, interfaceTurn }) => this.sendMsg({
-            type: 'ui:tree:response', sessionId, requestId, elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}),
+          .then(({ elements, interfaceTurn, aspect }) => this.sendMsg({
+            type: 'ui:tree:response', sessionId, requestId, elements,
+            ...(interfaceTurn !== undefined ? { interfaceTurn } : {}), ...(aspect !== undefined ? { aspect } : {}),
           }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -3157,13 +3158,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * multi-panel device: its panels are drawn with their own turn and touched by another path, and turning a point by
    * the app's turn there is unmeasured (#1116), so it gets the absent value every client already handles.
    */
-  private async readUITreeWithTurn(state: DeviceState): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
+  private async readUITreeWithTurn(state: DeviceState): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270; aspect?: number }> {
     const bundleId = this.lastBundleIds.get(state.deviceId)
     if (!bundleId) {
       throw new PlatformError('no app launched — launch an app before querying the UI tree')
     }
     const read = await this.uiTreeReader.readWithTurn(state.deviceId, bundleId)
-    return this.multiPanelDevices.has(state.deviceId) ? { elements: read.elements } : read
+    if (!this.multiPanelDevices.has(state.deviceId)) return read
+    // The turn only: the aspect is of the tree's own space, which a multi-panel device's turn is not (#1116, #1196).
+    const { interfaceTurn: _turn, ...rest } = read
+    return rest
   }
 
   /**
