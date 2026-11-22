@@ -348,7 +348,16 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   if (reads.length === 0) return steps
   let i = 0
   let previousEnd = -Infinity
+  // The step before stayed on the home screen: placed there, and the first read asked after it ended says home too —
+  // a page turned, a folder opened. Not one that left it (the icon's own tap, whose next read is of the app starting).
+  let stayedHome = false
   return steps.map((s, n) => {
+    const placed = place(s, n)
+    stayedHome = placed.onHome === true && reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome === true
+    return placed
+  })
+
+  function place(s: RawStep, n: number): RawStep {
     const sinceLast = previousEnd
     previousEnd = s.endAt
     // A report says this touch went down in the app, whatever a read trailing the icon's tap says. No touch on the home
@@ -370,11 +379,16 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
     while (k >= 0 && reads[k]!.requestedAt > s.at) k--
     const lastRead = k >= 0 ? reads[k] : undefined
     const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
-    if (last === undefined) return s
+    // No read placed it — the person moved faster than the reads, one before it asked during the step ahead and the
+    // next answered just after it lifted (#1224, iOS 26.5) — yet the step before stayed home: the app's first report
+    // still says whether this tap is the one that opened it, on the same evidence as below. Not after a step that left
+    // home: a permission alert's Allow, tapped as the app came up, sits right before the app's first touch as well
+    // (pre-PR review), and the replay would launch into an alert nobody taps.
+    if (last === undefined) return stayedHome && openedTheApp(steps, n) ? { ...s, onHome: true } : s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
     if (last && after === false) return openedTheApp(steps, n) ? { ...s, onHome: true } : s
     return { ...s, onHome: last }
-  })
+  }
 }
 
 /**
@@ -382,6 +396,11 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
  * app reported, followed straight by a touch the app reports as the first in its process (`seq` 1).
  * A missing report alone cannot say it: an app just started may report its first tap too late to be paired, and that
  * tap looks the same (design review). Anything else stays unknown, which stops the default range's skip there.
+ *
+ * It need not be the icon: a widget, a Spotlight result or a notification of the app opens it the same way, and the
+ * replay's own launch stands for each. Another app's icon would open that app, and coming back takes a touch of its own,
+ * so the next step would not be the app's first. What this cannot tell: another app opening this one by a link with no
+ * touch between, whose screen the replay's plain launch may not reach.
  */
 function openedTheApp(steps: readonly RawStep[], n: number): boolean {
   const s = steps[n]!
