@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { RawStep, ScreenCells } from '@tapflowio/flow-runner/browser'
+import type { CapturedStep, RawStep, ScreenCells } from '@tapflowio/flow-runner/browser'
 import type { ScreenDivergence } from '@/lib/flowCapture/runner'
 import type { Carried } from '@/lib/flowCapture/remembered'
 
@@ -709,6 +709,44 @@ describe('matchRange: comparing each step with its recording', () => {
         await run({ ...(viewer as object), platform: 'android' } as unknown as Tap)
       } finally { delete screen.interfaceTurn }
       expect(turns).toEqual([undefined, 90])
+    })
+
+    // #1178: a step the person waved through as mostly different is marked, so Edit can say its screen was not compared.
+    describe('marks a step whose screen was not compared', () => {
+      const stepsOf = async (carried: Carried, compare: () => Promise<ScreenDivergence | null>) => {
+        const h = hooks()
+        await matchRange(viewer, channel, lease, [tapStep, tapStep, tapStep], { start: 1, end: 3 }, null, {
+          ...h, compare, carried: async () => carried, onDiverged: async () => {},
+        })
+        return h.onStep.mock.calls.slice(-2).map((c) => (c[0] as CapturedStep).notCompared)
+      }
+
+      it('where an earlier Continue anyway on it waived a difference', async () => {
+        // The range's first step comes after the launch and is not compared (`asked` above is [2]).
+        expect(await stepsOf('skip', async () => leftDiffers)).toEqual([undefined, true])
+      })
+
+      it('not where it was compared and matched, though it was waived before', async () => {
+        expect(await stepsOf('skip', async () => null)).toEqual([undefined, undefined])
+      })
+
+      it('not where set-aside areas covered the difference: the rest was compared', async () => {
+        expect(await stepsOf({ areas: [LEFT], from: 0 }, async () => leftDiffers)).toEqual([undefined, undefined])
+      })
+
+      it('where this Match stopped on it as mostly different and the person went on, not on one different in places', async () => {
+        const run = async (stop: ScreenDivergence) => {
+          const h = hooks()
+          const looks = [stop]
+          await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+            ...h, compare: async () => looks.shift() ?? null, onDiverged: async () => {},
+          })
+          return h.onStep.mock.calls.slice(-2).map((c) => (c[0] as CapturedStep).notCompared)
+        }
+        // The second step is the one compared (the first follows the launch).
+        expect(await run({ ...leftDiffers, mostly: true })).toEqual([undefined, true])
+        expect(await run(leftDiffers)).toEqual([undefined, undefined])
+      })
     })
 
     it('goes on past a step the person said is mostly different, and stops without anything remembered', async () => {

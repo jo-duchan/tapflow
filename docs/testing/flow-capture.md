@@ -131,7 +131,7 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 - On Android, when a person whose steps are recorded boots a device, the agent reads the accessibility tree at each tap's point and records the name and identifier of what it touched. A tap's record carries no field contents and no password; what a field holds is read separately, as above. From that boot the agent holds the emulator's accessibility connection (UiAutomation), so another tool such as `uiautomator dump` or Appium cannot connect to that emulator until it shuts down or boots again without recording.
 - Replaying a typing step by replacing the field's contents needs Android 13 or later, and `imeAction` Android 11 or later. See [Flows](/automation/flows).
 - An element covered by an overlay with no accessibility information is invisible when the device judges where a touch lands. Suspect one when Verify says a touch changed nothing. See [Where a touch lands](/automation/flows#where-a-touch-lands).
-- A step you go on from with **Continue anyway** when it is mostly different is not compared in later Matches, and nothing in Match or Edit shows that it was not.
+- A step you go on from with **Continue anyway** when it is mostly different is not compared in later Matches. Edit marks it **fragile** and says its screen was not compared; Match itself shows nothing.
 - Every role can use it, Viewer included.
 
 ## Troubleshooting {#troubleshooting}
