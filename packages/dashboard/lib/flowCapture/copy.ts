@@ -137,6 +137,7 @@ export const copy = {
     'too-long': 'Held longer than a flow allows (60 seconds).',
     'no-pinch': 'The fingers moved but the scale hardly changed.',
     'orientation-unknown': 'The device did not report which way it ended up.',
+    'orientation-upside-down': 'The device ended up upside down, and a flow can turn it only to portrait or landscape.',
     'posture-between': 'A flow can fold or unfold fully, not stop between.',
     install: 'The run installs the build itself.',
     network: 'A flow cannot switch the network.',

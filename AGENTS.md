@@ -317,6 +317,13 @@ pkill -f "vitest"
 ```
 Zombie worker processes accumulate silently from `pnpm test` loops and consume memory. Kill them before starting new test runs.
 
+**Code that reads the time takes its clock as a parameter, and its tests pass one.** A `now: () => number` (and a
+`sleep` where it waits), defaulting to the real one, as `FocusedServer`, `CaptureStore`, `admission` and `AdbWrapper`
+do. A test then never spies on the global `Date.now` (it leaks into every other caller until restored) and never waits
+in real time. Both shapes cost a CI cycle or more: #1220's `AdbWrapper` tests counted the dump's budget on the real
+clock, so a runner that spent 1 ms got `timeout 9` instead of `10` — green locally, red on CI — and #1221's rotate
+waits spent 8 real seconds per test until the clock was injected, after which the six ran in 7 ms.
+
 ### Dev Server Hygiene
 Same rule, different processes. **Anything you start with `pnpm dev` you stop before the session ends:**
 ```bash

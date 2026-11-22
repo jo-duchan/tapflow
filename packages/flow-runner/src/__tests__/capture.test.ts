@@ -1191,7 +1191,9 @@ describe('matchStep', () => {
     r.msg({ type: 'input:rotate', sessionId: 's', payload: { orientation: 'portrait' } })
     const [turn, upright] = r.steps()
     expect(matchStep(turn!, ctxOf([], { orientationAfter: 'landscape' })).step).toEqual({ type: 'setOrientation', orientation: 'landscape' })
-    expect(matchStep(turn!, ctxOf([], { orientationAfter: 'upside-down' })).skipped).toBe('orientation-unknown')
+    // Upside down was reported, but a flow cannot turn a device there; no report at all is another reason to leave it out.
+    expect(matchStep(turn!, ctxOf([], { orientationAfter: 'upside-down' })).skipped).toBe('orientation-upside-down')
+    expect(matchStep(turn!, ctxOf([])).skipped).toBe('orientation-unknown')
     expect(matchStep(upright!, ctxOf([])).step).toEqual({ type: 'setOrientation', orientation: 'portrait' })
   })
 
