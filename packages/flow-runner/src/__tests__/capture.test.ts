@@ -1280,6 +1280,15 @@ describe('toFlowSteps', () => {
     expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
   })
 
+  // #1178: Match's trace that the swipe's screen was not compared goes with the scroll it becomes.
+  it('keeps a swipe\'s not-compared trace on the scroll it becomes', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.9 } })
+    const flow = toFlowSteps([{ ...matchStep(swipe!, ctxOf([table, ...list(8)])), notCompared: true }, matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]).toMatchObject({ step: { type: 'scroll' }, notCompared: true })
+    expect(flow.steps[1]!.notCompared).toBeUndefined()
+  })
+
   // Review: the view a touch begins on takes the scroll, so a fling that ends in the tab bar is still one.
   it('takes a swipe begun in a list and ended below it for a scroll', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.1]]).touch([[0.5, 0.55]]).steps()
