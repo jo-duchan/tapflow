@@ -180,6 +180,13 @@ async function chromeNow(channel: DashboardSessionChannel, tap: CaptureTap): Pro
 export const ROTATE_SETTLE_MS = 8_000
 const ROTATE_POLL_MS = 200
 
+/** The time a wait is counted on, given so a test can run an 8 s wait without spending it (AGENTS.md "Test Hygiene"). */
+export interface Clock {
+  now: () => number
+  sleep: (ms: number) => Promise<void>
+}
+const realClock: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }
+
 /** The turn a chrome says the device is held at — iOS's `streamRotation`, Android's `bodyRotation` — by value, since a
  *  turn from one landscape to the other changes no orientation's name. */
 function heldTurn(chrome: ChromePayload | null): number | undefined {
@@ -208,17 +215,18 @@ function rotateDirection(raw: RawStep): 'clockwise' | 'counterclockwise' | undef
  */
 async function chromeAfterTurn(
   channel: DashboardSessionChannel, tap: CaptureTap, from: number | undefined, direction: 'clockwise' | 'counterclockwise' | undefined, signal: AbortSignal,
+  clock: Clock,
 ): Promise<ChromePayload | null> {
   if (from === undefined) return chromeNow(channel, tap)
   const want = direction === undefined ? undefined : (from + (direction === 'clockwise' ? 90 : 270)) % 360
-  const until = Date.now() + ROTATE_SETTLE_MS
+  const until = clock.now() + ROTATE_SETTLE_MS
   for (;;) {
     signal.throwIfAborted()
     const now = await chromeNow(channel, tap)
     const turn = heldTurn(now)
     if (turn !== undefined && (want === undefined ? turn !== from : turn === want)) return now
-    if (Date.now() >= until) return null
-    await new Promise((resolve) => setTimeout(resolve, ROTATE_POLL_MS))
+    if (clock.now() >= until) return null
+    await clock.sleep(ROTATE_POLL_MS)
   }
 }
 
@@ -228,14 +236,14 @@ async function chromeAfterTurn(
  * orientation's `setOrientation`, which returns at once when the chrome already says the target, and a replayed
  * rotate, whose turn is counted from it (review). A chrome that cannot say which way it is held is not waited for.
  */
-async function chromeUpright(channel: DashboardSessionChannel, sessionId: string, signal?: AbortSignal): Promise<void> {
-  const until = Date.now() + ROTATE_SETTLE_MS
+async function chromeUpright(channel: DashboardSessionChannel, sessionId: string, signal: AbortSignal | undefined, clock: Clock): Promise<void> {
+  const until = clock.now() + ROTATE_SETTLE_MS
   for (;;) {
     signal?.throwIfAborted()
     const chrome = await channel.chrome(sessionId, 1)
     const o = chrome ? chromeOrientation(chrome) : undefined
-    if (o === undefined || o === 'portrait' || Date.now() >= until) return
-    await new Promise((resolve) => setTimeout(resolve, ROTATE_POLL_MS))
+    if (o === undefined || o === 'portrait' || clock.now() >= until) return
+    await clock.sleep(ROTATE_POLL_MS)
   }
 }
 
@@ -263,6 +271,8 @@ const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
 const SHOWN_AFTER = new Set<RawStep['kind']>([...TYPING, 'imeAction'])
 
 export interface MatchHooks {
+  /** What the rotate waits count on; the real clock when absent. */
+  clock?: Clock
   /** `inserted`: a step the replay added (a tap on the field typed into), not one of the range's, so not counted. */
   onStep: (step: CapturedStep, screenshot?: string, inserted?: boolean) => void
   /** Where a step is about to touch, for drawing on the device as it does (the MCP watch view's marks). */
@@ -397,10 +407,12 @@ function swipeBeforeNamedTap(slice: RawStep[], offset: number, frameTurn?: 0 | 9
  * keychain, privacy grants, clipboard and simulated location reset, the network back online and the device upright.
  * An agent that cannot do it gets the app's data cleared, as before, and `null` says the rest was not.
  */
-export async function resetDevice(channel: DashboardSessionChannel, sessionId: string, bundleId: string | null, signal?: AbortSignal): Promise<HeldResetReport | null> {
+export async function resetDevice(
+  channel: DashboardSessionChannel, sessionId: string, bundleId: string | null, signal?: AbortSignal, clock: Clock = realClock,
+): Promise<HeldResetReport | null> {
   const report = await channel.runReset(sessionId, bundleId ? [bundleId] : [])
   if (report !== undefined) {
-    if (report?.done.includes('orientation')) await chromeUpright(channel, sessionId, signal)
+    if (report?.done.includes('orientation')) await chromeUpright(channel, sessionId, signal, clock)
     return report
   }
   if (bundleId) await channel.clearState(sessionId, bundleId)
@@ -421,7 +433,8 @@ export async function matchRange(
   const slice = steps.slice(range.start, range.end)
   await lease.start()
   // Apart from the report: `onReset?.(await …)` skips the reset itself when nobody listens.
-  const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal)
+  const clock = hooks.clock ?? realClock
+  const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal, clock)
   hooks.onReset?.(reset)
   hooks.signal.throwIfAborted()
   // The reset stood the device up, and `resetDevice` waited for the chrome to say so. Still not said, every turn read
@@ -786,7 +799,7 @@ export async function matchRange(
     if (uprightUnseen && heldTurn(chrome) === 0) uprightUnseen = false
     if (raw.kind === 'rotate' && !uprightUnseen) {
       // `chrome` was read before the turn was sent: the turn it held.
-      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), rotateDirection(raw), hooks.signal)
+      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), rotateDirection(raw), hooks.signal, clock)
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }

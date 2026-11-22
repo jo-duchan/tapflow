@@ -86,7 +86,11 @@ export class AdbWrapper {
   // A hold a dump let go of comes back once dumps have stopped for this long (`dumpUiHierarchy`).
   private readonly reholdTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-  constructor(private readonly runner: AdbRunner = defaultRunner) {
+  constructor(
+    private readonly runner: AdbRunner = defaultRunner,
+    /** The clock the dump's budget is counted on: tests give a fixed one (#1220's flake, AGENTS.md "Test Hygiene"). */
+    private readonly now: () => number = Date.now,
+  ) {
     this.focusedServers = runner.spawnPiped
       // Quoted: adb joins the arguments and the device shell splits them, so an unquoted `FocusedServer <nonce>` was two
       // patterns, and toybox pkill ORs them — killing any field server, a newer one included. The nonce is hex.
@@ -575,7 +579,7 @@ export class AdbWrapper {
       // Through the field server first, on its connection, held or not: no app_process to start (one-shot p50 1306 ms,
       // served ~340 ms, held ~15–300 ms on Pixel_9_tapflow Android 14), and a held connection stays held. The same XML
       // (TreeDump.answer). Anything it cannot answer goes the one-shot way below, as before.
-      const started = Date.now()
+      const started = this.now()
       const served = await this.dumpViaServer(serial)
       if (served !== undefined) {
         // A one-shot dump just before this one let the hold go and set a re-hold, which this dump's queueing cleared:
@@ -584,7 +588,7 @@ export class AdbWrapper {
         return served
       }
       // What the server spent comes off the one-shot's budget: together they must fit the relay's 15 s tree deadline.
-      timeoutSec = Math.max(1, timeoutSec - Math.ceil((Date.now() - started) / 1000))
+      timeoutSec = Math.max(1, timeoutSec - Math.ceil((this.now() - started) / 1000))
       // The one-shot dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
       // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
       // list each time (up to 400 ms) would be paid by the replay. Left to the 30 s ping instead, the first tap after a
