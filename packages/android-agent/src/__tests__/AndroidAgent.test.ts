@@ -3279,6 +3279,20 @@ describe('AndroidAgent', () => {
         })
       })
 
+      // #1196: the tree goes out with the height ÷ width its frames were divided by, so a list's frame reads in pixels.
+      it('answers ui:tree:request with the tree\'s aspect beside its elements', async () => {
+        vi.spyOn(adb, 'dumpUiHierarchy').mockResolvedValue(
+          `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<hierarchy rotation="1">\n` +
+          `<node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="a" content-desc="" bounds="[0,0][2400,1080]" />\n</hierarchy>`,
+        )
+        const out = sent()
+        inject({ type: 'ui:tree:request', requestId: 'rq-t1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:tree:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:tree:response')).toEqual({
+          type: 'ui:tree:response', sessionId: agent.sessionId, requestId: 'rq-t1', elements: [], aspect: 0.45,
+        })
+      })
+
       it('answers ui:field:request with no value for a password', async () => {
         vi.spyOn(adb, 'readFocused').mockResolvedValue({
           identifier: 'form.password', frame: { x: 0, y: 0, width: 10, height: 10 }, secure: true, value: 'leaked', reason: 'secure',

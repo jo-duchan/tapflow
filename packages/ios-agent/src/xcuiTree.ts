@@ -138,6 +138,12 @@ export function splitInterfaceTurn(text: string): { body: string; interfaceTurn?
 }
 
 export function parseTreeText(text: string): UIElement[] {
+  return parseTreeTextWithAspect(text).elements
+}
+
+/** The tree's elements, and the height ÷ width of the frame they were divided by (`UiTreeResponse.aspect`): the app's
+ *  window, in its own upright interface, so no turn applies. */
+export function parseTreeTextWithAspect(text: string): { elements: UIElement[]; aspect?: number } {
   const lines = text.split('\n')
   const startIdx = lines.findIndex((l) => l.trim() === 'Element subtree:')
   const bodyLines = startIdx >= 0 ? lines.slice(startIdx + 1) : lines
@@ -159,7 +165,7 @@ export function parseTreeText(text: string): UIElement[] {
     const area = n.frame.width * n.frame.height
     return !max || area > max.width * max.height ? n.frame : max
   }, undefined)
-  if (!basis || basis.width <= 0 || basis.height <= 0) return []
+  if (!basis || basis.width <= 0 || basis.height <= 0) return { elements: [] }
 
   const elements: UIElement[] = []
   for (const node of raw) {
@@ -194,5 +200,5 @@ export function parseTreeText(text: string): UIElement[] {
     if (node.selected) element.selected = true
     elements.push(element)
   }
-  return elements
+  return { elements, aspect: basis.height / basis.width }
 }

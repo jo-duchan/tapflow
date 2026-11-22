@@ -228,6 +228,8 @@ describe('XCUITreeReader', () => {
     const read = await reader.readWithTurn('udid-A', 'com.app')
     expect(read.interfaceTurn).toBe(270)
     expect(read.elements.length).toBeGreaterThan(0)
+    // #1196: the aspect of the window the frames were divided by goes out with them.
+    expect(read.aspect).toBeGreaterThan(0)
     expect(await reader.read('udid-A', 'com.app')).toEqual(read.elements)
   })
 

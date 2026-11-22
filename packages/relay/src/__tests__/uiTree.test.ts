@@ -145,6 +145,21 @@ describe('GET /api/v1/sessions/:sessionId/ui-tree', () => {
     agent.close()
   })
 
+  // #1196: the tree's aspect rides beside it, through the schema and the relay's own copy, and only when sent.
+  it.each([[0.45, { aspect: 0.45 }], [undefined, {}], [-1, {}]] as const)('TC1c: aspect %s from the agent → %j in the body', async (sent, extra) => {
+    const { agent, sessionId } = await setupAgent()
+    agent.on('message', (data) => {
+      const msg = JSON.parse(data.toString()) as AgentSocketInbound
+      if (msg.type === 'ui:tree:request') {
+        agent.send(JSON.stringify({ type: 'ui:tree:response', sessionId: msg.sessionId, requestId: msg.requestId, elements: ELEMENTS, interfaceTurn: 90, aspect: sent }))
+      }
+    })
+    const res = await httpGet(port, `/api/v1/sessions/${sessionId}/ui-tree`, { Cookie: makeAuthCookie() })
+    expect(res.status).toBe(200)
+    expect(JSON.parse(res.body.toString())).toEqual({ elements: ELEMENTS, interfaceTurn: 90, ...extra })
+    agent.close()
+  })
+
   it('TC2: no auth → 401', async () => {
     const { agent, sessionId } = await setupAgent()
 

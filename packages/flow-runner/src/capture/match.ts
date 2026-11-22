@@ -22,6 +22,9 @@ export interface MatchContext {
    *  the screen Android draws, for a point sent in the frame's space (Android body mode). The chrome recorded beside
    *  the step lags a turn by up to 3.6 s and must not be used for this. */
   frameTurn?: 0 | 90 | 180 | 270
+  /** The height ÷ width of the space `tree`'s frames are fractions of, from the same read (`UiTreeResponse.aspect`).
+   *  Absent when the agent did not say: a phone held upright is assumed. */
+  screenAspect?: number
   /** The device's orientation once a rotate step has settled (`chromeOrientation` of its chrome). */
   orientationAfter?: 'portrait' | 'landscape' | 'upside-down'
   /** The device's postures, most closed first (`device:postures`). */
@@ -83,6 +86,8 @@ export interface CapturedStep {
   /** On a swipe: the elements of `tree`, by index, that were on it but not wholly in view — partly off the screen, or
    *  their centre covered on the device (#1125). The scroll rule reads them as not yet brought into view. */
   notInView?: number[]
+  /** On a swipe: `tree`'s aspect (`MatchContext.screenAspect`), for the scroll rule's reading of a list's frame. */
+  screenAspect?: number
   /** On a touch: what Match's replay saw it do, from the screen before it to the screen the next step was read on.
    *  Export writes only what Verify saw it do as well (`agreedEffect`), since a number that changes by itself usually
    *  reads differently minutes apart (#1125). Absent where the replay could not read the screen after it. */
@@ -291,6 +296,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
         fragile: 'swipe',
         tree: ctx.tree,
         notInView: notInView(ctx.tree, ctx),
+        ...(ctx.screenAspect !== undefined ? { screenAspect: ctx.screenAspect } : {}),
       }
     case 'holdDrag': return { raw, step: null, skipped: 'hold-drag' }
     case 'pinch': {
@@ -583,10 +589,11 @@ function innermostList(tree: readonly UIElement[], point: Point): UIElement | un
 
 /**
  * The way a list scrolls, which the tree does not say: the way its items are laid out — stacked (one column) is
- * vertical, side by side (one row) horizontal. A grid, or a list with one item, by its frame, with the height counted
- * twice: frames are in parts of the screen, and a phone held upright is about twice as tall as it is wide.
+ * vertical, side by side (one row) horizontal. A grid, or a list with one item, by its frame's shape in pixels: frames are
+ * in parts of the tree's space, whose height ÷ width the agent sends with the tree (`aspect`, #1196) — about 2 on a phone
+ * held upright, which is assumed when it did not say, 0.45 on one turned, 1.44 on an iPad.
  */
-function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
+function listAxis(tree: readonly UIElement[], list: UIElement, aspect = 2): 'x' | 'y' {
   const f = list.frame
   // Its items: what lies within it, not a container around it whose centre happens to fall inside.
   const within = (g: UIElement['frame']) => g.x >= f.x - 0.01 && g.y >= f.y - 0.01 && g.x + g.width <= f.x + f.width + 0.01
@@ -611,7 +618,7 @@ function listAxis(tree: readonly UIElement[], list: UIElement): 'x' | 'y' {
     if (sx < 0.02 && sy >= 0.02) return 'y'
     if (sy < 0.02 && sx >= 0.02) return 'x'
   }
-  return f.height * 2 >= f.width ? 'y' : 'x'
+  return f.height * aspect >= f.width ? 'y' : 'x'
 }
 
 function insideList(before: readonly UIElement[], after: readonly UIElement[] | undefined, from: Point): boolean {
@@ -654,7 +661,7 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     // Across the list it began in (sideways in a vertical list) is a row's own gesture — revealing its Delete — which the
     // engine's swipe across the middle of the screen would make on another row, or none: it stays a swipe.
     const list = innermostList(swipe.tree, swipe.step.from)
-    if (list && listAxis(swipe.tree, list) !== axis) continue
+    if (list && listAxis(swipe.tree, list, swipe.screenAspect) !== axis) continue
     const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
     if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
     steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }

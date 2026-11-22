@@ -379,6 +379,7 @@ const AGENT_CONSUMED = {
     // would refuse the whole tree for one unknown turn, and the caller would wait out the 15 s deadline for a
     // tree that had arrived.
     interfaceTurn: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().catch(undefined),
+    aspect: z.number().positive().finite().optional().catch(undefined),
   }),
   'ui:tree:error': z.object({
     type: z.literal('ui:tree:error'), sessionId, requestId, message: z.string().default(''),

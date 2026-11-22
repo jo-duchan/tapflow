@@ -1951,6 +1951,13 @@ export interface UiTreeResponse {
    * client did before this field.
    */
   interfaceTurn?: 0 | 90 | 180 | 270
+  /**
+   * The height ÷ width, in pixels, of the space the elements' frames are fractions of: what the agent normalised them
+   * by (Android: the dump's root, or the screen under a floating dialog; iOS: the app's window). A frame's own shape is
+   * its width and height times this — a list 0.3 wide and 0.5 tall is wider than tall in landscape (#1196).
+   * **Absent means no information** (an older agent): a client then assumes a phone held upright.
+   */
+  aspect?: number
 }
 
 /** Request-scoped, for the same reasons as `ScreenshotError`. */
