@@ -50,8 +50,8 @@ interface IOSViewerProps {
   launchApp: () => void;
   connected: boolean;
   joined: boolean;
-  appLogHandlerRef: MutableRefObject<AppLogHandler | null>;
-  appLogsSupported: boolean;
+  appLogHandlerRef?: MutableRefObject<AppLogHandler | null>;
+  appLogsSupported?: boolean;
   deviceReady: boolean;
   installing: boolean;
   installed: boolean;

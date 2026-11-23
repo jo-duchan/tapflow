@@ -452,7 +452,7 @@ describe('a boot can ask for a service tier', () => {
   })
 })
 
-describe("readServiceTier checks a tier from outside a frame against the boot's schema", () => {
+describe('readServiceTier checks a tier from outside a frame against the boot\'s schema', () => {
   it('takes a tier, and nothing else', () => {
     expect(readServiceTier({ name: 'slim', keep: ['push'] })).toEqual({ name: 'slim', keep: ['push'] })
     expect(readServiceTier({ name: 'turbo', keep: [] })).toBeUndefined()
@@ -465,8 +465,7 @@ describe("readServiceTier checks a tier from outside a frame against the boot's 
 
 describe('a boot can ask for a run reset', () => {
   const boot = (runReset: unknown) => parseInbound({ type: 'device:boot', sessionId: 's', requestId: 'r', payload: { deviceId: 'd', runReset } })
-  const payloadOf = (r: ReturnType<typeof boot>) =>
-    r.ok ? (r.msg as { payload: Record<string, unknown> }).payload : undefined
+  const payloadOf = (r: ReturnType<typeof boot>) => (r.ok ? (r.msg as { payload: Record<string, unknown> }).payload : undefined)
   it('forwards a well-formed request', () => {
     expect(payloadOf(boot({ uninstall: ['com.example.app'], clear: [] }))?.runReset).toEqual({ uninstall: ['com.example.app'], clear: [] })
   })
@@ -496,8 +495,7 @@ describe('readRunResetReport reads what an agent reported resetting', () => {
 // `correlatedRequestsGated` exempts `device:lease` from `ANSWERABLE` on the strength of this test.
 describe('a lease is never dropped for its payload', () => {
   const lease = (payload: unknown) => parseInbound({ type: 'device:lease', requestId: 'r', payload })
-  const payloadOf = (r: ReturnType<typeof lease>) =>
-    r.ok ? (JSON.parse(JSON.stringify((r.msg as { payload: unknown }).payload)) as Record<string, unknown>) : undefined
+  const payloadOf = (r: ReturnType<typeof lease>) => (r.ok ? JSON.parse(JSON.stringify((r.msg as { payload: unknown }).payload)) as Record<string, unknown> : undefined)
 
   it('keeps every well-formed field', () => {
     const full = {

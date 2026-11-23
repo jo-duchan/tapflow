@@ -50,8 +50,12 @@ describe('DeviceViewer app log feed', () => {
   })
   afterEach(() => vi.unstubAllGlobals())
   const flushFrames = () => act(() => frames.splice(0).forEach((callback) => callback(0)))
+  const sent = (type: string) => send.mock.calls.map(([message]) => message).findLast((message) => message.type === type)!
+  const output = () => screen.queryByRole('region', { name: 'App log output' })
+  const lines = () => Array.from(output()!.querySelectorAll('[data-log-line]'), (line) => line.textContent)
 
-  it('renders only its current launch logs for its own session in arrival order', () => {
+  /** A joined, booted, installed session with its frame, ready for Launch. */
+  function installed() {
     render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
     act(() => {
       deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs'] })
@@ -59,70 +63,98 @@ describe('DeviceViewer app log feed', () => {
     act(() => {
       deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } })
     })
-    const install = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:install')!
     act(() => {
-      deliver!({ type: 'app:install-done', sessionId: 'mine', requestId: install.requestId })
-    })
-    act(() => {
+      deliver!({ type: 'app:install-done', sessionId: 'mine', requestId: sent('app:install').requestId })
       deliver!({ type: 'session:chrome', sessionId: 'mine', payload: CHROME })
     })
+  }
+  function launch(): string {
     act(() => { screen.getByLabelText('Launch app').click() })
-    const launch = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:launch')!
+    return sent('app:launch').requestId
+  }
+  function launched(): string {
+    installed()
+    const requestId = launch()
     act(() => {
-      deliver!({ type: 'app:launch-done', sessionId: 'mine', requestId: launch.requestId })
+      deliver!({ type: 'app:launch-done', sessionId: 'mine', requestId })
     })
+    return requestId
+  }
+
+  it('renders only its current launch logs for its own session, one row per line, in arrival order', () => {
+    const launchId = launched()
     act(() => {
-      deliver!({ type: 'app:log', sessionId: 'other', launchId: launch.requestId, text: 'foreign log' })
+      deliver!({ type: 'app:log', sessionId: 'other', launchId, text: 'foreign log' })
     })
     act(() => {
       deliver!({ type: 'app:log', sessionId: 'mine', launchId: 'older-launch', text: 'stale log' })
     })
     act(() => {
-      deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'first\n' })
-      deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'second\t🚀' })
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId, text: 'first\n' })
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId, text: 'second\t🚀' })
     })
 
     flushFrames()
-    const log = screen.getByRole('log', { name: 'App log output' })
-    expect(log.textContent).toBe('first\nsecond\t🚀')
+    expect(lines()).toEqual(['first', 'second\t🚀'])
+    expect(screen.getByText('2 lines')).toBeTruthy()
   })
 
-  it('clears the previous app output when launching again or starting a new boot', () => {
-    render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
+  // Shown only between a launch and what ends that app: "waiting" anywhere else promises output that is not coming.
+  it('is not shown before a launch, and waits for output once launched', () => {
+    installed()
+    expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
+    launch()
+    expect(output()!.textContent).toMatch(/Waiting for app logs/)
+  })
+
+  it('goes away when the launch fails', () => {
+    installed()
+    const requestId = launch()
     act(() => {
-      deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs'] })
+      deliver!({ type: 'app:launch-error', sessionId: 'mine', requestId, message: 'not installed' })
     })
+    expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
+  })
+
+  it('clears the previous app output when launching again', () => {
+    const first = launched()
     act(() => {
-      deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } })
-    })
-    const install = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:install')!
-    act(() => {
-      deliver!({ type: 'app:install-done', sessionId: 'mine', requestId: install.requestId })
-      deliver!({ type: 'session:chrome', sessionId: 'mine', payload: CHROME })
-    })
-    act(() => {
-      screen.getByLabelText('Launch app').click()
-    })
-    const launch = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:launch')!
-    act(() => {
-      deliver!({ type: 'app:launch-done', sessionId: 'mine', requestId: launch.requestId })
-      deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'previous app output' })
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId: first, text: 'previous app output' })
     })
     flushFrames()
-    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toBe('previous app output')
+    expect(lines()).toEqual(['previous app output'])
 
-    act(() => {
-      screen.getByLabelText('Launch app').click()
-    })
-    const nextLaunch = send.mock.calls.map(([message]) => message).findLast((message) => message.type === 'app:launch')!
+    const next = launch()
     flushFrames()
-    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toMatch(/Waiting for app logs/)
-
+    expect(output()!.textContent).toMatch(/Waiting for app logs/)
     act(() => {
-      deliver!({ type: 'app:log', sessionId: 'mine', launchId: launch.requestId, text: 'late previous app output' })
-      deliver!({ type: 'app:log', sessionId: 'mine', launchId: nextLaunch.requestId, text: 'new app output' })
-      deliver!({ type: 'device:booting', sessionId: 'mine' })
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId: first, text: 'late previous app output' })
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId: next, text: 'new app output' })
     })
-    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toMatch(/Waiting for app logs/)
+    flushFrames()
+    expect(lines()).toEqual(['new app output'])
+  })
+
+  // Each of these ends the app the logs came from, and a chunk still on its way for that launch is dropped after it.
+  it.each([
+    ['a new boot', { type: 'device:booting', sessionId: 'mine' }],
+    ['a re-join', { type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs'] }],
+    ['the agent going away', { type: 'session:agent-away', sessionId: 'mine' }],
+    ['a restarted agent', { type: 'session:rebound', sessionId: 'mine', capabilities: ['app-logs'] }],
+    ['the session ending', { type: 'session:terminated', sessionId: 'mine', reason: 'agent-disconnected' }],
+  ] as const)('closes the log on %s, and drops that launch\'s late output', (_case, message) => {
+    const launchId = launched()
+    act(() => {
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId, text: 'running' })
+    })
+    flushFrames()
+    act(() => {
+      deliver!(message as BrowserInbound)
+    })
+    act(() => {
+      deliver!({ type: 'app:log', sessionId: 'mine', launchId, text: 'late' })
+    })
+    flushFrames()
+    expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
   })
 })

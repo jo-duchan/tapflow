@@ -448,7 +448,7 @@ export class AdbWrapper {
       }
     }
     const component = resolved ? resolved.component : await this.launcherComponent(serial, packageName)
-    if (component && (await this.startAndWait(serial, component, onStart))) return undefined
+    if (component && await this.startAndWait(serial, component, onStart)) return undefined
     await this.launchWithMonkey(serial, packageName, onStart)
     return undefined
   }
@@ -484,8 +484,8 @@ export class AdbWrapper {
       if (targetUid !== undefined) return targetUid
     }
 
-    // If we cannot determine the current user or it's not in the list, return the first one.
-    return uids[0]!
+    // Another user's uid would stream that user's copy of the app, so an unknown current user streams nothing.
+    return null
   }
 
   async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
@@ -523,11 +523,9 @@ export class AdbWrapper {
     onStart?: (deviceTime: string | undefined) => void
   ): Promise<void> {
     if (Object.keys(options.env ?? {}).length > 0) {
-      throw new ValidationError(
-        "env is iOS-only: Android has no way to set an app's environment. Pass it in arguments instead, read from the intent extras"
-      )
+      throw new ValidationError('env is iOS-only: Android has no way to set an app\'s environment. Pass it in arguments instead, read from the intent extras')
     }
-    const component = resolved ?? (await this.launcherComponent(serial, packageName))
+    const component = resolved ?? await this.launcherComponent(serial, packageName)
     if (!component) {
       throw new ValidationError(`Could not find a single launcher activity for ${packageName}, so the launch arguments cannot be delivered`)
     }
@@ -948,10 +946,7 @@ export class AdbWrapper {
     if (!pushed) {
       pushed = (async () => {
         try {
-          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256')
-            .update(readFileSync(UIDUMP_JAR))
-            .digest('hex')
-            .slice(0, 12)}.jar`
+          this.uidumpDevicePath ??= `/data/local/tmp/tapflow-uidump-${createHash('sha256').update(readFileSync(UIDUMP_JAR)).digest('hex').slice(0, 12)}.jar`
           await this.runner.exec('-s', serial, 'push', UIDUMP_JAR, this.uidumpDevicePath)
           return this.uidumpDevicePath
         } catch (e) {

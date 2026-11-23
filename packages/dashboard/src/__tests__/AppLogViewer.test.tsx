@@ -14,6 +14,7 @@ beforeEach(() => {
     return frames.length
   })
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  try { localStorage.clear() } catch { /* no storage */ }
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -21,51 +22,108 @@ function flushFrames() {
   act(() => frames.splice(0).forEach((callback) => callback(0)))
 }
 
+function launched(supported = true) {
+  const handlerRef = makeHandlerRef()
+  render(<AppLogViewer handlerRef={handlerRef} supported={supported} />)
+  act(() => handlerRef.current?.({ kind: 'launch' }))
+  const send = (text: string) => act(() => handlerRef.current?.({ kind: 'text', text }))
+  return { handlerRef, send }
+}
+const output = () => screen.getByRole('region', { name: 'App log output' })
+const lines = () => Array.from(output().querySelectorAll('[data-log-line]'), (line) => line.textContent)
+
 describe('AppLogViewer', () => {
+  it('renders nothing until a launch', () => {
+    const handlerRef = makeHandlerRef()
+    render(<AppLogViewer handlerRef={handlerRef} supported />)
+    expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
+    act(() => handlerRef.current?.({ kind: 'launch' }))
+    expect(output().textContent).toMatch(/Waiting for app logs/)
+    act(() => handlerRef.current?.({ kind: 'clear' }))
+    expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
+  })
+
   it('explains when the connected agent does not support app logs', () => {
-    render(<AppLogViewer handlerRef={makeHandlerRef()} supported={false} />)
-    expect(screen.getByRole('log', { name: 'App log output' }).textContent).toBe('Update the device agent to view app logs.')
+    launched(false)
+    expect(output().textContent).toBe('Update the device agent to view app logs.')
   })
 
   it('batches chunks until the next animation frame', () => {
-    const handlerRef = makeHandlerRef()
-    render(<AppLogViewer handlerRef={handlerRef} supported />)
-    const log = screen.getByRole('log', { name: 'App log output' })
-    act(() => {
-      handlerRef.current?.('first')
-      handlerRef.current?.(' second')
-    })
-
-    expect(log.textContent).toMatch(/Waiting for app logs/)
+    const { send } = launched()
+    send('first')
+    send(' second')
+    expect(output().textContent).toMatch(/Waiting for app logs/)
     flushFrames()
-    expect(log.textContent).toBe('first second')
+    expect(lines()).toEqual(['first second'])
   })
 
-  it('resumes following the tail after the buffer is cleared', () => {
-    const handlerRef = makeHandlerRef()
-    render(<AppLogViewer handlerRef={handlerRef} supported />)
-    const log = screen.getByRole('log', { name: 'App log output' })
-    Object.defineProperties(log, {
+  // The card is 300px wide: a line wraps in its own row instead of scrolling the box sideways.
+  it('puts each line in its own wrapping row, a partial last line included', () => {
+    const { send } = launched()
+    send('one\ntwo\nthr')
+    flushFrames()
+    send('ee\n')
+    flushFrames()
+    expect(lines()).toEqual(['one', 'two', 'three'])
+    expect(output().className).toMatch(/overflow-x-hidden/)
+    expect(output().querySelector('[data-log-line]')!.className).toMatch(/whitespace-pre-wrap/)
+  })
+
+  it('follows the tail of a new launch even if the last one was scrolled up', () => {
+    const { handlerRef, send } = launched()
+    send('first output')
+    flushFrames()
+    const first = output()
+    Object.defineProperties(first, {
       scrollHeight: { configurable: true, value: 300 },
       clientHeight: { configurable: true, value: 100 },
-      scrollTop: { configurable: true, writable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
     })
+    fireEvent.scroll(first)
 
-    log.scrollTop = 0
-    fireEvent.scroll(log)
-    act(() => handlerRef.current?.('first output'))
+    act(() => handlerRef.current?.({ kind: 'launch' }))
+    const next = output()
+    expect(next).not.toBe(first)
+    Object.defineProperties(next, {
+      scrollHeight: { configurable: true, value: 300 },
+      clientHeight: { configurable: true, value: 100 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    send('new launch output')
     flushFrames()
-
-    act(() => handlerRef.current?.(null))
-    expect(log.scrollTop).toBe(300)
-    act(() => handlerRef.current?.('new launch output'))
-    flushFrames()
-    expect(log.scrollTop).toBe(300)
+    expect(next.scrollTop).toBe(300)
   })
 
-  it('is focusable for keyboard users', () => {
-    render(<AppLogViewer handlerRef={makeHandlerRef()} supported={true} />)
-    const logRegion = screen.getByRole('log')
-    expect(logRegion).toHaveAttribute('tabindex', '0')
+  it('collapses and remembers it', () => {
+    const { send } = launched()
+    send('line')
+    flushFrames()
+    const toggle = screen.getByRole('button', { name: 'App logs' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('region', { name: 'App log output' })).toBeNull()
+    expect(localStorage.getItem('tapflow.appLogs.collapsed')).toBe('1')
+  })
+
+  it('copies the whole log, and selects it where there is no clipboard', async () => {
+    const { send } = launched()
+    send('alpha\nbeta')
+    flushFrames()
+    vi.stubGlobal('navigator', { ...navigator, clipboard: undefined })
+    const select = vi.spyOn(window, 'getSelection')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })) })
+    expect(select).toHaveBeenCalled()
+
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })) })
+    expect(writeText).toHaveBeenCalledWith('alpha\nbeta')
+  })
+
+  it('is focusable for keyboard users and is not a live region', () => {
+    launched()
+    expect(output()).toHaveAttribute('tabindex', '0')
+    expect(output()).not.toHaveAttribute('aria-live')
   })
 })

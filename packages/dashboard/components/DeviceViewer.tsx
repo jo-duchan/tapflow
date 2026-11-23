@@ -10,6 +10,7 @@ import { usePerfMode } from '@/hooks/usePerfMode';
 import { IOSViewer } from './device/IOSViewer';
 import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
+import type { AppLogHandler } from './device/shared/AppLogViewer';
 import type { AndroidChrome, ChromeData, BrowserInbound, PosturesPayload } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
 import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, CODEC_AUDIO, type BinaryFrameHandler } from '@/lib/envelope';
@@ -154,7 +155,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
-  const appLogHandlerRef = useRef<((text: string | null) => void) | null>(null);
+  const appLogHandlerRef = useRef<AppLogHandler | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   // Set while the relay holds this viewer's boot behind another on the same Mac; cleared by anything that
   // ends the wait — the boot starting, finishing or failing.
@@ -283,13 +284,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'app:log') {
       if (msg.launchId !== appLogLaunchIdRef.current) return;
-      appLogHandlerRef.current?.(msg.text);
+      appLogHandlerRef.current?.({ kind: 'text', text: msg.text });
       return;
     }
 
     if (msg.type === 'session:joined') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.(null);
+      appLogHandlerRef.current?.({ kind: 'clear' });
       // A join starts a boot cycle of its own (socket blip, re-entry). Any rebind still waiting for
       // a `device:ready` will never get one, and leaving it pending would make this cycle's ready
       // look like a rebind — suppressing installs for the rest of the mount.
@@ -314,7 +315,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:agent-away') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.(null);
+      appLogHandlerRef.current?.({ kind: 'clear' });
       // Everything on screen describes an agent that is no longer there. Drop the frame so the
       // status card is what the tester sees — a picture that has simply stopped updating is the
       // thing #426 was opened about.
@@ -327,13 +328,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:terminated') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.(null);
+      appLogHandlerRef.current?.({ kind: 'clear' });
       onSessionEnded?.(msg.reason);
       return;
     }
     if (msg.type === 'session:rebound') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.(null);
+      appLogHandlerRef.current?.({ kind: 'clear' });
       // The agent restarted under us. Nothing is streaming, but until the new agent answers, every
       // flag here still describes the old one — and the relay cannot tell a viewer to stop, since
       // its own "agent offline" check sees a live socket (the new agent's). So tear down first,
@@ -464,7 +465,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'device:booting') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.(null);
+      appLogHandlerRef.current?.({ kind: 'clear' });
       setBootWaiting(null);
       setServicesOff(false);
       setDeviceReady(false);
@@ -540,6 +541,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
         setInstalling(true);
         const requestId = newRequestId();
         appLogLaunchIdRef.current = null;
+        appLogHandlerRef.current?.({ kind: 'clear' });
         appInstallIdsRef.current.add(requestId);
         sendRef.current({ type: 'app:install', sessionId, requestId, buildId, ...(keepInstalledRef.current ? { keepIfInstalled: true } : {}) });
       }
@@ -558,6 +560,11 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     if (msg.type === 'app:launch-done' || msg.type === 'app:launch-error') {
       if (!appLaunchIdsRef.current.delete(msg.requestId)) return;
       setLaunching(false);
+      // A launch that failed has no output to wait for.
+      if (msg.type === 'app:launch-error' && msg.requestId === appLogLaunchIdRef.current) {
+        appLogLaunchIdRef.current = null;
+        appLogHandlerRef.current?.({ kind: 'clear' });
+      }
       // Without this the spinner just stopped, and a failed launch looked like a button that did nothing.
       if (msg.type === 'app:launch-error') toast.error('The app did not launch', { description: msg.message });
     }
@@ -717,7 +724,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     if (buildId === undefined) return;
     const requestId = newRequestId();
     appLogLaunchIdRef.current = requestId;
-    appLogHandlerRef.current?.(null);
+    appLogHandlerRef.current?.({ kind: 'launch' });
     appLaunchIdsRef.current.add(requestId);
     setLaunching(true);
     sendRef.current({ type: 'app:launch', sessionId, requestId, buildId });

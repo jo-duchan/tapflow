@@ -2842,7 +2842,7 @@ describe('AndroidAgent', () => {
       // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
       it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
         const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
-        const _launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
+        const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
         inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
         await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
         const failed = waitForType(browser, 'app:launch-error')

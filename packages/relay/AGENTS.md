@@ -239,12 +239,6 @@ announced `'device-updates'` on `agent:registered`. `handleAgentDevices` diffs i
   sends `device:shutdown` and keeps the session, so no single place sees a session stop being held. Removal goes
   through `removeSession`, which also releases the boot gate.
 
-### App log routing (#153)
-
-`app:log` is accepted only from the session's own agent socket and is sent only to its current holder. It is not
-cached or sent through `forwardToWatchers`: app logs belong to the active QA holder, and an unrelated agent must not
-be able to address another session's viewer with them. Each `app:log.launchId` is the launch request that owns the
-stream; the viewer uses it to discard late chunks from an earlier launch.
 - **Only the one who was on a gone device may re-join it** (`SessionManager.join`): the same client, or the person a
   dropped session is waiting for. Anyone else holding the id would boot a device that is no longer there and, as its
   holder, keep the session from being swept.
@@ -256,6 +250,18 @@ stream; the viewer uses it to discard late chunks from an earlier launch.
 Device prefs and favourites (`api/devicePrefs.ts`, migration 021) are laid over `agents:listed` by
 `withDevicePrefs`, keyed by `SessionInfo.agentKey` (`agentId ?? agentName`) and the device id. **Nothing is removed
 from the listing**: an MCP client and the lease read the same one, and a hidden device must stay usable to them.
+
+### App log routing (#153)
+
+`app:log` is accepted only from the session's own agent socket and is sent only to its current holder. It is not
+cached or sent through `forwardToWatchers`: app logs belong to the active QA holder, and an unrelated agent must not
+be able to address another session's viewer with them. **A chunk is forwarded only for the launch the relay last
+sent** (`appLogLaunches`), and only while the holder that sent it still holds the session: an install, a
+clear-state, a shutdown or the session's end forgets the launch, and a stream that outlives its holder reaches
+nobody. Each
+`app:log.launchId` is that launch's request id, which the viewer also uses to discard late chunks from an earlier
+launch. Above `APP_LOG_BACKPRESSURE_BYTES` buffered on the holder's socket a chunk is dropped, with a warning at most
+once a second: the log shares that socket with the video, and the video comes first.
 
 ### Flow Capture's record (`capture/`, #1125)
 

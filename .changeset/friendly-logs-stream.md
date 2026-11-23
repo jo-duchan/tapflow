@@ -1,6 +1,8 @@
 ---
 '@tapflowio/relay': minor
 '@tapflowio/android-agent': patch
+'@tapflowio/ios-agent': patch
+'@tapflowio/agent-core': patch
 '@tapflowio/protocol': patch
 ---
 

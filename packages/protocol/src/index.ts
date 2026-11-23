@@ -1007,8 +1007,9 @@ export interface SessionScoped {
 
 /** Raw text emitted by the active app's native log stream. Chunks are ordered, but relay backpressure may drop
  *  them, so joining `text` values does not guarantee a complete stream. */
-export interface AppLog extends SessionScoped {
+export interface AppLog {
   type: 'app:log'
+  sessionId: string
   /** The app:launch request that owns this stream. Lets a viewer discard late chunks from an older app. */
   launchId: string
   text: string

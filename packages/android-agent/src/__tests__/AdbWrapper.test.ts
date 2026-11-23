@@ -307,6 +307,20 @@ describe('AdbWrapper', () => {
 
       await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(1010123)
     })
+
+    // Falling back to the first uid would stream another user's copy of the app.
+    it.each([
+      ['the current user is not in the list', '11\n'],
+      ['the current user cannot be read', 'Error: unknown command\n'],
+    ])('returns null when %s', async (_case, currentUser) => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n')
+        .mockResolvedValueOnce(currentUser)
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
   })
 
   describe('getPackagesForUid', () => {

@@ -365,14 +365,14 @@ describe('IOSAgent', () => {
     // was long enough for the relay's heartbeat to end the agent's connection. A slow fake `unzip` makes
     // the hold measurable — a 1 ms interval keeps ticking only if the extraction is asynchronous.
     describe('extraction off the event loop', () => {
+      const realUnzip = spawnSync('/bin/sh', ['-c', 'command -v unzip']).stdout.toString().trim()
       const originalPath = process.env.PATH
       afterEach(() => {
         if (originalPath === undefined) delete process.env.PATH
         else process.env.PATH = originalPath
       })
 
-      it.skipIf(process.platform === 'win32')('keeps the event loop running while the archive extracts', async () => {
-        const realUnzip = spawnSync('/bin/sh', ['-c', 'command -v unzip']).stdout.toString().trim()
+      it('keeps the event loop running while the archive extracts', async () => {
         const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-slow-unzip-'))
         fs.writeFileSync(path.join(bin, 'unzip'), `#!/bin/sh\nsleep 0.3\nexec "${realUnzip}" "$@"\n`, { mode: 0o755 })
         process.env.PATH = `${bin}:${originalPath ?? ''}`
