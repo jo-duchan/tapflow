@@ -223,6 +223,9 @@ interface AndroidAgentInternals {
   prepareBody(state: TestState, serial: string, upright: boolean): Promise<void>
   sendChrome(state: TestState): void
   reconcileSerial(state: TestState, serial: string, w: number, h: number, skin: SkinRotation | null): Promise<boolean>
+  startAppLogStreamAfterLaunch(
+    sessionId: string, state: TestState, serial: string, bundleId: string, launchId: string, logStartTime: string | undefined, generation: number
+  ): Promise<void>
 }
 const internals = (agent: AndroidAgent): AndroidAgentInternals =>
   agent as unknown as AndroidAgentInternals
@@ -4290,7 +4293,98 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-1', payload: { bundleId: 'com.example.app' } })
         await done
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false, expect.any(Function))
+      })
+
+      it('answers app:launch before process discovery completes', async () => {
+        let releaseUidLookup!: (uid: number | null) => void
+        vi.spyOn(adb, 'launchApp').mockImplementation(async (...args) => {
+          args[4]?.('11-22 12:34:56.789')
+          return undefined
+        })
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(() => new Promise((resolve) => {
+          releaseUidLookup = resolve
+        }))
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rqi-log', payload: { bundleId: 'com.example.app' } })
+
+        expect((await done)['requestId']).toBe('rqi-log')
+        await vi.waitFor(() => expect(getAppUidSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', expect.any(Number)))
+        releaseUidLookup(null)
+      })
+
+      it('does not continue UID-scoped discovery after its deadline', async () => {
+        let now = 10_000
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        let packageTimeoutMs = 0
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(async (_serial, _bundleId, timeoutMs = 2_000) => {
+          expect(timeoutMs).toBe(2_000)
+          now = 14_900
+          return 10_123
+        })
+        const getPackagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockImplementation(async (_serial, _uid, timeoutMs = 2_000) => {
+          packageTimeoutMs = timeoutMs
+          now = 15_000
+          return ['com.example.app']
+        })
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'launch-deadline', '11-22 12:34:56.789', 1
+          )
+
+          expect(getAppUidSpy).toHaveBeenCalledOnce()
+          expect(getPackagesSpy).toHaveBeenCalledOnce()
+          expect(packageTimeoutMs).toBe(100)
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+          clock.mockRestore()
+        }
+      })
+
+      it('does not stream logs for a UID shared by another package', async () => {
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        vi.spyOn(adb, 'getAppUid').mockResolvedValue(10_123)
+        const packagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockResolvedValue([
+          'com.example.app', 'com.example.helper'
+        ])
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'shared-uid', '11-22 12:34:56.789', 1
+          )
+
+          expect(packagesSpy).toHaveBeenCalledOnce()
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+        }
       })
 
       it('passes launch arguments through and reports their names', async () => {
@@ -4298,7 +4392,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-2', payload: { bundleId: 'com.example.app', arguments: { flag: true } } })
         expect((await done)['applied']).toEqual({ arguments: ['flag'], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false, expect.any(Function))
       })
 
       // The relay's defaults the device could not take are reported as not applied, which is what a run record shows.
@@ -4307,7 +4401,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-5', payload: { bundleId: 'com.example.app', arguments: { flag: true }, defaultsOnly: true } })
         expect((await done)['applied']).toEqual({ arguments: [], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true, expect.any(Function))
       })
 
       it('refuses options the shared check refuses, without launching', async () => {

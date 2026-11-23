@@ -270,6 +270,116 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('getAppUid', () => {
+    it('reads the exact package UID and ignores similarly named packages', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.application uid:10002\npackage:com.example.app uid:10123\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(10123)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('package:com.example.application uid:10002\n')
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
+
+    it('bounds the package UID lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app uid:10123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app', 900)).resolves.toBe(10123)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+    })
+
+    it('resolves the UID for the current user when multiple are returned', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n') // First call: package list
+        .mockResolvedValueOnce('10\n') // Second call: get-current-user
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(1010123)
+    })
+
+    // Falling back to the first uid would stream another user's copy of the app.
+    it.each([
+      ['the current user is not in the list', '11\n'],
+      ['the current user cannot be read', 'Error: unknown command\n'],
+    ])('returns null when %s', async (_case, currentUser) => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n')
+        .mockResolvedValueOnce(currentUser)
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
+  })
+
+  describe('getPackagesForUid', () => {
+    it('returns the package names assigned to the UID', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.app\npackage:com.example.helper\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123)).resolves.toEqual([
+        'com.example.app', 'com.example.helper'
+      ])
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+
+    it('bounds the package lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123, 900)).resolves.toEqual(['com.example.app'])
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+  })
+
+  describe('hasAppProcessForUid', () => {
+    it('detects any process using the app UID and rejects a header-only result', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n123\n456\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(true)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n')
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(false)
+    })
+
+    it('bounds the process lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('PID\n123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123, 900)).resolves.toBe(true)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+    })
+  })
+
   describe('launchApp', () => {
     const PKG = 'com.example.app'
     const START_FIELDS = ['-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000']
@@ -317,9 +427,11 @@ describe('AdbWrapper', () => {
         if (args.includes('am')) throw killed
         return ''
       })
-      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
-      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
-      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      const onStart = vi.fn()
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG, undefined, false, onStart)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : c.includes('date') ? 'date' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [2_000, 'date'], [12_000, 'am']])
+      expect(onStart).toHaveBeenCalledWith(undefined)
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 

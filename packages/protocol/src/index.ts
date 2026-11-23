@@ -538,14 +538,15 @@ export interface AgentRegistered {
   /** What this relay accepts from an agent beyond the messages every relay does. Optional: an older relay omits
    *  it, and an agent reads the absence as "send only what every relay understands". The relay → agent half of
    *  the skew markers (protocol AGENTS.md, #662); `capabilities` is agent → relay, `AgentsListed.features` is
-   *  relay → browser. */
+   *  relay → browser. Agents that know `app-logs` use the app log forward message for live QA output. */
   features?: RelayAgentFeature[]
 }
 
 /** Values of `AgentRegistered.features`. An agent meeting one it does not know ignores it.
  *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`.
- *  `'touch-landings'`: the relay takes `capture:landed` (#1214). */
-export type RelayAgentFeature = 'device-updates' | 'touch-landings'
+ *  `'touch-landings'`: the relay takes `capture:landed` (#1214).
+ *  `'app-logs'`: the relay takes `app:log` and forwards it to the session's holder (#1132). */
+export type RelayAgentFeature = 'device-updates' | 'touch-landings' | 'app-logs'
 
 /** The relay's answer to `agent:devices`: the sessions it made for devices that appeared, and the ones it removed
  *  for devices that left. Not correlated: the agent sends at most one list at a time per socket, and a list lost
@@ -1002,6 +1003,16 @@ export interface DeviceReady {
  */
 export interface SessionScoped {
   sessionId: string
+}
+
+/** Raw text emitted by the active app's native log stream. Chunks are ordered, but relay backpressure may drop
+ *  them, so joining `text` values does not guarantee a complete stream. */
+export interface AppLog {
+  type: 'app:log'
+  sessionId: string
+  /** The app:launch request that owns this stream. Lets a viewer discard late chunks from an older app. */
+  launchId: string
+  text: string
 }
 
 export interface AppInstallError extends SessionScoped {
@@ -1817,6 +1828,7 @@ export interface ClipboardWriteDone {
  *  `device:ready` stays optional for a different reason — see the note above the declarations. */
 export type AgentToBrowser =
   | RelayOrAgentToBrowser
+  | AppLog
   | DeviceBooting
   | DeviceShutdownDone
   | AppLaunchDone

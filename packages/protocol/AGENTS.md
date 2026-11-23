@@ -647,6 +647,9 @@ So a change to what an existing wire value *means* is made like this:
    `AgentRegistered.features` (`RelayAgentFeature`) is the relay's answer at registration, and an agent sends
    `agent:devices` only to a relay that said `'device-updates'`. An older relay would have dropped each one with
    a debug line and no harm; the marker is what keeps the agent from re-reading a list nobody will take.
+   `app:log` follows the same rule with `'app-logs'`: an older relay would drop each chunk with a debug line too,
+   and the marker keeps the agent from running a log process whose output nobody receives. Each chunk carries the
+   `app:launch` request id as `launchId`, so a viewer can discard output from an earlier app.
 
 #662 asked for a version field on `agent:register`. It was not added: the two skews it described never
 shipped (network control, the reason split and `enforcement-lost` all first released together in

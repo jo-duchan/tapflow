@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **App logs are visible in the QA session.** After the app launches, the agent streams native process output into the viewer below the FPS and status indicators. Logs start at the current Android app launch, stay with the session holder who launched them, and yield to browser backpressure; the viewer batches updates per animation frame.
+
 ### Changed
 
 - **`tapflow flow run` keeps its screenshots as JPEG, and the Flow Runs page says when one was not kept.** A run asks the device for JPEG: a large screen's PNG (an iPhone Air on a map, 5.4 MB) went past the relay's 5 MB limit, and the flow's card showed nothing where its screenshot should be. The same screen is about 1.3 MB as JPEG. The Android agent now makes JPEG with macOS's own `sips` when asked, and a run's failure screenshot in the artifacts directory is named `-failure.jpg` when it is one; adjust a CI step that collects only `*.png` from there. When a screenshot is still not kept, the card says why: over the limit, not an image, the relay's disk full, or the device did not return one. Showing the reason needs the relay from this release, and "did not return one" also this release's `tapflow`.

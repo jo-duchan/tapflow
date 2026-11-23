@@ -131,7 +131,7 @@ import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
 import type { GuestHelperNative } from '../GuestHelper'
 import { EventEmitter } from 'events'
-import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
+import { barrier, waitForMessage, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type { SessionJoined } from '@tapflowio/protocol'
 const MockTouchHelper = vi.mocked(TouchHelper)
 const MockAudioStreamer = vi.mocked(AudioCaptureStreamer)
@@ -205,7 +205,8 @@ function mockSimctl(booted: boolean | 'unknown' = false): SimctlWrapper {
     // Absent until L5 added the first `open-url` tests — which is why the handler had none.
     openUrl: vi.fn().mockResolvedValue(undefined),
     installApp: vi.fn().mockResolvedValue(undefined),
-    launchApp: vi.fn().mockResolvedValue(undefined),
+    launchApp: vi.fn().mockResolvedValue(null),
+    getAppExecutablePath: vi.fn().mockResolvedValue('/sim/Example.app/Example'),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
     resetKeyboardLanguage: vi.fn().mockResolvedValue(undefined),
@@ -3893,12 +3894,28 @@ describe('IOSAgent', () => {
       async function bootedAgent() {
         const simctl = mockSimctl(false)
         const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+        // Session admission reads the agent's latest resource sample. Keep this device-boot fixture
+        // independent of the machine running Vitest; the resource gate has its own relay tests.
+        const resources = (agent as unknown as {
+          resources: {
+            getMemoryUsage(): Promise<{ memUsedMB: number; memTotalMB: number }>
+            getMemoryPressure(): Promise<undefined>
+            getCpuPercent(): number
+          }
+        }).resources
+        vi.spyOn(resources, 'getMemoryUsage').mockResolvedValue({ memUsedMB: 1, memTotalMB: 1024 })
+        vi.spyOn(resources, 'getMemoryPressure').mockResolvedValue(undefined)
+        vi.spyOn(resources, 'getCpuPercent').mockReturnValue(0)
         await agent.connect(`ws://localhost:${port}`)
         const browser = new WebSocket(`ws://localhost:${port}`)
         await waitForOpen(browser)
-        const ready = waitForType(browser, 'device:ready')
+        const joinedReply = waitForMessage(browser)
         browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
-        await waitForType(browser, 'session:joined')
+        const joined = await joinedReply
+        if (joined.type !== 'session:joined') {
+          throw new Error(`session:start was refused: ${String(joined['message'] ?? joined.type)}`)
+        }
+        const ready = waitForType(browser, 'device:ready')
         browser.send(JSON.stringify({
           type: 'device:boot', requestId: 'rq-fix-11', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' },
         }))
@@ -4070,6 +4087,24 @@ describe('IOSAgent', () => {
       })
 
       // #1047. The wire handler calls simctl itself rather than `DeviceAgent.launchApp`, so the frame is what is tested.
+      it('log stream setup failure does not turn a successful app launch into an error', async () => {
+        const { simctl, agent, browser } = await bootedAgent()
+        vi.mocked(simctl.launchApp).mockResolvedValueOnce(456)
+        vi.mocked(simctl.getAppExecutablePath).mockRejectedValueOnce(new Error('app image unavailable'))
+
+        const done = waitForType(browser, 'app:launch-done')
+        deliver(agent, {
+          type: 'app:launch',
+          requestId: 'rq-log-setup',
+          sessionId: agent.sessionId,
+          payload: { bundleId: 'com.example.app' },
+        })
+
+        expect((await done).requestId).toBe('rq-log-setup')
+        await vi.waitFor(() => expect(simctl.getAppExecutablePath).toHaveBeenCalledWith('dev-1', 'com.example.app'))
+        agent.disconnect(); browser.close()
+      })
+
       it('launch passes arguments and env through and reports their names, never their values', async () => {
         const { simctl, agent, browser } = await bootedAgent()
 
