@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -283,6 +283,24 @@ describe('findAapt: resolves via ANDROID_SDK_ROOT and Linux path (parity with do
     } finally {
       fs.rmSync(sdk, { recursive: true, force: true })
       fs.rmSync(emptyHome, { recursive: true, force: true })
+    }
+  })
+
+  // #1100: build-tools ship `aapt.exe` on Windows, so an `aapt` probe never matched there.
+  it('resolves aapt.exe on Windows', () => {
+    const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-winsdk-'))
+    const btDir = path.join(sdk, 'build-tools', '99.0.0')
+    fs.mkdirSync(btDir, { recursive: true })
+    const aaptPath = path.join(btDir, 'aapt.exe')
+    fs.writeFileSync(aaptPath, '')
+    fs.writeFileSync(path.join(btDir, 'aapt'), '') // a POSIX-named file must not be what Windows picks
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    process.env.ANDROID_HOME = sdk
+    try {
+      expect(mod.findAapt()).toBe(aaptPath)
+    } finally {
+      platform.mockRestore()
+      fs.rmSync(sdk, { recursive: true, force: true })
     }
   })
 })

@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { banner } from '../lib/print.js'
+import { requireOnPath } from '../lib/hostTools.js'
 
 interface SimDevice {
   udid: string
@@ -35,7 +36,7 @@ export function cmdDevices(): void {
 
   // ── Android ───────────────────────────────────────────────────────────────
   try {
-    execSync('which adb', { stdio: 'pipe' })
+    requireOnPath('adb')
 
     const runningLines: string[] = []
     try {

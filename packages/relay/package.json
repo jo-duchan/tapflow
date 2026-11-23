@@ -47,7 +47,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
+    "build": "tsc -b && node ../../scripts/fs-copy.mjs replace src/migrations dist/migrations",
     "typecheck": "tsc -b && tsc -p src/__tests__/tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",

@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
+import { androidSdkCandidates, findOnPath, hostExecutableName } from '@tapflowio/agent-core/utils'
 import { getDb } from '../db.js'
 import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
@@ -159,12 +160,9 @@ export function extractAppInfo(filePath: string): AppInfo | null {
 
 /** Resolve aapt from the SDK build-tools (any version). Candidate list mirrors `tapflow doctor` so the two agree; falls back to PATH. */
 export function findAapt(): string | null {
-  const candidates = [
-    process.env['ANDROID_HOME'],
-    process.env['ANDROID_SDK_ROOT'],
-    `${process.env['HOME']}/Library/Android/sdk`, // macOS
-    `${process.env['HOME']}/Android/Sdk`,          // Linux
-  ].filter(Boolean) as string[]
+  // ANDROID_HOME, ANDROID_SDK_ROOT, then the host default (%LOCALAPPDATA%\Android\Sdk on Windows, #1100).
+  const candidates = androidSdkCandidates()
+  const aaptName = hostExecutableName('aapt')
 
   for (const androidHome of candidates) {
     const buildToolsDir = path.join(androidHome, 'build-tools')
@@ -177,12 +175,14 @@ export function findAapt(): string | null {
         return bm - am || bi - ai || bp - ap
       })
     for (const v of versions) {
-      const aapt = path.join(buildToolsDir, v, 'aapt')
+      const aapt = path.join(buildToolsDir, v, aaptName)
       if (fs.existsSync(aapt)) return aapt
     }
   }
 
   // PATH fallback — relay 프로세스가 ANDROID_HOME을 상속받지 못한 경우
+  // Windows has no `which`.
+  if (process.platform === 'win32') return findOnPath('aapt')
   const which = spawnSync('which', ['aapt'], { encoding: 'utf8' })
   if (which.status === 0) return (which.stdout as string).trim()
 

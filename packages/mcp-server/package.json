@@ -36,7 +36,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js",
+    "build": "tsc && node ../../scripts/fs-copy.mjs chmod-x dist/index.js",
     "typecheck": "tsc --noEmit && tsc -p src/__tests__/tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src"

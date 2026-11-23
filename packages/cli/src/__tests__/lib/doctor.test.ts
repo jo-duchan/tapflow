@@ -9,7 +9,8 @@ vi.mock('@tapflowio/ios-agent', () => ({
 }))
 
 import { execSync, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import type { Stats } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -688,5 +689,47 @@ describe('Lean mode', () => {
     const check = await leanCheck(false)
     expect(check?.label).toBe('Lean mode (iOS): off (1 device still lean)')
     expect(check?.detail).toMatch(/puts each one back when it connects and finds it shut down/)
+  })
+  // #1100: on Windows the SDK's tools are adb.exe, emulator.exe, aapt.exe and sdkmanager.bat, the
+  // default SDK is %LOCALAPPDATA%\Android\Sdk, and there is no `which`.
+  it('finds a Windows SDK by its .exe/.bat names, without running which', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\dev\\AppData\\Local')
+    const sdk = 'C:\\Users\\dev\\AppData\\Local\\Android\\Sdk'
+    const toolsDir = 'C:\\Users\\dev\\AppData\\Local\\Android\\Sdk\\platform-tools'
+    vi.stubEnv('PATH', `C:\\Windows\\System32;${toolsDir}`)
+    vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT')
+    const onPathAdb = 'C:\\Users\\dev\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe'
+    const present = new Set([
+      join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager.bat'),
+      join(sdk, 'build-tools'),
+      join(sdk, 'build-tools', '35.0.0', 'aapt.exe'),
+      join(sdk, 'emulator', 'emulator.exe'),
+    ])
+    mockExistsSync.mockImplementation((p) => present.has(String(p)))
+    mockReaddirSync.mockImplementation(((p: string) => (String(p) === join(sdk, 'build-tools') ? ['35.0.0'] : [])) as never)
+    vi.mocked(statSync).mockImplementation(((p: string) => {
+      if (String(p) === onPathAdb) return { isFile: () => true } as Stats
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    }) as never)
+    mockSpawnSync.mockImplementation(((cmd: string, args: string[]) => {
+      if (cmd === join(sdk, 'emulator', 'emulator.exe') && args[0] === '-list-avds') return { stdout: 'Pixel_8\r\nPixel_Fold\r\n' }
+      return { stdout: '' }
+    }) as never)
+    mockExecSync.mockImplementation((cmd) => {
+      if (String(cmd).startsWith('which')) throw new Error('which does not exist on Windows')
+      return ''
+    })
+
+    const result = await runDoctorChecks('android')
+    const labels = result.android?.map((c) => c.label) ?? []
+    expect(labels).toContain(`Android SDK: ${sdk}`)
+    expect(labels).toContain(`adb found: ${onPathAdb}`)
+    expect(labels).toContain(`aapt (build-tools): ${join(sdk, 'build-tools', '35.0.0', 'aapt.exe')}`)
+    // CRLF output from emulator.exe must not leave a trailing \r on the AVD name.
+    expect(labels).toContain('AVD available: Pixel_8')
+    expect(mockExecSync.mock.calls.some(([c]) => String(c).startsWith('which'))).toBe(false)
   })
 })
