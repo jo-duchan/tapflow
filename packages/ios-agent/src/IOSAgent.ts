@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature, TouchLanding,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -53,6 +53,26 @@ const TOUCH_REPORT_POLL_MS = 50
 const TOUCH_REPORT_KEEP_MS = 5_000
 const TOUCH_REPORT_SKEW_MS = 1_500
 const TOUCH_REPORT_NEAR = 0.03
+// A recorded device whose dispatch log, once it has spoken, places none of this many gestures in a row has likely met an
+// iOS that words the line differently: said once, since landings then simply stop, which is what they were before.
+const LANDING_SILENT_WARN = 10
+const TOUCH_STARTS_KEEP = 32
+
+/** A device whose touches are watched while a person is recorded (record-time observation). */
+interface TouchWatch {
+  since: number
+  /** The gestures sent there, newest last: a touch's and a pinch's down, and its up once sent. */
+  starts: Array<{ x: number; y: number } & GestureSpan>
+  /** The app's touch-down reports not yet paired with a gesture, and its verdicts by touch. */
+  reports: AppTouch[]
+  ends: Map<string, AppTouchEnd>
+  /** UIKit's dispatch log, for a relay that takes `capture:landed` (#1214); stopped with the watch. */
+  landings: DispatchLog | null
+  /** The last SpringBoard landing that was not its keyboard: the surface a SpringBoard field's keys type on. */
+  lastSpringBoard?: { landed: TouchLanding; at: number }
+  /** Gestures in a row the log placed nothing for, once it had spoken. */
+  misses: number
+}
 const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
@@ -129,6 +149,8 @@ import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
 import { AppObserver, fieldOf, keyboardOf, type AppTouch, type AppTouchEnd, type AppTouchReport, type ObserverRead } from './AppObserver.js'
 import { AppAccessibility } from './AppAccessibility.js'
+import { DispatchLog } from './DispatchLog.js'
+import { landingOf, MAX_DISPATCH_LAG_MS, KEYBOARD_INHERIT_MS, pickDispatch, SPRINGBOARD, springBoardSurface, type GestureSpan } from './touchLanding.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
@@ -175,6 +197,9 @@ export interface IOSAgentOptions {
   /** The app observer's host side. Injectable for the same reason as `network`; under vitest the default asks in a
    *  directory under the OS temp folder rather than the simulators' /tmp. */
   appObserver?: AppObserver
+  /** UIKit's dispatch log for a recorded device (#1214). Under vitest the default reads nothing, so a suite never spawns
+   *  into a real simulator; a test passes its own. */
+  dispatchLog?: (udid: string) => DispatchLog | null
   /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
    *  default keeps its markers in a directory under the OS temp folder. */
   appAccessibility?: AppAccessibility
@@ -421,7 +446,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly installing = new Map<string, Map<string, number>>()
   // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
   // observation): the gestures sent there, newest last, and the reports not yet paired with one.
-  private readonly touchWatch = new Map<string, { since: number; starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[]; ends: Map<string, AppTouchEnd> }>()
+  private readonly touchWatch = new Map<string, TouchWatch>()
+  /** Where each recorded touch landed is read from UIKit's dispatch log, one stream per device; null reads nothing. */
+  private readonly dispatchLog: (udid: string) => DispatchLog | null
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -496,6 +523,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       { appRunning: (udid, bundleId) => this.simctl.appRunning(udid, bundleId) },
       process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
     )
+    this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
     this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
       this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
     )
@@ -589,7 +617,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           this.relayFeatures = Array.isArray(msg.features)
             ? msg.features.filter(
                 (feature: unknown): feature is RelayAgentFeature =>
-                  feature === 'device-updates' || feature === 'app-logs'
+                  feature === 'device-updates' || feature === 'app-logs' || feature === 'touch-landings'
               )
             : []
           clearTimeout(timer)
@@ -795,8 +823,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
     this.deviceStates.clear()
     // Nobody reads the app's touch reports once this agent is gone: off, and what is on disk removed.
-    for (const deviceId of this.touchWatch.keys()) void this.appObserver.stopTouches(deviceId).catch(() => {})
-    this.touchWatch.clear()
+    for (const deviceId of [...this.touchWatch.keys()]) {
+      this.endTouchWatch(deviceId)
+      void this.appObserver.stopTouches(deviceId).catch(() => {})
+    }
     for (const deviceId of [...this.guests.keys()]) this.stopGuest(deviceId)
     this.uiTreeReader.stop()
     // The liveness watcher outlives every device it was started for, so it is stopped here with the
@@ -886,7 +916,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private cleanupDeviceState(state: DeviceState): void {
     this.stopAppLogStream(state)
     // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
-    if (this.touchWatch.delete(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
+    if (this.endTouchWatch(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
     // so a simulator that goes away while offline would otherwise keep its udid named there for the
     // rest of the Mac's uptime — and the next boot of that same device would come up offline with
@@ -1315,14 +1345,22 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
       // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
       const observeTouches = observed && touchObservations
-      if (observeTouches) this.touchWatch.set(deviceId, { since: Date.now(), starts: [], reports: [], ends: new Map() })
-      else this.touchWatch.delete(deviceId)
+      // Where each touch lands, for a relay that takes it: read from outside the device, so a device already up (picked up
+      // as it was, or from DeviceHub) is read the same as one this boot started.
+      // A relay from before #1214 logs every `capture:landed` as unknown: read only for one that said it takes them.
+      const landings = observeTouches && this.relayFeatures.includes('touch-landings') ? this.dispatchLog(deviceId) : null
+      const watched: TouchWatch | null = observeTouches ? { since: Date.now(), starts: [], reports: [], ends: new Map(), landings, misses: 0 } : null
+      if (watched) this.replaceTouchWatch(deviceId, watched)
+      else this.endTouchWatch(deviceId)
+      void landings?.start()
       await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
         logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
       })
       // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
       // read it. A newer boot is still waiting for its device here, so this stop cannot land on its watch.
       if (observeTouches && seq !== state.bootSeq) {
+        // Its own stream, unless a newer boot has replaced the watch already.
+        if (watched && this.touchWatch.get(deviceId) === watched) this.endTouchWatch(deviceId)
         await this.appObserver.stopTouches(deviceId).catch(() => {})
         this.abandonBoot(state, seq, sessionId, requestId); return
       }
@@ -1556,6 +1594,89 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   /**
+   * A recorded gesture's down, in the timeline its report and its landing are paired by. Kept well past what a landing
+   * waits for: a tap every 100 ms for `MAX_DISPATCH_LAG_MS` is 30, and one dropped from here is never placed.
+   */
+  private noteDown(deviceId: string, x: number, y: number): void {
+    const watch = this.touchWatch.get(deviceId)
+    if (!watch) return
+    watch.starts.push({ x, y, down: Date.now() })
+    if (watch.starts.length > TOUCH_STARTS_KEEP) watch.starts.shift()
+  }
+
+  /** A gesture the log could not place though it should have: said once at `LANDING_SILENT_WARN` in a row. */
+  private missLanding(deviceId: string, watch: TouchWatch): void {
+    if (++watch.misses === LANDING_SILENT_WARN) {
+      logger.warn(`the dispatch log for ${deviceId} placed none of the last ${LANDING_SILENT_WARN} touches: its format or window names may have changed on this iOS`)
+    }
+  }
+
+  /** The watch a boot sets, stopping the stream of the one it replaces: a device picked up again must not read twice. */
+  private replaceTouchWatch(deviceId: string, watch: TouchWatch): void {
+    const old = this.touchWatch.get(deviceId)
+    if (old !== watch) old?.landings?.stop()
+    this.touchWatch.set(deviceId, watch)
+  }
+
+  /** No watch for the device any more, and its stream stopped. Whether there was one. */
+  private endTouchWatch(deviceId: string): boolean {
+    const old = this.touchWatch.get(deviceId)
+    if (!old) return false
+    this.touchWatch.delete(deviceId)
+    old.landings?.stop()
+    return true
+  }
+
+  /**
+   * Where the gesture `requestId` ended went down (#1214), from UIKit's dispatch log: the first event delivered for it,
+   * named by the process and the window that took it (`pickDispatch`, `landingOf`). Waited for up to the longest lag
+   * measured, sent as soon as it is known, and not at all when it is not — a step without a landing is judged as before.
+   */
+  private async landTouch(sessionId: string, deviceId: string, requestId: string, span: TouchWatch['starts'][number]): Promise<void> {
+    const watch = this.touchWatch.get(deviceId)
+    const log = watch?.landings
+    if (!watch || !log) return
+    const until = span.down + MAX_DISPATCH_LAG_MS
+    for (;;) {
+      if (this.touchWatch.get(deviceId) !== watch) return
+      const i = watch.starts.indexOf(span)
+      if (i < 0) return
+      const pick = pickDispatch(log.lines(), watch.starts, i)
+      if (pick.kind === 'found') {
+        span.first = pick.line.at
+        const bundle = await log.bundleOf(pick.line.image)
+        if (!bundle) { this.missLanding(deviceId, watch); return }
+        const target = this.lastBundleIds.get(deviceId)
+        const surface = bundle === SPRINGBOARD ? springBoardSurface(pick.line.window) : null
+        // Asked only where it decides something, and directly: a read through the observer can wait behind others.
+        // As the app was when the touch was delivered, not when this asks: Home pressed meanwhile is not the alert's.
+        const away = surface === 'alert' || surface === 'keyboard'
+          ? (target ? await this.appObserver.isAway(deviceId, target, pick.line.at).catch(() => false) : true)
+          : false
+        // The landing before this one in time, whichever gesture finished placing first.
+        const last = watch.lastSpringBoard
+        const age = last ? pick.line.at - last.at : -1
+        const previous = last && age >= 0 && age <= KEYBOARD_INHERIT_MS ? last.landed : undefined
+        const landed = landingOf(bundle, pick.line.window, { ...(target ? { target } : {}), away, ...(previous ? { previous } : {}) })
+        if (landed && bundle === SPRINGBOARD && surface !== 'keyboard' && !(last && last.at > pick.line.at)) {
+          watch.lastSpringBoard = { landed, at: pick.line.at }
+        }
+        // A SpringBoard window not in the table is what a renamed one looks like; one placed nowhere on purpose (its
+        // keyboard over the app, an app with no target known) is not.
+        if (landed) watch.misses = 0
+        else if (bundle === SPRINGBOARD && surface === null) this.missLanding(deviceId, watch)
+        if (landed && this.touchWatch.get(deviceId) === watch) this.sendMsg({ type: 'capture:landed', sessionId, requestId, landed })
+        return
+      }
+      if (Date.now() >= until) {
+        if (pick.kind === 'none' && log.attached) this.missLanding(deviceId, watch)
+        return
+      }
+      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+    }
+  }
+
+  /**
    * Down reports into the list the pairings read, verdicts by seq; verdicts nobody came for are kept to a few. A down
    * report from before the watch began is a gesture of the boot it replaced, taken off disk across it: kept, a gesture
    * of the new boot at the same spot could pair with it before its own report lands (CodeRabbit, #1168).
@@ -1665,7 +1786,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
-    this.touchWatch.delete(deviceId)
+    this.endTouchWatch(deviceId)
     void this.appObserver.stopTouches(deviceId).catch(() => { /* swept at the next boot's prepare */ })
     // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
     await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
@@ -2494,11 +2615,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { x, y } = msg.payload as { x: number; y: number }
         state.touchHelper?.touchStart(x, y)
-        const watch = this.touchWatch.get(state.deviceId)
-        if (watch) {
-          watch.starts.push({ x, y, at: Date.now() })
-          if (watch.starts.length > 8) watch.starts.shift()
-        }
+        this.noteDown(state.deviceId, x, y)
         break
       }
       case 'input:touch:move': {
@@ -2524,7 +2641,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           .then((sent) => this.ackInput(state, sent ? 'delivered' : this.refusalReason(state.touchHelper, 'continuation'), requestId))
         // The gesture ending is the one that started last.
         const start = this.touchWatch.get(state.deviceId)?.starts.at(-1)
-        if (start) void this.reportTouch(msg.sessionId, state.deviceId, requestId, start)
+        if (start) {
+          start.up ??= Date.now()
+          void this.reportTouch(msg.sessionId, state.deviceId, requestId, { x: start.x, y: start.y, at: start.down })
+          void this.landTouch(msg.sessionId, state.deviceId, requestId, start).catch((e: unknown) => {
+            logger.warn('could not place a touch:', (e as Error).message)
+          })
+        }
         break
       }
       // A client leaving mid-gesture (#1115). No ack: the client is leaving, and the end it sends next is answered.
@@ -2538,6 +2661,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
         state.touchHelper?.pinchStart(f0.x, f0.y, f1.x, f1.y)
+        // In the timeline though a pinch is not placed: its events must not be taken for the gesture before it.
+        this.noteDown(state.deviceId, f0.x, f0.y)
         break
       }
       case 'input:pinch:move': {
@@ -2554,6 +2679,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const pinchHelper = state.touchHelper
         void this.ackInput(state, pinchHelper?.pinchEnd() ? 'delivered' : this.refusalReason(pinchHelper, 'continuation'), requestId)
+        const pinch = this.touchWatch.get(state.deviceId)?.starts.at(-1)
+        if (pinch) pinch.up ??= Date.now()
         break
       }
       case 'input:rotate': {

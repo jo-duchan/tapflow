@@ -508,6 +508,66 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
 
 ---
 
+### Where a touch landed (#1214)
+
+For a recorded person's boot on a relay that announced `touch-landings`, the agent sends `capture:landed` for each
+gesture: the app, the home screen, a system surface, a prompt, or another app. **It is read from outside the device,
+with nothing injected**: every UIKit process logs, at default level, `Sending UIEvent type: 0; subtype: 0; to window:
+<CLASS: 0x…>; contextId: 0x…` for each touch event it delivers, the class a public argument. `DispatchLog` streams that
+line alone (`simctl spawn <udid> log stream --style ndjson` with a predicate), `touchLanding.ts` holds the rules as pure
+functions, `IOSAgent.landTouch` pairs and sends. A device already up (picked up as it was, DeviceHub) is read the same.
+
+- **Why not injected.** An earlier design put a `sendEvent:` hook into SpringBoard through the boot's
+  `DYLD_INSERT_LIBRARIES`. It worked, and the log named the same process and window class in 23 of 23 touches on iOS
+  26.5 (home, pages, App Library and its keys, Control Center, Notification Center, status bar, alert, banner, the app)
+  and on 27.0 the same classes, a secure field's keys in the app's own process as on 26.5 — without putting a library in
+  every process the boot starts, which is how the observer once
+  crash-looped two daemons (App observer, above). The measurements are in the plan for #1214.
+- **Measured delivery.** Each line reaches the pipe as its own chunk within 1 ms of the event's timestamp (iOS 26.5,
+  spawned from Node as the agent does); the stream is attached ~1.4 s after the spawn, and a touch before that has no
+  line. On iOS 27.0 a touch in the first seconds after the boot produced no line at all: SpringBoard was not dispatching
+  yet. The `log` process: 38 MB, 0.18 s of CPU over ten seconds of swipes.
+- **A line carries no touch phase**, so a gesture's moves and lift log lines too, and a lagging log (0.1–2.1 s on a
+  loaded Mac mini, iOS 27.0) stamps them after the next gesture's down. `pickDispatch` takes the earliest line in
+  [downᵢ, downᵢ₊₁) and places gesture `i` only when the one before it finished delivering first: its lag (first line −
+  down), stretched for the lift (×1.5 + 50 ms: lifts trailed by 13–40 ms where first events trailed by 7–11 ms, iOS
+  26.5), shorter than the gap from its up to `i`'s down, an unknown lag counting as too long within `MAX_DISPATCH_LAG_MS`.
+  A wrong landing outranks every read in flow-runner; a missing one leaves the reads, so doubt sends nothing. A pinch's
+  down is in the timeline though a pinch is not placed. **The lift margin is an assumption the measurements hold, not a
+  bound**: over 130 gestures (iOS 26.5 idle; 27.0 just after boot and at load 51–104) a lift trailed its first line by
+  at most 14 ms, and by 128 ms where the first line was 897 ms late.
+- **A home-screen widget's renderer is not a landing.** It logs a touch beside SpringBoard's home-screen window, and on
+  iOS 27.0 it logged a page swipe 28 ms after its down while a stalled SpringBoard logged it 800 ms after: taken first,
+  the swipe was `other` with the renderer's id. `landsNothing` leaves it out with the system-gesture layer. Lag is per
+  process, which is also why the margin above is measured on one.
+- **Classification** (`landingOf`): the app under test, any window — its keyboard's keys land in its own process, a
+  secure field's too (measured on 26.5 and 27.0). SpringBoard by window class: `SBHomeScreenWindow` home; status bar, the switcher's
+  status bar over an app (a tap at the top of the screen, which the app never sees), cover sheet, Control Center, banner
+  system; `SBAlertItemWindow` alert, or system while the app is away (an alert over the home screen is not the app's);
+  `UIRemoteKeyboardWindow` takes the surface of the last SpringBoard landing within 30 s, and only while the app is away,
+  so no key typed in the app is ever placed on the home screen (the relay keeps a thumbnail of a home-screen step).
+  Spotlight and any other app are `other` with their id. **A class not in the table is unknown**: a new iOS that renames
+  one gives no landing, which is what every touch had before, and `LANDING_SILENT_WARN` logs once when a stream that has
+  spoken places nothing for ten gestures in a row — no line, an unreadable bundle, or a SpringBoard window it does not
+  know; a touch left out on purpose (SpringBoard's keyboard over the app) does not count. A gesture's down stays in the
+  timeline for the last 32, so a burst while the log trails is placed whole. With no app under test known (an agent restart), only SpringBoard and
+  Spotlight are placed: the app's own touches would read as another app's.
+- **Away is asked directly** (`AppObserver.isAway`: the background marker, then `launchctl`), not through `read`, which
+  waits behind other reads, and **as of the touch's line**: a marker written after it (Home pressed since) means the app
+  was in front. A check that fails keeps `alert`. The last SpringBoard landing is kept in event-time order, since
+  gestures finish placing out of order, and a key takes only one from before it.
+- **The bundle** of a line's process is the `CFBundleIdentifier` of the `Info.plist` beside its `processImagePath` (a host
+  path), read once per path with `plutil`.
+- **Lifecycle.** The stream lives in the touch watch: `replaceTouchWatch` stops the one a re-boot replaces,
+  `endTouchWatch` is the one way a watch ends (teardown, shutdown, a boot nobody records, disconnect). A stream that dies
+  is started again at most 3 times in 30 s. Killing `simctl spawn` with TERM ends the `log` inside the simulator too
+  (measured); an agent killed with -9 leaves both, so each start first kills this device's leftovers, found by `pgrep`
+  and matched by the predicate. Lines older than 10 s are let go each second and all of them at stop, since they name
+  what a person touched; stdout is decoded as a stream (a chunk can end inside a Hangul path). A spawn `error` ends the
+  stream as an `exit` does, once. Under vitest the default reads nothing; a test passes `options.dispatchLog`.
+
+---
+
 ### keyboard-helper interface
 
 ```bash

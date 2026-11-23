@@ -92,6 +92,22 @@ describe('asking the app', () => {
     expect(existsSync(join(dir, 'request'))).toBe(false)
   })
 
+  // CodeRabbit on #1236: a touch's landing asks how the app was when the touch was delivered, not when the answer comes.
+  it('says the app was away at a time only if its background marker was there by then', async () => {
+    const { observer, dir } = setup()
+    await observer.prepare(UDID)
+    writeFileSync(join(dir, 'background'), 'com.app')
+    utimesSync(join(dir, 'background'), new Date(10_000), new Date(10_000))
+    expect(await observer.isAway(UDID, 'com.app', 10_500)).toBe(true)
+    // Home pressed after the touch: the marker is newer than it, so the app was still in front then.
+    expect(await observer.isAway(UDID, 'com.app', 9_500)).toBe(false)
+    expect(await observer.isAway(UDID, 'com.app')).toBe(true)
+    expect(await observer.isAway(UDID, 'com.other', 10_500)).toBe(false)
+    const gone = setup({ running: false })
+    await gone.observer.prepare(UDID)
+    expect(await gone.observer.isAway(UDID, 'com.app', 10_500)).toBe(true)
+  })
+
   it('reads no answer as away when the app has no process, and as unknown when it has one', async () => {
     const gone = setup({ running: false })
     await gone.observer.prepare(UDID)
