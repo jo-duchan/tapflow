@@ -302,7 +302,8 @@ describe('RangeScreen', () => {
       const dispatch = vi.fn()
       const { container } = draw(dropped, dispatch)
       const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
-      expect(tileOf(container, 1).contains(button)).toBe(true)
+      // Under its tile (#1227 moved the buttons out of the tiles, to be tabbed to after the strip).
+      expect(button.closest<HTMLElement>('[data-under]')!.style.left).toBe(tileOf(container, 1).style.left)
       expect(button.textContent).toBe('Put back')
       // Never wider than the tile's inner width, never wrapped (user, 2026-11-23).
       expect(button.className).toMatch(/\bw-full\b/)
@@ -311,7 +312,7 @@ describe('RangeScreen', () => {
       fireEvent.click(button)
       expect(dispatch).toHaveBeenCalledWith({ type: 'replay-dropped', index: 1 })
       // Only the tile with something to put back has a button.
-      expect(tileOf(container, 0).querySelector('button')).toBeNull()
+      expect(container.querySelectorAll('[data-under]')).toHaveLength(1)
     })
 
     it('says it was put back, and leaves it out again from the same place', () => {
@@ -341,7 +342,9 @@ describe('RangeScreen', () => {
     it('adds no button row to a strip with nothing to put back', () => {
       const plain = reduce(initialState, { type: 'loaded', range: { start: 0, end: 1 }, name: 'f', steps: [{ ...base, kind: 'tap', point: [0.5, 0.5] }] as never })
       const { container } = draw(plain)
-      expect(tileOf(container, 0).querySelector('[data-row="buttons"]')).toBeNull()
+      expect(container.querySelector('[data-row="buttons"]')).toBeNull()
+      // No room kept for one either: the strip is its frame's height (12 + 10 + 217 + 10 + 12).
+      expect((container.querySelector('ol[aria-label]')!.parentElement as HTMLElement).style.height).toBe('261px')
     })
   })
 

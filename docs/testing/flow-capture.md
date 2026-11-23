@@ -26,6 +26,7 @@ Click **Capture flow** in the toolbar's Capture group. The dialog has five steps
 The steps you took are shown as a strip, each with a small picture of the screen as it began; a key pressed on the on-screen keyboard shows **On-screen keyboard** instead of a picture, and an install shows a download icon. Any other step without a picture shows an icon in its place; hover over it to see why there is none. A frame marks the part that becomes the flow. It starts out from the first launch after the app was last installed or cleared to your last step.
 
 - Drag the handles at either end to move the start and the end. With a handle focused, the arrow keys move it one step at a time.
+- From the keyboard, Tab past the handles into the steps and move between them with the left and right arrow keys; **Home** and **End** go to the first and last. A focused step shows what hovering over it shows.
 - **drop first** and **drop last** take the first or last step out, one at a time.
 - Fill in **Name** and, optionally, **Tags** (comma-separated). The name becomes the file name you export.
 

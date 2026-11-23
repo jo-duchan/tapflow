@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type Dispatch, type KeyboardEvent, type Ref, type RefObject } from 'react'
 import { ChevronRight, Download, ImageOff, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
@@ -200,9 +200,14 @@ const FRAME_Y = 12
 const INNER_Y = 10
 const ROW_H = FRAME_Y + INNER_Y + TILE_H + INNER_Y + FRAME_Y
 /** The row of Put back / Leave out buttons under the tiles (#1170): there only while a step in the strip has one, and it
- *  stays once a step is put back, so the strip does not jump. 8 px over a 28 px button: the step's name sits on an 11 px
- *  line, so this reads as the gap between the tile's number and its picture (user, 2026-11-23). */
+ *  stays once a step is put back, so the strip does not jump. A 28 px button `BUTTON_DROP` under the tile: 10 px under
+ *  the step's name, the tile's 8 px bottom padding and that, where the user asked for at least the gap between the
+ *  number and the picture (2026-11-23); the rest is room under the button. */
 const BUTTON_ROW = 36
+/** How far under its tile a button sits. A tile's focus ring (#1227) is drawn 2 px inside the tile, 2 px wide: inside the
+ *  frame's padding, 4 px clear of the tile's number, picture and name, and so 4 px clear of the button too — it overlaps
+ *  nothing (user, 2026-11-23). */
+const BUTTON_DROP = 2
 /** Shared by the tiles, the frame and the handles, so they move as one. Off under reduced motion. */
 const SLIDE = 'duration-200 ease-out motion-reduce:transition-none'
 
@@ -235,6 +240,13 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy, putBack
   const [named, setNamed] = useState<Edge | null>(null)
   const total = steps.length
   const buttons = steps.some((s) => s.dropped) || Object.keys(putBack).length > 0
+  /** The tile the strip's one tab stop is on (#1227, roving tabindex): the range's first to begin with, then the last one
+   *  focused, so leaving the strip and coming back resumes there. */
+  const [active, setActive] = useState(() => Math.min(range.start, Math.max(0, total - 1)))
+  const tiles = useRef<Array<HTMLLIElement | null>>([])
+  const tileKeys: Record<string, (i: number) => number> = {
+    ArrowLeft: (i) => i - 1, ArrowRight: (i) => i + 1, Home: () => 0, End: () => total - 1,
+  }
 
   // Opened on a range that starts further in, the strip starts there. Only once: after that the strip is where the
   // person put it. A ref callback, not an effect: an effect on opening alone would need its dependencies suppressed,
@@ -340,14 +352,49 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy, putBack
           >
             <div className="absolute rounded-md bg-muted" style={{ left: EDGE, right: EDGE, top: INNER_Y, bottom: INNER_Y }} />
           </div>
+          {/* The handles first: the strip's way in by keyboard, then its tiles, then the buttons under them (#1227). They are
+              placed absolutely, so the order moves nothing on screen. */}
+          {handle('start')}
+          {handle('end')}
           <ol aria-label={copy.rangeStrip}>
             {steps.map((s, i) => (
               <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} noPictureWhy={noPictureWhy?.(s) ?? null}
-                buttons={buttons} putBack={i in putBack} onReplay={() => onReplay?.(i)} onDropAgain={() => onDropAgain?.(i)} />
+                buttons={buttons} putBack={i in putBack} tabbable={i === active}
+                ref={(el) => { tiles.current[i] = el }}
+                onFocus={() => setActive(i)}
+                onKeyDown={(e) => {
+                  const to = tileKeys[e.key]
+                  if (!to) return
+                  e.preventDefault()
+                  const next = Math.max(0, Math.min(total - 1, to(i)))
+                  setActive(next)
+                  tiles.current[next]?.focus()
+                }} />
             ))}
           </ol>
-          {handle('start')}
-          {handle('end')}
+          {/* Outside the list, so the buttons are tabbed to after the strip as one stop, in step order, and no tile holds a
+              control of its own. Each is placed under its tile and slides with it; its name says which step. */}
+          {buttons && steps.map((s, i) => (s.dropped || i in putBack) && (
+            <div
+              key={i}
+              data-under={i}
+              data-row="buttons"
+              className={cn('absolute px-2 transition-[left,opacity]', SLIDE, !(i >= range.start && i < range.end) && 'opacity-50')}
+              style={{ left: tileLeft(i, range), top: FRAME_Y + INNER_Y + TILE_H + BUTTON_DROP, width: TILE }}
+            >
+              {/* One button in one place either way, so focus stays on it as it turns from Put back into Leave out. Never
+                  wider than the tile, and never wrapped: the tile is 80 px inside (user, 2026-11-23). */}
+              <Button
+                variant="outline"
+                className="h-7 w-full min-w-0 max-w-full whitespace-nowrap px-2 text-xs"
+                aria-label={i in putBack ? copy.leaveOutTile(i + 1) : copy.putBackTile(i + 1)}
+                onClick={() => (i in putBack ? onDropAgain?.(i) : onReplay?.(i))}
+              >
+                {/* Words only: with an icon the label left no room for the button's own padding (user, 2026-11-23). */}
+                {i in putBack ? copy.leaveOut : copy.putBack}
+              </Button>
+            </div>
+          ))}
         </div>
       </div>
     </TooltipProvider>
@@ -359,10 +406,12 @@ function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy, putBack
 const typedOnSoftKeyboard = (step: RawStep): boolean =>
   step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
 
-/** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
-function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons, putBack, onReplay, onDropAgain }: {
+/** A name cut short in the tile is shown whole on hover, and on focus (#1227). The list item already holds it whole for a
+ *  screen reader. */
+function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons, putBack, tabbable, ref, onFocus, onKeyDown }: {
   step: RawStep; index: number; inRange: boolean; left: number; picture: string | null; noPictureWhy: string | null
-  buttons: boolean; putBack: boolean; onReplay: () => void; onDropAgain: () => void
+  buttons: boolean; putBack: boolean; tabbable: boolean; ref: Ref<HTMLLIElement>
+  onFocus: () => void; onKeyDown: (e: KeyboardEvent<HTMLLIElement>) => void
 }) {
   // A tap left out before the replay is drawn as one outside the range, and says why.
   const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
@@ -372,11 +421,20 @@ function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons,
     <Tooltip>
       <TooltipTrigger asChild>
         <li
-          className={cn('absolute flex flex-col p-2 text-xs transition-[left,opacity]', SLIDE, !inRange && 'opacity-50')}
-          style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H + (buttons ? BUTTON_ROW : 0) }}
+          ref={ref}
+          tabIndex={tabbable ? 0 : -1}
+          onFocus={onFocus}
+          onKeyDown={onKeyDown}
+          className={cn(
+            'absolute flex flex-col rounded-md p-2 text-xs transition-[left]',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-ring',
+            SLIDE,
+          )}
+          style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
         >
-          {/* A step left out is dimmed as one outside the range, but not its button, which is how it comes back. */}
-          <div className={cn('flex flex-col gap-1', step.dropped && 'opacity-50')}>
+          {/* Dimmed inside, so a focused tile's ring is not: one outside the range, or a step left out (its button, under
+              the tile, is how it comes back, and is dimmed only with the range). */}
+          <div className={cn('flex flex-col gap-1 transition-opacity', SLIDE, !inRange && step.dropped ? 'opacity-25' : (!inRange || step.dropped) && 'opacity-50')}>
           {/* A tap left out says so in the tile, not only in the tooltip its cut-short name has (CodeRabbit on #1167). */}
           <span className="flex h-4 items-center justify-between gap-1 leading-4">
             <span className="text-muted-foreground">#{index + 1}</span>
@@ -412,26 +470,11 @@ function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons,
           <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
           </div>
           {why && <span className="sr-only">{why}</span>}
-          {/* One button in one place either way, so focus stays on it as it turns from Put back into Leave out. Never wider
-              than the tile, and never wrapped: the tile is 80 px inside (user, 2026-11-23). */}
-          {buttons && (
-            <div data-row="buttons" className="mt-auto pt-2">
-              {(step.dropped || putBack) && (
-                <Button
-                  variant="outline"
-                  className="h-7 w-full min-w-0 max-w-full whitespace-nowrap px-2 text-xs"
-                  aria-label={putBack ? copy.leaveOutTile(index + 1) : copy.putBackTile(index + 1)}
-                  onClick={putBack ? onDropAgain : onReplay}
-                >
-                  {/* Words only: with an icon the label left no room for the button's own padding (user, 2026-11-23). */}
-                  {putBack ? copy.leaveOut : copy.putBack}
-                </Button>
-              )}
-            </div>
-          )}
         </li>
       </TooltipTrigger>
-      <TooltipContent side="bottom">
+      {/* Below the frame: past the button row when there is one, so it never covers a Put back button, and past the
+          frame's lower edge (#1227). */}
+      <TooltipContent side="bottom" sideOffset={(buttons ? BUTTON_ROW : 0) + INNER_Y + 4}>
         <span className="block font-mono">{label}</span>
         {why && <span className="block text-muted-foreground">{why}</span>}
       </TooltipContent>
