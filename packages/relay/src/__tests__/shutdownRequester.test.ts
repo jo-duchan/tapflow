@@ -263,7 +263,10 @@ describe('device:shutdown answers reach whoever asked', () => {
 
   it.each([{ label: 'no ID', requestId: undefined }, { label: 'supplied ID', requestId: 'rq-malformed' }])('refuses malformed shutdowns ($label) without delivering them', async ({ requestId }) => {
     const { agent, sessionId } = await registerAgent()
-    const caller = await joinAs(sessionId)
+    // The holder is a *separate* socket from the caller, so a refusal forwarded to the holder as well
+    // as to the caller is visible. Both are unidentified loopback sockets, the same principal (#455).
+    const holder = await joinAs(sessionId)
+    const caller = await socket()
     const forwarded: string[] = []
     agent.on('message', (raw) => {
       const frame = JSON.parse(raw.toString()) as { type: string }
@@ -281,6 +284,8 @@ describe('device:shutdown answers reach whoever asked', () => {
           type: 'device:shutdown-error', sessionId, message: 'malformed device:shutdown payload',
           ...(requestId === undefined ? {} : { requestId }),
         })
+        await barrier(holder)
+        expect(await waitForTypeOrNull<DeviceShutdownError>(holder, 'device:shutdown-error', 0)).toBeNull()
         await barrier(agent)
         expect(forwarded).toHaveLength(0)
       }
@@ -293,7 +298,7 @@ describe('device:shutdown answers reach whoever asked', () => {
       expect((await completed).requestId).toBe('rq-valid-after-refusal')
       expect(forwarded).toHaveLength(1)
     } finally {
-      agent.close(); caller.close()
+      agent.close(); holder.close(); caller.close()
     }
   })
 
