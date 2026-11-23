@@ -36,10 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A WebSocket peer can no longer exhaust the relay's memory by flooding it with pings.** The `ws` library answered every Ping with a Pong and kept those replies in memory without limit while the peer stopped reading, until the process ran out of memory. tapflow now depends on `ws` 8.23.0, which fixes it. From another machine this took a valid credential, a member's or an agent's, since the relay closes a remote connection it refuses. A connection from the relay's own machine needs none, so any process running there could send the same flood. A fresh install of an earlier release from npm already gets 8.23.0; an existing install and the Docker image get it by upgrading to this release.
 
-### Fixed
-
-- App logs start at the current Android app launch, stay with the session holder who launched them, and yield to browser backpressure; the viewer batches updates per animation frame.
-
 ## [0.33.0] - 2026-11-19
 
 Flow Capture: save the steps you took in a QA session as a flow, replayed on the device to check it before you export it, with Android brought level with iOS along the way.
