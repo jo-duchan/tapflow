@@ -62,7 +62,7 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, CaptureLanded, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   WatchStart, WatchStop,
 } from '../index.js'
@@ -428,6 +428,14 @@ const AGENT_CONSUMED = {
       seq: z.number().int().positive().optional().catch(undefined),
     }),
   }),
+  // A landing the relay cannot read is none: Capture judges that touch as before (#1214).
+  'capture:landed': z.object({
+    type: z.literal('capture:landed'), sessionId, requestId,
+    landed: z.object({
+      on: z.enum(['app', 'home', 'system', 'alert', 'other']),
+      id: z.string().min(1).max(256).optional().catch(undefined),
+    }),
+  }),
   // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.
   'ui:keyboard:response': z.object({
     type: z.literal('ui:keyboard:response'), sessionId, requestId,
@@ -733,6 +741,7 @@ type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
 type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
 type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>
 type _CaptureTouched = Assert<V<'capture:touched', CaptureTouched>>
+type _CaptureLanded = Assert<V<'capture:landed', CaptureLanded>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 

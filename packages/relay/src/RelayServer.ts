@@ -1706,6 +1706,7 @@ export class RelayServer {
       case 'ui:field:response':  this.handleUIFieldResponse(ws, msg); break
       case 'ui:keyboard:response': this.handleUIKeyboardResponse(ws, msg); break
       case 'capture:touched':    this.handleCaptureTouched(ws, msg); break
+      case 'capture:landed':     this.handleCaptureLanded(ws, msg); break
       case 'agents:list': {
         this.sendTo(ws, {
           type: 'agents:listed',
@@ -2754,7 +2755,7 @@ export class RelayServer {
     // which only held while every device got a session — now that some are rebound, the arrays have
     // different lengths and index alignment would hand the agent someone else's session id.
     const registeredSessions = devices.map((d) => ({ deviceId: d.id, sessionId: byDeviceId.get(d.id)! }))
-    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates'] })
+    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates', 'touch-landings'] })
 
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
@@ -4132,6 +4133,13 @@ export class RelayServer {
     const session = this.sessions.get(msg.sessionId)
     if (!session || session.agentSocket !== ws) return
     this.captures.recordTouched(session.id, captureHolder(session), msg.requestId, msg.observation)
+  }
+
+  /** Where a recorded touch went down (#1214). Only the session's own agent says so, as with `capture:touched`. */
+  private handleCaptureLanded(ws: WebSocket, msg: Inbound<'capture:landed'>): void {
+    const session = this.sessions.get(msg.sessionId)
+    if (!session || session.agentSocket !== ws) return
+    this.captures.recordLanded(session.id, captureHolder(session), msg.requestId, msg.landed)
   }
 
   private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {

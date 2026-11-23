@@ -109,6 +109,34 @@ describe('what is recorded', () => {
   })
 })
 
+// #1214: where a recorded touch went down, as the agent says.
+describe('a touch landing', () => {
+  const touch = (requestId: string): CapturedMessage[] => [
+    { type: 'input:touch:start', sessionId: 's', payload: { x: 0.3, y: 0.4 } },
+    { type: 'input:touch:end', sessionId: 's', requestId, payload: { x: 0.3, y: 0.4 } },
+  ]
+  const landings = (s: CaptureStore) => s.takeSnapshot('s', '1')!.entries.filter((e) => e.kind === 'landed')
+
+  it('is kept for a gesture the capture recorded, once', () => {
+    const { s } = store()
+    for (const m of touch('r1')) s.recordInput('s', ALICE, m)
+    s.recordLanded('s', ALICE, 'r1', { on: 'home' })
+    s.recordLanded('s', ALICE, 'r1', { on: 'app' })
+    expect(landings(s)).toEqual([expect.objectContaining({ kind: 'landed', requestId: 'r1', landed: { on: 'home' } })])
+  })
+
+  it('is not kept for a gesture the capture never recorded, or from someone not recording', () => {
+    const { s } = store()
+    for (const m of touch('r1')) s.recordInput('s', ALICE, m)
+    s.recordLanded('s', ALICE, 'nobody', { on: 'home' })
+    s.recordLanded('s', { kind: 'dashboard', user: '2' }, 'r1', { on: 'home' })
+    expect(landings(s)).toEqual([])
+    // The same capture keeps the one it recorded, so the empty list above is the refusals and not a store that keeps none.
+    s.recordLanded('s', ALICE, 'r1', { on: 'other', id: 'com.google.android.googlequicksearchbox' })
+    expect(landings(s)).toHaveLength(1)
+  })
+})
+
 describe('when a capture ends', () => {
   it('survives the same person coming back in a dashboard', () => {
     const { s } = store()
@@ -789,6 +817,28 @@ describe('CaptureStore — thumbnails', () => {
       expect(s.putThumbnail('s', '1', 'key', jpeg(10))).toBe('keyboard')
     })
 
+    // #1214: the agent says where the touch went down. The home screen has no keyboard of its own, so the reads are not
+    // asked; anywhere else they decide as before (another app or an alert can show one).
+    it('keeps one for a touch the agent placed on the home screen, whatever the reads say', async () => {
+      const s = await withKeyboard([UP])
+      record(s, ...touchAt('home', 0.8))
+      s.recordLanded('s', ALICE, 'home', { on: 'home' })
+      expect(s.putThumbnail('s', '1', 'home', jpeg(10))).toBe('kept')
+      const none = store().s
+      record(none, ...touchAt('h', 0.8))
+      none.recordLanded('s', ALICE, 'h', { on: 'home' })
+      expect(none.putThumbnail('s', '1', 'h', jpeg(10))).toBe('kept')
+    })
+
+    it('leaves a touch placed anywhere else to the reads', async () => {
+      const s = await withKeyboard([UP])
+      for (const [id, on] of [['o', 'other'], ['a', 'app'], ['al', 'alert'], ['sy', 'system']] as const) {
+        record(s, ...touchAt(id, 0.8))
+        s.recordLanded('s', ALICE, id, { on })
+        expect(s.putThumbnail('s', '1', id, jpeg(10))).toBe('keyboard')
+      }
+    })
+
     // CodeRabbit on #1226: a read that cannot say (iOS answers `{ shown: null }` for an app inactive with its keyboard
     // up) does not show the keyboard was down after a touch the last read placed off the app.
     it('keeps none for a touch placed off the app when the read after it cannot say', async () => {
@@ -873,6 +923,16 @@ describe('CaptureStore — thumbnails', () => {
         expect(s.putThumbnail('s', '1', 'signIn', jpeg(10))).toBe('typed')
         expect(s.takeSnapshot('s', '1')!.thumbnailRefusals).toEqual({ signIn: 'typed' })
       }
+    })
+
+    // #1214 review: a touch the agent placed on the home screen skips the keyboard reads, not this rule. Home right after
+    // a password (an app that went home on Sign in) can still show its last character.
+    it('keeps none from a secure field for a touch placed on the home screen either', async () => {
+      const s = await typedInto(true)
+      record(s, ...touchAt('home', 0.2))
+      s.recordLanded('s', ALICE, 'home', { on: 'home' })
+      await vi.advanceTimersByTimeAsync(50)
+      expect(s.putThumbnail('s', '1', 'home', jpeg(10))).toBe('typed')
     })
 
     it('keeps one from a field read as not secure, and any once the moment has passed', async () => {

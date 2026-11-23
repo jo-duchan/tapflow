@@ -543,8 +543,9 @@ export interface AgentRegistered {
 }
 
 /** Values of `AgentRegistered.features`. An agent meeting one it does not know ignores it.
- *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`. */
-export type RelayAgentFeature = 'device-updates'
+ *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`.
+ *  `'touch-landings'`: the relay takes `capture:landed` (#1214). */
+export type RelayAgentFeature = 'device-updates' | 'touch-landings'
 
 /** The relay's answer to `agent:devices`: the sessions it made for devices that appeared, and the ones it removed
  *  for devices that left. Not correlated: the agent sends at most one list at a time per socket, and a list lost
@@ -2087,6 +2088,43 @@ export interface CaptureTouched {
   observation: TouchObservation
 }
 
+/**
+ * Where a recorded touch went down (#1214): a fact the agent saw as the finger went down, not a reading of the screen
+ * after it. Flow Capture used to infer it from keyboard reads, their timing and the app's touch count; a landing settles
+ * the step it is about, and a step without one is judged as before.
+ *
+ * - `app`: the app under test, the soft keyboard over it and a sheet it shows in its own window (iOS draws a share
+ *   sheet's touches in the host, measured).
+ * - `home`: the launcher's own surface — iOS SpringBoard below window level 0 (pages, Today view, dock, an icon's
+ *   menu, editing), and Spotlight (`id` `com.apple.Spotlight`); Android the home package.
+ * - `system`: a system surface over whatever is in front — iOS SpringBoard at level 0 up to 2000 (status bar,
+ *   Notification Center, Control Center); Android a window that is not an application's (status bar, shade).
+ * - `alert`: a prompt over the app — iOS SpringBoard at level 2000 and up (`UIWindowLevelAlert`: a permission alert);
+ *   Android the permission controller.
+ * - `other`: another app, named by `id` when known.
+ *
+ * Measured on iOS 26.5 (window levels: home −2, status bar 999, Notification Center 1050, Control Center 1080, alert
+ * 2000) and Android 16; the plan is in the issue. The set is closed: a member added later needs its own relay feature,
+ * since an older relay's validator drops a message carrying a value it does not know.
+ */
+export type TouchLandedOn = 'app' | 'home' | 'system' | 'alert' | 'other'
+
+export interface TouchLanding {
+  on: TouchLandedOn
+  /** What took the touch: an iOS bundle id, an Android package. Absent for `app`, and where it could not be read. */
+  id?: string
+}
+
+/** Agent → relay: where the gesture `requestId` (its `input:touch:end`'s) went down, for every recorded touch, the
+ *  app's included, at most once. Sent only to a relay whose `agent:registered` named `'touch-landings'`, on a boot it
+ *  marked `observed` with `touchObservations`. A pinch lands where its first finger went down. */
+export interface CaptureLanded {
+  type: 'capture:landed'
+  sessionId: string
+  requestId: string
+  landed: TouchLanding
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -2099,6 +2137,7 @@ export type AgentToRelay =
   | UiFieldResponse
   | UiKeyboardResponse
   | CaptureTouched
+  | CaptureLanded
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
