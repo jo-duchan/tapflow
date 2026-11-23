@@ -85,6 +85,11 @@ tapflow setup ios
 tapflow setup android
 ```
 
+| Option | Description |
+|--------|-------------|
+| `[platform]` | `ios` or `android`; omit to auto-detect |
+| `--yes`, `-y` | Windows, `setup android` only: answer yes to the download, install and create-AVD prompts, also without a terminal (a remote shell, a script). It accepts the Android SDK licences as those installs do. It never elevates: winget is skipped, because its installer can raise a UAC prompt, so a missing JDK comes from the per-user Temurin zip. It does not turn on Windows features. Elsewhere it is ignored with a warning, and it never answers sudo, the iOS steps or the network-filter approval. |
+
 Runs in one pass, asking for consent before each install (interactive terminals only; non-interactive runs print the command instead). On both platforms it installs Homebrew first when it is missing.
 
 - **iOS**: opens the App Store for Xcode, accepts the license / runs first-launch (needs sudo), downloads a simulator runtime.

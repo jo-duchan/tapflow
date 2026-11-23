@@ -14,6 +14,7 @@ import { step } from './print.js'
 import { terminalApprovalDeps } from './approval-prompt.js'
 import { isInteractive } from './interactive.js'
 import { findXcodeApp, selectedXcodeApp, DEFAULT_XCODE_APP } from './xcode.js'
+import { runSetupAndroidWindows, realWindowsDeps } from './setup-android-windows.js'
 
 // SetupStepResult = DoctorCheck + optional state (found/created/repaired); ok is untouched so doctor is unaffected.
 export type SetupStepState = 'found' | 'created' | 'repaired'
@@ -79,7 +80,18 @@ function hasIosDevice(): boolean {
   }
 }
 
-export async function runSetupAndroid(): Promise<SetupStepResult[]> {
+export interface SetupOptions {
+  /**
+   * `tapflow setup --yes`. Only the Windows Android flow reads it, and only for its own
+   * download/install/create-AVD prompts; macOS, Linux, iOS and the network filter ignore it.
+   */
+  assumeYes?: boolean
+}
+
+export async function runSetupAndroid(opts: SetupOptions = {}): Promise<SetupStepResult[]> {
+  // Windows has no Homebrew: winget/Temurin zip, Google's cmdline-tools zip, then the same SDK
+  // packages and AVD set as below (setup-android-windows.ts). macOS and Linux are unchanged.
+  if (process.platform === 'win32') return runSetupAndroidWindows(realWindowsDeps({ assumeYes: opts.assumeYes }))
   const results: SetupStepResult[] = []
   const brew = await checkAndFixHomebrew()
   results.push(brew)

@@ -73,6 +73,22 @@ describe('cmdSetup', () => {
     expect(mockRunSetupIos).not.toHaveBeenCalled()
   })
 
+  it('--yes reaches runSetupAndroid only, never runSetupIos', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    await cmdSetup('android', { assumeYes: true })
+    expect(mockRunSetupAndroid).toHaveBeenCalledWith({ assumeYes: true })
+    expect(errLines.join('\n')).not.toContain('--yes')
+
+    await cmdSetup('ios', { assumeYes: true })
+    expect(mockRunSetupIos).toHaveBeenCalledWith()
+  })
+
+  it('--yes off Windows is ignored, with a warning', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    await cmdSetup('android', { assumeYes: true })
+    expect(errLines.join('\n')).toContain('--yes only answers')
+  })
+
   it('인자 없음 + darwin + adb 있음 → ios와 android 둘 다', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     mockResolveAdb.mockReturnValue({ path: '/x/adb', inPath: true })

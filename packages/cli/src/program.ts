@@ -54,7 +54,8 @@ export function createCli(): CAC {
 
   cli
     .command('setup [platform]', 'Set up the environment (ios | android; omit to auto-detect)')
-    .action((platform?: string) => cmdSetup(platform))
+    .option('-y, --yes', 'Windows Android only: answer yes to the download, install and create-AVD prompts, also without a terminal. Never elevates.')
+    .action((platform: string | undefined, opts: { yes?: boolean }) => cmdSetup(platform, { assumeYes: opts.yes === true }))
 
   cli
     .command('devices', 'List available iOS simulators and Android AVDs')
