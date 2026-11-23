@@ -45,12 +45,7 @@ describe('agent:devices (#1085)', () => {
 
   async function open(userId?: number) {
     const ws = new WebSocket(`ws://localhost:${port}`, userId
-      ? { headers: { Cookie: `tapflow_token=${signJwt({
-                userId,
-                email: `u${userId}@example.com`,
-                role: 'QA'
-              })}`
-            } }
+      ? { headers: { Cookie: `tapflow_token=${signJwt({ userId, email: `u${userId}@example.com`, role: 'QA' })}` } }
       : {})
     await waitForOpen(ws)
     return ws

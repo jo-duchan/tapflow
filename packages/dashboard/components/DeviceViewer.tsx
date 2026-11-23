@@ -11,6 +11,7 @@ import { IOSViewer } from './device/IOSViewer';
 import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
 import type { AppLogHandler } from './device/shared/AppLogViewer';
+import { endsShownLaunch } from '@/lib/appLogs';
 import type { AndroidChrome, ChromeData, BrowserInbound, PosturesPayload } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
 import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, CODEC_AUDIO, type BinaryFrameHandler } from '@/lib/envelope';
@@ -661,6 +662,10 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const send = useCallback((msg: BrowserToRelay) => {
     const sent = relaySend(msg);
     if (sent) thumbnailsRef.current?.note(msg);
+    if (sent && endsShownLaunch(msg, appLogLaunchIdRef.current)) {
+      appLogLaunchIdRef.current = null;
+      appLogHandlerRef.current?.({ kind: 'clear' });
+    }
     return sent;
   }, [relaySend]);
   useLayoutEffect(() => { sendRef.current = send; });

@@ -136,11 +136,10 @@ describe('DeviceViewer app log feed', () => {
   })
 
   // Each of these ends the app the logs came from, and a chunk still on its way for that launch is dropped after it.
+  // A new boot, the agent going away and a rebound are not here: each drops the frame, which unmounts the whole viewer,
+  // so a test of them would pass with their clears deleted.
   it.each([
-    ['a new boot', { type: 'device:booting', sessionId: 'mine' }],
     ['a re-join', { type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs'] }],
-    ['the agent going away', { type: 'session:agent-away', sessionId: 'mine' }],
-    ['a restarted agent', { type: 'session:rebound', sessionId: 'mine', capabilities: ['app-logs'] }],
     ['the session ending', { type: 'session:terminated', sessionId: 'mine', reason: 'agent-disconnected' }],
   ] as const)('closes the log on %s, and drops that launch\'s late output', (_case, message) => {
     const launchId = launched()

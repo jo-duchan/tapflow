@@ -126,7 +126,8 @@ export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
             {lines.length} {lines.length === 1 ? 'line' : 'lines'}
           </span>
         )}
-        {supported && lines.length > 0 && (
+        {/* Only while open: on a page with no clipboard, Copy selects the body, which a collapsed box does not render. */}
+        {supported && lines.length > 0 && !collapsed && (
           <CodeBlockCopyButton value={text} copy={copyOrSelect} className="size-6" />
         )}
       </div>

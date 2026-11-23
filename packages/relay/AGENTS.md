@@ -238,7 +238,6 @@ announced `'device-updates'` on `agent:registered`. `handleAgentDevices` diffs i
   listing and the lease, and removed by the heartbeat (`sweepGoneDevices`) once `goneAndVacant`: an idle shutdown
   sends `device:shutdown` and keeps the session, so no single place sees a session stop being held. Removal goes
   through `removeSession`, which also releases the boot gate.
-
 - **Only the one who was on a gone device may re-join it** (`SessionManager.join`): the same client, or the person a
   dropped session is waiting for. Anyone else holding the id would boot a device that is no longer there and, as its
   holder, keep the session from being swept.
@@ -258,10 +257,9 @@ cached or sent through `forwardToWatchers`: app logs belong to the active QA hol
 be able to address another session's viewer with them. **A chunk is forwarded only for the launch the relay last
 sent** (`appLogLaunches`), and only while the holder that sent it still holds the session: an install, a
 clear-state, a shutdown or the session's end forgets the launch, and a stream that outlives its holder reaches
-nobody. Each
-`app:log.launchId` is that launch's request id, which the viewer also uses to discard late chunks from an earlier
-launch. Above `APP_LOG_BACKPRESSURE_BYTES` buffered on the holder's socket a chunk is dropped, with a warning at most
-once a second: the log shares that socket with the video, and the video comes first.
+nobody. Each `app:log.launchId` is that launch's request id, which the viewer also uses to discard late chunks from
+an earlier launch. Above `APP_LOG_BACKPRESSURE_BYTES` buffered on the holder's socket a chunk is dropped, with a
+warning at most once a second: the log shares that socket with the video.
 
 ### Flow Capture's record (`capture/`, #1125)
 
