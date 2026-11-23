@@ -5509,7 +5509,7 @@ describe('what a rotation does on each backend', () => {
 
   const rotate = async (backend: 'grpc' | 'scrcpy') => {
     const adb = mockAdb(true)
-    vi.spyOn(adb, 'setRotation').mockResolvedValue(undefined)
+    const setRotation = vi.spyOn(adb, 'setRotation').mockResolvedValue(undefined)
     const metrics = vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue({
       natural: { width: 1080, height: 2400 },
       current: { width: 2400, height: 1080 },
@@ -5519,10 +5519,11 @@ describe('what a rotation does on each backend', () => {
     const state = stateOn(backend)
     internals(agent).deviceStates.set('s1', state)
     internals(agent).handleRelayMessage({ type: 'input:rotate', sessionId: 's1' })
-    // The gRPC path samples `dumpsys` until it settles (3 reads, `TAPFLOW_METRICS_GAP_MS=1`
-    // in this suite), so a microtask drain is not enough — wait real time for both branches.
+    // A microtask drain is not enough: the gRPC path turns the body and reads it back after a real 50 ms poll
+    // (`BODY_TURN_POLL_MS`), then samples `dumpsys` (`TAPFLOW_METRICS_GAP_MS=1` here). A floor, not a promise: the gRPC
+    // test waits for its outcome on top of this, and the scrcpy test first waits for its rotation to have been sent.
     await new Promise((r) => setTimeout(r, 60))
-    return { metrics, state }
+    return { metrics, setRotation, state }
   }
 
   // Settling the display after a rotation samples it until it holds still — up to 3.6s. That ran in
@@ -5549,7 +5550,9 @@ describe('what a rotation does on each backend', () => {
     // see landscape content, switch its CSS quarter off — the only thing that rotates this
     // backend — and then find the frame no longer matches the screen it was told about. The
     // picture goes blank with no way back but pressing rotate again.
-    const { metrics, state } = await rotate('scrcpy')
+    const { metrics, setRotation, state } = await rotate('scrcpy')
+    // The rotation was sent, so what follows is an absence after it ran, not because nothing did.
+    await vi.waitFor(() => expect(setRotation).toHaveBeenCalledWith(expect.any(String), 3))
     expect(metrics).not.toHaveBeenCalled()
     // And `toDevicePx` says this backend must never carry a rotation: its frames are natural
     // already, so applying one double-maps every tap.
@@ -5560,8 +5563,10 @@ describe('what a rotation does on each backend', () => {
   it('does re-describe it on gRPC, which is what makes the button feel immediate', async () => {
     // The pair that stops the test above passing because nothing ran.
     const { metrics, state } = await rotate('grpc')
+    // Waited for, not timed: the body's 50 ms poll left the helper's 60 ms about 7 ms to spare, and a slow CI runner
+    // used it up (the Node 22 job on #1230).
+    await vi.waitFor(() => expect(state.rotation).toBe(270))
     expect(metrics).toHaveBeenCalled()
-    expect(state.rotation).toBe(270)
     expect(state.displayWidth).toBe(2400)
   })
 })
