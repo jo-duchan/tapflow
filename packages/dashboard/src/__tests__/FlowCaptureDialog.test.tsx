@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useReducer } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -19,14 +19,15 @@ const tap: CaptureTap = {
   chrome: () => null, postures: () => ({ postures: [], currentId: null }), surface: () => null,
 }
 
-const entry = (at: number, msg: Record<string, unknown>): CaptureEntry => ({ at, kind: 'input', msg: { sessionId: 's1', ...msg } as never })
+type InputMsg = Extract<CaptureEntry, { kind: 'input' }>['msg']
+const entry = (at: number, msg: InputMsg): CaptureEntry => ({ at, kind: 'input', msg })
 const snapshot: CaptureSnapshot = {
   id: 'snap', takenAt: 0, thinned: false,
   entries: [
-    entry(0, { type: 'app:install', requestId: 'i', buildId: 7 }),
-    entry(100, { type: 'app:launch', requestId: 'l', buildId: 7 }),
-    entry(200, { type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
-    entry(280, { type: 'input:touch:end', requestId: 't' }),
+    entry(0, { sessionId: 's1', type: 'app:install', requestId: 'i', buildId: 7 }),
+    entry(100, { sessionId: 's1', type: 'app:launch', requestId: 'l', buildId: 7 }),
+    entry(200, { sessionId: 's1', type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
+    entry(280, { sessionId: 's1', type: 'input:touch:end', requestId: 't' }),
   ],
 }
 
@@ -285,6 +286,65 @@ describe('RangeScreen', () => {
     expect(tiles[1]!.querySelector('img')).toHaveAttribute('src', '/pic/t')
   })
 
+  // #1170: a step left out before the replay has a button under its tile to put it back, and to leave it out again.
+  describe('a step left out before the replay', () => {
+    const dropped = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 3 }, name: 'f',
+      steps: [
+        { ...base, kind: 'tap', point: [0.5, 0.5] },
+        { ...base, kind: 'tap', point: [0.5, 0.5], dropped: 'retried' },
+        { ...base, kind: 'tap', point: [0.5, 0.5] },
+      ] as never,
+    })
+    const tileOf = (container: HTMLElement, n: number) => container.querySelectorAll('ol[aria-label] > li')[n] as HTMLElement
+
+    it('puts it back from a button under its tile, no wider than the tile', () => {
+      const dispatch = vi.fn()
+      const { container } = draw(dropped, dispatch)
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
+      expect(tileOf(container, 1).contains(button)).toBe(true)
+      expect(button.textContent).toBe('Put back')
+      // Never wider than the tile's inner width, never wrapped (user, 2026-11-23).
+      expect(button.className).toMatch(/\bw-full\b/)
+      expect(button.className).toMatch(/\bmin-w-0\b/)
+      expect(button.className).toMatch(/\bwhitespace-nowrap\b/)
+      fireEvent.click(button)
+      expect(dispatch).toHaveBeenCalledWith({ type: 'replay-dropped', index: 1 })
+      // Only the tile with something to put back has a button.
+      expect(tileOf(container, 0).querySelector('button')).toBeNull()
+    })
+
+    it('says it was put back, and leaves it out again from the same place', () => {
+      const dispatch = vi.fn()
+      const { container } = draw(reduce(dropped, { type: 'replay-dropped', index: 1 }), dispatch)
+      expect(tileOf(container, 1).textContent).toContain('Put back')
+      expect(tileOf(container, 1).textContent).not.toContain('Not replayed')
+      fireEvent.click(screen.getByRole('button', { name: 'Leave out #2 from the replay again' }))
+      expect(dispatch).toHaveBeenCalledWith({ type: 'drop-again', index: 1 })
+    })
+
+    // Pre-PR review: the user's "focus stays on the button", through the real reducer on one mounted strip.
+    it('keeps focus on the button as it turns from Put back into Leave out', () => {
+      function Strip() {
+        const [state, dispatch] = useReducer(reduce, dropped)
+        return <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />
+      }
+      render(<Strip />)
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
+      button.focus()
+      fireEvent.click(button)
+      const turned = screen.getByRole('button', { name: 'Leave out #2 from the replay again' })
+      expect(turned).toBe(button)
+      expect(turned).toHaveFocus()
+    })
+
+    it('adds no button row to a strip with nothing to put back', () => {
+      const plain = reduce(initialState, { type: 'loaded', range: { start: 0, end: 1 }, name: 'f', steps: [{ ...base, kind: 'tap', point: [0.5, 0.5] }] as never })
+      const { container } = draw(plain)
+      expect(tileOf(container, 0).querySelector('[data-row="buttons"]')).toBeNull()
+    })
+  })
+
   it('asks for the password, hidden, and holds Continue until it is given', async () => {
     const dispatch = vi.fn()
     draw(loaded, dispatch)
@@ -471,7 +531,7 @@ describe('VerifyScreen', () => {
 
 // #1139: Match and Verify start from a run's reset, and say what it did.
 describe('the device reset', () => {
-  const props = { tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+  const props = { tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null, onPutBackAndMatch: vi.fn() }
   const matching = reduce({ ...initialState, phase: 'range' as const }, { type: 'match-started', total: 2 })
 
   it('says what was reset, by name, once the agent has answered', () => {
@@ -519,7 +579,7 @@ describe('focus through a run', () => {
   // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
   it('keeps focus on the button pressed when Stop becomes Start again', () => {
     const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
-    const props = { tap: tapStub, touch, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+    const props = { tap: tapStub, touch, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null, onPutBackAndMatch: vi.fn() }
     const { rerender } = render(<MatchScreen state={running} {...props} />)
     const stop = screen.getByRole('button', { name: 'Stop' })
     stop.focus()

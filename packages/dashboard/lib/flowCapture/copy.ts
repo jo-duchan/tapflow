@@ -107,6 +107,13 @@ export const copy = {
     `${span} ${n === 1 ? 'was' : 'were'} not replayed${reason === 'stopped-scroll' ? ': tapped while a list was still moving, which only stops it.'
       : reason === 'retried' ? ': tapped again right after, on a screen that had not changed.' : '.'}`,
   droppedShort: 'Not replayed',
+  /** #1170: a step left out before the replay, put back by the person, and the button that does either. */
+  putBackShort: 'Put back',
+  putBack: 'Put back',
+  leaveOut: 'Leave out',
+  putBackTile: (n: number) => `Put back #${n} in the replay`,
+  leaveOutTile: (n: number) => `Leave out #${n} from the replay again`,
+  putBackAndMatch: 'Put back and match again',
   droppedTile: {
     'stopped-scroll': 'Not replayed: tapped while the list was still moving.',
     retried: 'Not replayed: it did nothing, and the next tap on the same element did.',
