@@ -142,12 +142,21 @@ const firstIn = (lines: readonly Dispatch[], from: number, to: number): Dispatch
   lines.find((l) => l.at >= from && l.at < to && l.window !== SYSTEM_GESTURE_WINDOW)
 
 /**
+ * How much later than its first event a gesture's lift may be logged, relative to that first event's lag. A line
+ * carries no touch phase, so the lift's own lag cannot be read; measured on iOS 26.5 (idle MacBook), first events 7–11 ms
+ * behind and lifts 13–40 ms behind. The margin leans toward placing nothing: a gesture left unplaced is judged by the
+ * reads as before, one placed on the gesture before it is wrong.
+ */
+const LIFT_LAG_FACTOR = 1.5
+const LIFT_LAG_SLACK_MS = 50
+
+/**
  * The event that says where gesture `i` landed: the earliest one delivered at or after its down and before the next
  * gesture's. A line carries no touch phase, so a gesture's moves and lift log lines too, and a lagging log stamps them
  * after the next gesture went down: an app tap right after a swipe on the home screen would take the swipe's window.
- * So gesture `i` is placed only when the one before it is known to have finished delivering before `i` went down: its
- * lag (first event − down) shorter than the gap from its up to `i`'s down. Unknown lag counts as too long while the gap
- * is inside the longest lag seen. Lines must be in time order.
+ * So gesture `i` is placed only when the one before it has surely finished delivering before `i` went down: its lag
+ * (first event − down), stretched by the lift's margin, shorter than the gap from its up to `i`'s down. Unknown lag
+ * counts as too long while the gap is inside the longest lag allowed. Lines must be in time order.
  */
 export function pickDispatch(lines: readonly Dispatch[], spans: readonly GestureSpan[], i: number): Pick {
   const span = spans[i]
@@ -157,7 +166,7 @@ export function pickDispatch(lines: readonly Dispatch[], spans: readonly Gesture
     const prevFirst = prev.first ?? firstIn(lines, prev.down, span.down)?.at
     const gap = prev.up === undefined ? 0 : span.down - prev.up
     const lag = prevFirst === undefined ? undefined : prevFirst - prev.down
-    if (lag === undefined ? gap < MAX_DISPATCH_LAG_MS : lag >= gap) return { kind: 'refused' }
+    if (lag === undefined ? gap < MAX_DISPATCH_LAG_MS : lag * LIFT_LAG_FACTOR + LIFT_LAG_SLACK_MS >= gap) return { kind: 'refused' }
   }
   const next = spans[i + 1]
   const line = firstIn(lines, span.down, next ? next.down : Infinity)

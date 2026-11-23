@@ -530,7 +530,8 @@ functions, `IOSAgent.landTouch` pairs and sends. A device already up (picked up 
 - **A line carries no touch phase**, so a gesture's moves and lift log lines too, and a lagging log (0.1–2.1 s on a
   loaded Mac mini, iOS 27.0) stamps them after the next gesture's down. `pickDispatch` takes the earliest line in
   [downᵢ, downᵢ₊₁) and places gesture `i` only when the one before it finished delivering first: its lag (first line −
-  down) shorter than the gap from its up to `i`'s down, an unknown lag counting as too long within `MAX_DISPATCH_LAG_MS`.
+  down), stretched for the lift (×1.5 + 50 ms: lifts trailed by 13–40 ms where first events trailed by 7–11 ms, iOS
+  26.5), shorter than the gap from its up to `i`'s down, an unknown lag counting as too long within `MAX_DISPATCH_LAG_MS`.
   A wrong landing outranks every read in flow-runner; a missing one leaves the reads, so doubt sends nothing. A pinch's
   down is in the timeline though a pinch is not placed.
 - **Classification** (`landingOf`): the app under test, any window — its keyboard's keys land in its own process, a
@@ -546,14 +547,18 @@ functions, `IOSAgent.landTouch` pairs and sends. A device already up (picked up 
   timeline for the last 32, so a burst while the log trails is placed whole. With no app under test known (an agent restart), only SpringBoard and
   Spotlight are placed: the app's own touches would read as another app's.
 - **Away is asked directly** (`AppObserver.isAway`: the background marker, then `launchctl`), not through `read`, which
-  waits behind other reads. A check that fails keeps `alert`.
+  waits behind other reads, and **as of the touch's line**: a marker written after it (Home pressed since) means the app
+  was in front. A check that fails keeps `alert`. The last SpringBoard landing is kept in event-time order, since
+  gestures finish placing out of order, and a key takes only one from before it.
 - **The bundle** of a line's process is the `CFBundleIdentifier` of the `Info.plist` beside its `processImagePath` (a host
   path), read once per path with `plutil`.
 - **Lifecycle.** The stream lives in the touch watch: `replaceTouchWatch` stops the one a re-boot replaces,
   `endTouchWatch` is the one way a watch ends (teardown, shutdown, a boot nobody records, disconnect). A stream that dies
   is started again at most 3 times in 30 s. Killing `simctl spawn` with TERM ends the `log` inside the simulator too
   (measured); an agent killed with -9 leaves both, so each start first kills this device's leftovers, found by `pgrep`
-  and matched by the predicate. Under vitest the default reads nothing; a test passes `options.dispatchLog`.
+  and matched by the predicate. Lines older than 10 s are let go each second and all of them at stop, since they name
+  what a person touched; stdout is decoded as a stream (a chunk can end inside a Hangul path). A spawn `error` ends the
+  stream as an `exit` does, once. Under vitest the default reads nothing; a test passes `options.dispatchLog`.
 
 ---
 

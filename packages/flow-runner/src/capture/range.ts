@@ -128,7 +128,7 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
   const out: RangeWarning[] = []
   // A step the reads place in the app needs no launch of its own to start from: the replay launches the app first. So
   // does another app's sheet the app's own touch follows, which the range keeps (`pastLanded`) and iOS reads as home.
-  if (first?.kind !== 'launch' && first?.onHome !== false && !sheetBeforeApp(steps, at)) out.push('no-launch-at-start')
+  if (first?.kind !== 'launch' && first?.onHome !== false && !sheetBeforeApp(steps, at, range.end)) out.push('no-launch-at-start')
   const before = steps.slice(0, range.start)
   const lastLaunch = before.map((s) => s.kind).lastIndexOf('launch')
   const cleanBefore = before.some((s, i) => (s.kind === 'clearState' || s.kind === 'install') && s.outcome !== 'refused' && i > lastLaunch)
@@ -136,12 +136,12 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
   return out
 }
 
-/** A run of another app's steps from `from`, with a step the agent placed in the app right after it. */
-function sheetBeforeApp(steps: readonly RawStep[], from: number): boolean {
+/** A run of another app's steps from `from`, with a step the agent placed in the app right after it, before `end`. */
+function sheetBeforeApp(steps: readonly RawStep[], from: number, end: number): boolean {
   const landed = (s: RawStep | undefined) => (s && 'landed' in s ? s.landed : undefined)
   let j = from
-  while (j < steps.length && landed(steps[j])?.on === 'other' && !landedHome(landed(steps[j]))) j++
-  return j > from && landed(steps[j])?.on === 'app'
+  while (j < end && landed(steps[j])?.on === 'other' && !landedHome(landed(steps[j]))) j++
+  return j > from && j < end && landed(steps[j])?.on === 'app'
 }
 
 /**

@@ -21,6 +21,8 @@ export const DISPATCH_PREDICATE =
 /** What the stream keeps: a gesture waits up to `MAX_DISPATCH_LAG_MS` for its line, and reads the one before it. */
 const KEEP_MS = 10_000
 const KEEP_MAX = 4_000
+/** How often lines past `KEEP_MS` are let go while no new line arrives: they name what a person touched. */
+const PRUNE_EVERY_MS = 1_000
 /** As TouchHelper's: a stream that keeps dying is not restarted for ever. */
 const RESPAWN_MAX = 3
 const RESPAWN_WINDOW_MS = 30_000
@@ -90,6 +92,7 @@ export class DispatchLog {
   private readonly bundles = new Map<string, Promise<string | null>>()
   /** Whether any line in the format was read: until then, silence is a stream not yet attached, not a changed format. */
   private seen = false
+  private pruner: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly udid: string, private readonly deps: DispatchLogDeps = defaultDispatchLogDeps) {}
 
@@ -107,6 +110,8 @@ export class DispatchLog {
     this.stopped = true
     const proc = this.proc
     this.proc = null
+    if (this.pruner) { clearInterval(this.pruner); this.pruner = null }
+    this.kept.length = 0
     killWithSigkillFallback(proc)
   }
 
@@ -150,13 +155,29 @@ export class DispatchLog {
     }
     this.proc = proc
     this.buf = ''
-    proc.stdout?.on('data', (chunk: Buffer) => this.take(chunk.toString('utf8')))
-    proc.on('error', (e) => logger.warn(`the dispatch log for ${this.udid} failed:`, e.message))
-    proc.on('exit', () => {
+    if (!this.pruner) {
+      this.pruner = setInterval(() => this.prune(), PRUNE_EVERY_MS)
+      this.pruner.unref?.()
+    }
+    // Decoded by the stream, not per chunk: a chunk can end inside a character of a path (an app named in Hangul).
+    proc.stdout?.setEncoding('utf8')
+    proc.stdout?.on('data', (chunk: string) => this.take(chunk))
+    // A spawn that fails is not promised an `exit` after its `error`: both end it here, once, by the process's identity.
+    const ended = () => {
       if (this.proc !== proc) return
       this.proc = null
       if (!this.stopped) this.spawnStream()
+    }
+    proc.on('error', (e) => {
+      logger.warn(`the dispatch log for ${this.udid} failed:`, e.message)
+      ended()
     })
+    proc.on('exit', ended)
+  }
+
+  private prune(): void {
+    const cutoff = this.deps.now() - KEEP_MS
+    while (this.kept.length && (this.kept[0]!.at < cutoff || this.kept.length > KEEP_MAX)) this.kept.shift()
   }
 
   private take(text: string): void {
@@ -176,7 +197,6 @@ export class DispatchLog {
     }
     // A line with no end yet is held; one that never ends is not held for ever.
     if (this.buf.length > 64 * 1024) this.buf = ''
-    const cutoff = this.deps.now() - KEEP_MS
-    while (this.kept.length && (this.kept[0]!.at < cutoff || this.kept.length > KEEP_MAX)) this.kept.shift()
+    this.prune()
   }
 }

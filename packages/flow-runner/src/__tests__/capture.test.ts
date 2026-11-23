@@ -2104,6 +2104,8 @@ describe('the default range by where touches landed', () => {
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
       // As on Android, where the reads place the sheet in the app: the range starts in the app, no launch is missing.
       expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+      // A range ending on the sheet replays no step in the app: the app after it is not what it starts in.
+      expect(rangeWarnings(steps, { start: 2, end: 3 })).toEqual(['no-launch-at-start'])
     }
   })
 

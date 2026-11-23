@@ -239,10 +239,16 @@ export class AppObserver {
 
   /**
    * Whether the app is off the screen — its background marker, or no process — asked directly, not behind the reads in
-   * line: a touch's landing waits on it. A check that fails throws, and the caller decides what doubt means.
+   * line: a touch's landing waits on it. With `at`, as it was then: a marker written after it (Home pressed since) says
+   * the app was still in front. A check that fails throws, and the caller decides what doubt means.
    */
-  async isAway(udid: string, bundleId: string): Promise<boolean> {
-    if (await this.markedAway(this.dir(udid), bundleId)) return true
+  async isAway(udid: string, bundleId: string, at?: number): Promise<boolean> {
+    const marker = join(this.dir(udid), 'background')
+    if (await this.markedAway(this.dir(udid), bundleId)) {
+      if (at === undefined) return true
+      const st = await lstat(marker).catch(() => undefined)
+      return !st || st.mtimeMs <= at
+    }
     return !(await this.host.appRunning(udid, bundleId))
   }
 

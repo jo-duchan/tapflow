@@ -143,6 +143,13 @@ describe('pickDispatch', () => {
     expect(pickDispatch(quick, spans, 1)).toMatchObject({ kind: 'found', line: { window: 'UIWindow' } })
   })
 
+  it('allows the lift to trail more than the first event did: a lag close to the gap places nothing', () => {
+    // First event 200 ms behind, 300 ms from the lift to the next down: the lift may still be on its way.
+    expect(pickDispatch([at(1200), at(1610, 'UIWindow')], [{ down: 1000, up: 1300 }, { down: 1600 }], 1)).toEqual({ kind: 'refused' })
+    // 10 ms behind, the same gap: nothing of the gesture before is left to come.
+    expect(pickDispatch([at(1010), at(1610, 'UIWindow')], [{ down: 1000, up: 1300 }, { down: 1600 }], 1)).toMatchObject({ kind: 'found' })
+  })
+
   it('takes an unknown lag for a long one while the gap is short, and not once the longest lag has passed', () => {
     expect(pickDispatch([at(1710, 'UIWindow')], [{ down: 1000, up: 1080 }, { down: 1700 }], 1)).toEqual({ kind: 'refused' })
     expect(pickDispatch([at(9010, 'UIWindow')], [{ down: 1000, up: 1080 }, { down: 9000 }], 1)).toMatchObject({ kind: 'found' })
@@ -193,6 +200,56 @@ describe('DispatchLog', () => {
     await log.bundleOf(log.lines()[3]!.image)
     expect(d.bundleOf).toHaveBeenCalledTimes(1)
     log.stop()
+  })
+
+  it('keeps a path whole when a chunk ends inside one of its characters', async () => {
+    const { d, procs } = deps()
+    const log = new DispatchLog('U', d)
+    await log.start()
+    const line = JSON.parse(FIX_LINES.find((l) => l.includes('UIWindow'))!) as Record<string, unknown>
+    const image = '/Users/dev/Library/Developer/CoreSimulator/Devices/U/data/Containers/Bundle/Application/A/안녕.app/안녕'
+    const bytes = Buffer.from(JSON.stringify({ ...line, processImagePath: image }) + '\n', 'utf8')
+    const cut = bytes.indexOf(Buffer.from('안', 'utf8')) + 1 // inside the first Hangul character
+    procs[0]!.stdout.write(bytes.subarray(0, cut))
+    procs[0]!.stdout.write(bytes.subarray(cut))
+    await new Promise((r) => setImmediate(r))
+    expect(log.lines().map((l) => l.image)).toEqual([image])
+    log.stop()
+  })
+
+  it('starts a stream whose spawn failed again, once, whether or not an exit follows the error', async () => {
+    const { d, procs } = deps()
+    const log = new DispatchLog('U', d)
+    await log.start()
+    procs[0]!.emit('error', new Error('spawn xcrun ENOENT'))
+    expect(d.spawn).toHaveBeenCalledTimes(2)
+    procs[1]!.emit('error', new Error('spawn xcrun ENOENT'))
+    procs[1]!.emit('exit', null, null)
+    expect(d.spawn).toHaveBeenCalledTimes(3)
+    log.stop()
+  })
+
+  it('lets old lines go on a timer while nothing new arrives, and drops what it holds when stopped', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const { d, procs, advance } = deps()
+      const log = new DispatchLog('U', d)
+      await log.start()
+      procs[0]!.stdout.write(FIX_LINES.join('\n') + '\n')
+      await new Promise((r) => setImmediate(r))
+      expect(log.lines()).toHaveLength(4)
+      advance(15_000)
+      vi.advanceTimersByTime(1_000)
+      expect(log.lines()).toHaveLength(0)
+      advance(-15_000)
+      procs[0]!.stdout.write(FIX_LINES.join('\n') + '\n')
+      await new Promise((r) => setImmediate(r))
+      expect(log.lines()).toHaveLength(4)
+      log.stop()
+      expect(log.lines()).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('clears what an earlier agent left for the device before it starts', async () => {

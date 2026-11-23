@@ -1323,7 +1323,7 @@ describe('IOSAgent', () => {
       }
       // A check that failed keeps the alert: doubt does not move a prompt out of the recording.
       expect(landed(sent)).toEqual([['a1', { on: 'alert' }], ['a2', { on: 'system' }], ['a3', { on: 'alert' }]])
-      expect(away).toHaveBeenCalledWith('dev-1', 'com.app')
+      expect(away).toHaveBeenCalledWith('dev-1', 'com.app', expect.any(Number))
       vi.restoreAllMocks()
       agent.disconnect()
       browser.close()
@@ -1357,11 +1357,66 @@ describe('IOSAgent', () => {
       await new Promise((r) => setTimeout(r, 30))
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 's3' } as never)
       d.emit(Date.now() + 10, 'com.apple.springboard', 'SBHomeScreenWindow')
-      await new Promise((r) => setTimeout(r, 50))
+      await new Promise((r) => setTimeout(r, 150))
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
       d.emit(Date.now() + 10, 'com.app', 'UIWindow')
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 't4' } as never)
       await vi.waitFor(() => expect(landed(sent)).toEqual([['s3', { on: 'home' }], ['t4', { on: 'app' }]]), { timeout: 2500 })
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1236: an alert still waiting on its away check must not replace the home landing after it, which a
+    // SpringBoard field's keys then take.
+    it('gives SpringBoard\'s keyboard the landing before it in time, whichever gesture finished placing first', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      vi.spyOn(AppObserver.prototype, 'isAway')
+        .mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(false), 500)))
+        .mockResolvedValue(true)
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const gesture = async (id: string, window: string) => {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+        d.emit(Date.now() + 2, 'com.apple.springboard', window)
+        await new Promise((r) => setTimeout(r, 15))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      await gesture('k1', 'SBAlertItemWindow')
+      await gesture('k2', 'SBHomeScreenWindow')
+      await vi.waitFor(() => expect(landed(sent).map(([r]) => r)).toContain('k1'), { timeout: 2000 })
+      await gesture('k3', 'UIRemoteKeyboardWindow')
+      await vi.waitFor(() => expect(landed(sent)).toHaveLength(3), { timeout: 2000 })
+      expect(landed(sent)).toEqual([['k2', { on: 'home' }], ['k1', { on: 'alert' }], ['k3', { on: 'home' }]])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('gives SpringBoard\'s keyboard no landing made after it', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      // The key's away check is slow; the home touch after it is placed meanwhile.
+      vi.spyOn(AppObserver.prototype, 'isAway').mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(true), 500)))
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      for (const [id, window] of [['f1', 'UIRemoteKeyboardWindow'], ['f2', 'SBHomeScreenWindow']] as const) {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+        d.emit(Date.now() + 2, 'com.apple.springboard', window)
+        await new Promise((r) => setTimeout(r, 15))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      await new Promise((r) => setTimeout(r, 600))
+      expect(landed(sent)).toEqual([['f2', { on: 'home' }]])
       vi.restoreAllMocks()
       agent.disconnect()
       browser.close()
@@ -1429,14 +1484,14 @@ describe('IOSAgent', () => {
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
-      // Twelve taps 60 ms apart; each one's line is stamped 5 ms after its down but delivered only after the burst.
+      // Twelve taps 120 ms apart; each one's line is stamped 5 ms after its down but delivered only after the burst.
       const downs: number[] = []
       for (let k = 0; k < 12; k++) {
         internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
         downs.push(Date.now())
         await new Promise((r) => setTimeout(r, 20))
         internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: `b${k}` } as never)
-        await new Promise((r) => setTimeout(r, 40))
+        await new Promise((r) => setTimeout(r, 100))
       }
       for (const t of downs) d.emit(t + 5, 'com.app', 'UIWindow')
       await vi.waitFor(() => expect(landed(sent)).toHaveLength(12), { timeout: 3000 })

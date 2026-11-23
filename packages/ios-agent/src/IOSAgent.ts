@@ -1649,13 +1649,18 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         const target = this.lastBundleIds.get(deviceId)
         const surface = bundle === SPRINGBOARD ? springBoardSurface(pick.line.window) : null
         // Asked only where it decides something, and directly: a read through the observer can wait behind others.
+        // As the app was when the touch was delivered, not when this asks: Home pressed meanwhile is not the alert's.
         const away = surface === 'alert' || surface === 'keyboard'
-          ? (target ? await this.appObserver.isAway(deviceId, target).catch(() => false) : true)
+          ? (target ? await this.appObserver.isAway(deviceId, target, pick.line.at).catch(() => false) : true)
           : false
+        // The landing before this one in time, whichever gesture finished placing first.
         const last = watch.lastSpringBoard
-        const previous = last && pick.line.at - last.at <= KEYBOARD_INHERIT_MS ? last.landed : undefined
+        const age = last ? pick.line.at - last.at : -1
+        const previous = last && age >= 0 && age <= KEYBOARD_INHERIT_MS ? last.landed : undefined
         const landed = landingOf(bundle, pick.line.window, { ...(target ? { target } : {}), away, ...(previous ? { previous } : {}) })
-        if (landed && bundle === SPRINGBOARD && surface !== 'keyboard') watch.lastSpringBoard = { landed, at: pick.line.at }
+        if (landed && bundle === SPRINGBOARD && surface !== 'keyboard' && !(last && last.at > pick.line.at)) {
+          watch.lastSpringBoard = { landed, at: pick.line.at }
+        }
         // A SpringBoard window not in the table is what a renamed one looks like; one placed nowhere on purpose (its
         // keyboard over the app, an app with no target known) is not.
         if (landed) watch.misses = 0
