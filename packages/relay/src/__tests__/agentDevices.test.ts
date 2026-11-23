@@ -83,7 +83,7 @@ describe('agent:devices (#1085)', () => {
 
   it('tells the agent it may send updates', async () => {
     const { reply } = await register([DEV_A])
-    expect(reply.features).toEqual(['device-updates', 'app-logs'])
+    expect(reply.features).toEqual(['device-updates', 'touch-landings', 'app-logs'])
   })
 
   // The case the feature exists for: a Mac with nothing on it yet. No session holds the agent's identity, so the

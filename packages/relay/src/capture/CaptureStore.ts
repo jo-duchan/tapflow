@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -46,6 +46,8 @@ interface RecordedTouch {
   frame: boolean
   /** The relay's clock at the touch's end, which is when the read that follows it is asked. */
   at: number
+  /** Where it went down, when the agent said (#1214). */
+  landed?: TouchLanding
 }
 
 /** A key that types a character, as flow-runner's `keyChar` judges one: what continues a typed run. */
@@ -467,6 +469,20 @@ export class CaptureStore {
     } catch { /* see recordInput */ }
   }
 
+  /**
+   * Where a recorded gesture went down, from the agent (#1214). Kept only for a gesture this capture recorded, and once:
+   * a second landing for one gesture names nothing more.
+   */
+  recordLanded(sessionId: string, holder: Holder, requestId: string, landed: TouchLanding): void {
+    try {
+      const capture = this.captures.get(sessionId)
+      const touch = capture?.touches.get(requestId)
+      if (!capture || !touch || touch.landed || !this.recording(sessionId, holder, capture)) return
+      touch.landed = landed
+      this.append(capture, { at: this.now(), kind: 'landed', requestId, landed })
+    } catch { /* see recordInput */ }
+  }
+
   recordChrome(sessionId: string, holder: Holder, chrome: unknown): void {
     try {
       const capture = this.captureFor(sessionId, holder)
@@ -652,7 +668,8 @@ export class CaptureStore {
    * for, because the read before can be stale — a keyboard sliding up reads as down (measured: a first key kept).
    * `not-yet` until that read is back: the picture can beat it, and is asked for again.
    *
-   * Two cases a read before cannot settle are `off` all the same:
+   * A touch the agent says went down on the home screen is `off` before any read (#1214). Without that, two cases a read
+   * before cannot settle are `off` all the same:
    * - The last read before says iOS had the app under test off the screen (`shown: null, onHome: true`): the home screen
    *   or another app, where the runner reads no keyboard. Kept as a QA Session's recording and screenshots keep such a
    *   screen, which nothing masks either: capturing steps is off until the person turns it on, and these pictures stay
@@ -663,6 +680,9 @@ export class CaptureStore {
    * No read at all before it (an agent that reads no keyboard) is `on`: no read after will come to say otherwise.
    */
   private touchOnKeys(capture: Capture, touch: RecordedTouch): 'off' | 'on' | 'not-yet' {
+    // The agent saw it go down on the home screen (#1214), which has no keyboard of its own: Spotlight's is another
+    // process (`other`), and a SpringBoard field is in an alert (`alert`), both left to the reads below.
+    if (touch.landed?.on === 'home') return 'off'
     let before: KeyboardState | undefined
     let latest: KeyboardState | undefined
     for (let i = capture.entries.length - 1; i >= 0 && !before; i--) {

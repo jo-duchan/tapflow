@@ -519,6 +519,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   /** A recorded person's touches, per device (Flow Capture P4): only for a boot the relay marked `observed` and that
    *  keeps observations (`touchObservations`), as iOS. */
   private readonly touchWatches = new Map<string, TouchWatch>()
+  /** The relay takes `capture:landed` (#1214): said at registration, as `device-updates` is. */
+  private relayTakesLandings = false
   /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
    *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
   private readonly appPackages = new Map<string, string>()
@@ -687,6 +689,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           this.resourcesTimer = setInterval(() => { void this.reportResources() }, 5000)
           // Only a relay that said it takes `agent:devices`; see the same line in IOSAgent.
           if (Array.isArray(msg.features) && msg.features.includes('device-updates')) this.deviceWatcher.start(offered)
+          // A relay from before #1214 logs every `capture:landed` as unknown: sent only to one that said it takes them.
+          this.relayTakesLandings = Array.isArray(msg.features) && msg.features.includes('touch-landings')
           this.lastPingAt = null
           this.lastSocketError = undefined
           ws.on('ping', () => { this.lastPingAt = Date.now() })
@@ -2459,6 +2463,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           ping: (sr) => this.adb.pingFocusedServer(sr),
           hold: (sr, on) => this.adb.holdConnection(sr, on),
           send: (m) => this.sendMsg(m),
+          ...(this.relayTakesLandings ? { landings: { send: (m) => this.sendMsg(m), home: (sr) => this.adb.homePackage(sr) } } : {}),
         }, serial, () => this.appPackages.get(avdId)))
       }
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })

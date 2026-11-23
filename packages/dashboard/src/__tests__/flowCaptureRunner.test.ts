@@ -1179,10 +1179,10 @@ describe('matchRange with the app\'s touch reports', () => {
   describe('a tap made while the screen was still changing', () => {
     const first = { ...tapStep, at: 1_000, endAt: 1_100, touched: { point: { x: 0.3, y: 0.66 }, moving: false, element: { label: 'Active', traits: 1 }, tapCount: 1 } } as unknown as RawStep
     const second = (touched?: object) => ({ ...tapStep, at: 1_250, endAt: 1_350, ...(touched ? { touched: { point: { x: 0.3, y: 0.66 }, moving: false, ...touched } } : {}) }) as unknown as RawStep
-    const run = async (steps: RawStep[], differs: (s: RawStep) => boolean) => {
+    const run = async (steps: RawStep[], differs: (s: RawStep) => boolean, putBack?: ReadonlySet<number>) => {
       screen.elements = []
       const compare = vi.fn(async (s: RawStep) => (differs(s) ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
-      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 }, ...(putBack ? { putBack } : {}) }
       const lease = new PauseLease(ctap)
       const matched = await matchRange(ctap, channel, lease, steps, { start: 0, end: steps.length }, null, h)
       await lease.stop()
@@ -1212,6 +1212,14 @@ describe('matchRange with the app\'s touch reports', () => {
       await lease.stop()
       expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
       expect(carried).not.toHaveBeenCalled()
+    })
+
+    // CodeRabbit on #1228: a tap the person put back after it was left out (#1170) is asked to be replayed.
+    it('is sent all the same when the person put it back', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const { matched } = await run([launchStep, tapStep, first, s2], (s) => s === s2, new Set([3]))
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.at(-1)!.raw).toBe(s2)
     })
 
     it('is replayed without stopping when the app acted on it', async () => {

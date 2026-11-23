@@ -22,15 +22,16 @@ const tap: CaptureTap = {
   send: () => true, subscribe: () => () => {}, onConnectionLost: () => () => {}, connected: () => true,
   chrome: () => null, postures: () => ({ postures: [], currentId: null }), surface: () => null,
 }
-const entry = (at: number, msg: Record<string, unknown>): CaptureEntry => ({ at, kind: 'input', msg: { sessionId: 's1', ...msg } as never })
+type InputMsg = Extract<CaptureEntry, { kind: 'input' }>['msg']
+const entry = (at: number, msg: InputMsg): CaptureEntry => ({ at, kind: 'input', msg })
 // Install, launch, tap: the default range starts at the launch (#2), and the tap's picture is kept.
 const snapshot: CaptureSnapshot = {
   id: 'snap', takenAt: 0, thinned: false, thumbnails: ['t'],
   entries: [
-    entry(0, { type: 'app:install', requestId: 'i', buildId: 7 }),
-    entry(100, { type: 'app:launch', requestId: 'l', buildId: 7 }),
-    entry(200, { type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
-    entry(280, { type: 'input:touch:end', requestId: 't' }),
+    entry(0, { sessionId: 's1', type: 'app:install', requestId: 'i', buildId: 7 }),
+    entry(100, { sessionId: 's1', type: 'app:launch', requestId: 'l', buildId: 7 }),
+    entry(200, { sessionId: 's1', type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
+    entry(280, { sessionId: 's1', type: 'input:touch:end', requestId: 't' }),
   ],
 }
 const SKY = { x: 0, y: 0.1, width: 1, height: 0.2 }

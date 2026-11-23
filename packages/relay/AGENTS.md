@@ -398,7 +398,10 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
   keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
   character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`) is
-  no picture, not a guess. Two exceptions, both decided for a person who turned capturing on (it is off until they
+  no picture, not a guess. A touch the agent says went down on the home screen (`capture:landed` `home`, #1214) is off
+  the keyboard before any read is asked: the home screen has none of its own (Spotlight's is another process, `other`; a
+  SpringBoard field sits in an alert, `alert`), and both those stay with the reads. Without a landing, two exceptions,
+  both decided for a person who turned capturing on (it is off until they
   do) and whose pictures stay in memory, theirs alone: a touch iOS made with the app under test off the screen (the last
   read `shown: null, onHome: true` — the home screen or another app, which the runner cannot read a keyboard on) is kept,
   as a QA Session's recording and screenshots keep that screen unmasked, when the read after it has the keyboard down or the

@@ -306,6 +306,9 @@ export interface MatchHooks {
   tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[], signal: AbortSignal) => Promise<boolean>
   /** `LOOK_AGAIN`, shortened by tests. */
   lookAgain?: { forMs: number; everyMs: number }
+  /** Indices into the steps the person put back after they were left out (#1170): replayed whatever the recording says
+   *  the app did with them, since putting one back is asking for exactly that. */
+  putBack?: ReadonlySet<number>
   signal: AbortSignal
 }
 
@@ -592,7 +595,7 @@ export async function matchRange(
     // Not before typing: the review never offers a tap right before typing (`noResponseTaps`), so one left unsent there
     // would stay in the flow for Verify to send where Match did not. Sent, and marked, like one nothing says about.
     const leftUnsent = async (): Promise<boolean> => {
-      if (actedWhenRecorded !== false) return false
+      if (actedWhenRecorded !== false || hooks.putBack?.has(range.start + offset)) return false
       // Past a keyboard toggle, which has no step: the review looks past it too (`noResponseTaps`; CodeRabbit, #1176).
       const next = slice.slice(offset + 1).find((s) => !s.dropped && s.kind !== 'keyboardToggle')
       if (next && (TYPING.has(next.kind) || next.kind === 'keyboardKey')) return false

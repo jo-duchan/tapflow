@@ -1,6 +1,6 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
-import type { FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
@@ -62,7 +62,14 @@ type Touch = {
   /** What the agent reported of this touch's touch-down (`capture:touched`): whether a list was moving, the element
    *  and button it hit. Absent where no report came — an older agent, a touch outside the app, a hit read too late. */
   touched?: TouchObservation
+  /** Where the agent saw it go down (#1214): the app, the home screen, a system surface, a prompt the app raised, or
+   *  another app. Absent from an agent that does not say, or where it could not; the reads judge such a touch. */
+  landed?: TouchLanding
 }
+
+/** A step the agent placed on the home screen (#1214): the launcher's own surface, or Spotlight, which searches from it
+ *  in a process of its own. */
+export const landedHome = (l: TouchLanding | undefined): boolean => l?.on === 'home' || (l?.on === 'other' && l.id === 'com.apple.Spotlight')
 
 export type RawStep = StepBase & (
   | { kind: 'tap'; point: Point } & Touch
@@ -293,16 +300,21 @@ const TOUCH_KINDS = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'hold
  */
 function withTouches(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reports = new Map<string, TouchObservation>()
+  const landings = new Map<string, TouchLanding>()
   // The later of two for one gesture: the agent repeats the report once the app's verdict (`acted`) is in.
   for (const e of entries) if (e.kind === 'touched') reports.set(e.requestId, e.touched)
-  if (reports.size === 0) return steps
+  // One landing per gesture: the relay keeps the first (#1214).
+  for (const e of entries) if (e.kind === 'landed' && !landings.has(e.requestId)) landings.set(e.requestId, e.landed)
+  if (reports.size === 0 && landings.size === 0) return steps
   return steps.map((s) => {
     if (!TOUCH_KINDS.has(s.kind)) return s
     const end = s.messages.find((m) => m.msg.type === 'input:touch:end')?.msg
-    const touched = end && 'requestId' in end && end.requestId ? reports.get(end.requestId) : undefined
-    if (!touched) return s
-    const stopped = s.kind === 'tap' && touched.moving && s.outcome !== 'refused'
-    return { ...s, touched, ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
+    const id = end && 'requestId' in end && end.requestId ? end.requestId : undefined
+    const touched = id ? reports.get(id) : undefined
+    const landed = id ? landings.get(id) : undefined
+    if (!touched && !landed) return s
+    const stopped = s.kind === 'tap' && touched?.moving === true && s.outcome !== 'refused'
+    return { ...s, ...(touched ? { touched } : {}), ...(landed ? { landed } : {}), ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
   })
 }
 
@@ -345,7 +357,7 @@ function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
  */
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
-  if (reads.length === 0) return steps
+  if (reads.length === 0 && !steps.some((s) => 'landed' in s && s.landed)) return steps
   let i = 0
   let previousEnd = -Infinity
   // The step before stayed on the home screen: not a tap, placed there, and the first read asked after it ended, and
@@ -366,6 +378,12 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
   function place(s: RawStep, n: number): RawStep {
     const sinceLast = previousEnd
     previousEnd = s.endAt
+    // The agent saw where it went down (#1214): settled, whatever the reads around it say. A system surface or another
+    // app is neither the home screen nor the app, so `onHome` is left to the reads there — Match counts a step placed
+    // off the home screen as one taken in the app (`stepsBeforeRange`), and the range reads the landing itself.
+    const landed = 'landed' in s ? s.landed : undefined
+    if (landedHome(landed)) return { ...s, onHome: true }
+    if (landed?.on === 'app' || landed?.on === 'alert') return { ...s, onHome: false }
     // A report says this touch went down in the app, whatever a read trailing the icon's tap says. No touch on the home
     // screen is reported: iOS's observer runs only in the app under test, and Android's agent reports only a touch whose
     // topmost window is that app's.
