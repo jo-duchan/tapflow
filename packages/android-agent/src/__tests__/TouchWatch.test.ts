@@ -1,4 +1,4 @@
-import type { CaptureTouched } from '@tapflowio/protocol'
+import type { CaptureLanded, CaptureTouched } from '@tapflowio/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import { TouchWatch } from '../TouchWatch.js'
 
@@ -18,9 +18,12 @@ interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?
  * A watch on a fake clock: `hit` answers as the jar would, its branch read `readAfterMs` after the request (on the
  * device's clock); `sleep` moves the clock. `frames` is what the app drew, in host ms.
  */
-function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined } = {}) {
+function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined; home?: string | null } = {}) {
   let now = 1_000
   const sent: CaptureTouched[] = []
+  /** Landings (#1214), and the order both kinds were sent in. */
+  const landed: CaptureLanded[] = []
+  const order: string[] = []
   const holds: boolean[] = []
   const answers = [...(opts.answers ?? [])]
   const deps = {
@@ -41,7 +44,8 @@ function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); p
     framestats: vi.fn(async () => framestats(opts.pid?.() ?? 4495, typeof opts.frames === 'function' ? opts.frames() : opts.frames ?? [])),
     ping: vi.fn(async () => {}),
     hold: vi.fn(async (_serial: string, on: boolean) => { holds.push(on) }),
-    send: (m: CaptureTouched) => { sent.push(m) },
+    send: (m: CaptureTouched) => { sent.push(m); order.push('touched') },
+    ...('home' in opts ? { landings: { send: (m: CaptureLanded) => { landed.push(m); order.push('landed') }, home: async () => opts.home ?? null } } : {}),
   }
   const pkg = 'pkg' in opts ? opts.pkg : APP
   const watch = new TouchWatch(deps, 'emulator-5554', opts.pkgNow ?? (() => pkg))
@@ -52,7 +56,7 @@ function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); p
     return id
   }
   const advance = (ms: number) => { now += ms }
-  return { watch, sent, holds, deps, tap, advance, clock: () => now }
+  return { watch, sent, landed, order, holds, deps, tap, advance, clock: () => now }
 }
 
 describe('TouchWatch', () => {
@@ -318,5 +322,67 @@ describe('TouchWatch', () => {
     watch.stop()
     await watch.settled()
     expect(sent).toEqual([])
+  })
+})
+
+// #1214: where each touch went down, for a relay that takes it — the app's touches and everyone else's.
+describe('TouchWatch landings', () => {
+  const HOME = 'com.google.android.apps.nexuslauncher'
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  it('says a touch on the app landed on the app, before the report waits out the app\'s answer', async () => {
+    const { watch, landed, order, tap } = rig({ home: HOME, frames: [1_200, 1_250] })
+    const id = tap(0.2, 0.15)
+    await watch.settled()
+    expect(landed).toEqual([{ type: 'capture:landed', sessionId: 's1', requestId: id, landed: { on: 'app' } }])
+    expect(order).toEqual(['landed', 'touched'])
+  })
+
+  it('places the launcher, another app, a permission prompt and the status bar, which get no report', async () => {
+    const { watch, sent, landed, tap } = rig({
+      home: HOME,
+      answers: [{ pkg: HOME }, { pkg: 'com.google.android.googlequicksearchbox' }, { pkg: 'com.google.android.permissioncontroller' }, { pkg: 'com.android.systemui', type: 3 }],
+    })
+    for (let i = 0; i < 4; i++) { tap(0.5, 0.5); await flush() }
+    await watch.settled()
+    expect(landed.map((m) => m.landed)).toEqual([
+      { on: 'home', id: HOME },
+      { on: 'other', id: 'com.google.android.googlequicksearchbox' },
+      { on: 'alert', id: 'com.google.android.permissioncontroller' },
+      { on: 'system', id: 'com.android.systemui' },
+    ])
+    expect(sent).toEqual([])
+  })
+
+  // The report's rule: a hit read after the up may be of the screen the touch made — the icon's tap read as the app.
+  it('places nothing from a hit read after the up, and places the same touch read in time', async () => {
+    const late = rig({ home: HOME, answers: [{ readAfterMs: 120, pkg: HOME }] })
+    late.tap(0.2, 0.15, 100)
+    await late.watch.settled()
+    expect(late.landed).toEqual([])
+    const inTime = rig({ home: HOME, answers: [{ readAfterMs: 14, pkg: HOME }] })
+    inTime.tap(0.2, 0.15, 100)
+    await inTime.watch.settled()
+    expect(inTime.landed.map((m) => m.landed)).toEqual([{ on: 'home', id: HOME }])
+  })
+
+  it('places nothing when the launcher or the app under test is not known', async () => {
+    const noHome = rig({ home: null, answers: [{ pkg: HOME }] })
+    noHome.tap(0.2, 0.15)
+    await noHome.watch.settled()
+    expect(noHome.landed).toEqual([])
+    const noApp = rig({ home: HOME, pkg: undefined, answers: [{ pkg: HOME }] })
+    noApp.tap(0.2, 0.15)
+    await noApp.watch.settled()
+    expect(noApp.landed).toEqual([])
+  })
+
+  it('sends none to a relay that does not take them', async () => {
+    const { watch, sent, landed, tap } = rig({ frames: [1_200, 1_250] })
+    tap(0.2, 0.15)
+    await watch.settled()
+    expect(landed).toEqual([])
+    // The same touch is reported: the watch ran, it only had nowhere to send a landing.
+    expect(sent).toHaveLength(1)
   })
 })

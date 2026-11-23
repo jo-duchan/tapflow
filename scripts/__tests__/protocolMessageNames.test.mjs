@@ -186,8 +186,9 @@ describe('protocol message interfaces', () => {
     // 98 with `device:run-reset` and its two replies (#1139).
     // 100 is where a touch lands (#1125): `UiReachRequest` and `UiReachResponse`, the relay asking an agent where a
     // touch meant for each element would land. 101 is `CaptureTouched` (record-time observation): an agent telling the
-    // relay what a recorded touch hit, seen from inside the app.
-    expect(messages.size).toBe(101)
+    // relay what a recorded touch hit, seen from inside the app. 102 is `CaptureLanded` (#1214): where a recorded touch
+    // went down, the app's or anywhere else.
+    expect(messages.size).toBe(102)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })

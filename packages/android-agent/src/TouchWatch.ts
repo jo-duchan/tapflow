@@ -1,7 +1,7 @@
-import type { CaptureTouched, TouchObservation } from '@tapflowio/protocol'
+import type { CaptureLanded, CaptureTouched, TouchObservation } from '@tapflowio/protocol'
 import { performance } from 'perf_hooks'
 import { createLogger } from '@tapflowio/agent-core'
-import { AFTER_NS, judgeTouch, parseFramestats, parseHit, seenAt } from './touchObservation.js'
+import { AFTER_NS, judgeTouch, landingOf, parseFramestats, parseHit, seenAt } from './touchObservation.js'
 
 export interface TouchWatchDeps {
   /** The field server's `hit` at a point (fractions of the screen as drawn); `writtenAt` on `now`'s clock. */
@@ -11,6 +11,9 @@ export interface TouchWatchDeps {
   /** Keep the field server's UiAutomation connection while this watch lives, or let it go. */
   hold: (serial: string, on: boolean) => Promise<void>
   send: (msg: CaptureTouched) => void
+  /** Where each touch went down (#1214), for a relay that takes `capture:landed`; absent, none is sent. `home` is the
+   *  launcher's package, or `null` when it cannot be read. */
+  landings?: { send: (msg: CaptureLanded) => void; home: (serial: string) => Promise<string | null> }
   /** Monotonic milliseconds, the clock `hit`'s `writtenAt` is on. */
   now?: () => number
   sleep?: (ms: number) => Promise<void>
@@ -135,6 +138,26 @@ export class TouchWatch {
     this.last = { tap, fling, upAt: g.upAt, x: g.x, y: g.y, tapCount: tap ? g.tapCount : 0 }
     // One at a time, in the order the touches ended: a touch's `seq` is its place among them.
     this.tail = this.tail.then(() => this.report(sessionId, requestId, g, !tap)).catch(() => {})
+    // Not behind that line: a landing needs only the hit, and the report before it can wait 0.85 s for frames.
+    if (this.deps.landings) void this.land(this.deps.landings, sessionId, requestId, g).catch(() => {})
+  }
+
+  /**
+   * Where the touch went down (#1214), sent as soon as its hit is in. By the report's rules for a hit: one read after
+   * the up reached the app, or past a long press, may be of the screen the touch made (the icon's tap read as the app it
+   * opened), so it places nothing. Nor does a touch with no app under test or no launcher known: an app touch would read
+   * as another app's, a home one as another app's too, and a leading `other` is how Capture finds the app.
+   */
+  private async land(landings: NonNullable<TouchWatchDeps['landings']>, sessionId: string, requestId: string, g: Gesture): Promise<void> {
+    const [res, home] = await Promise.all([g.hit, landings.home(this.serial).catch(() => null)])
+    const hit = parseHit(res?.answer)
+    if (this.stopped || !res || !hit || !g.pkg || !home) return
+    // The offset the report would use, without adding this sample to it: the report adds it, in its turn.
+    const offsetNs = Math.min(...this.offsets, hit.rx - res.writtenAt * MS)
+    const device = (ms: number) => Math.round(ms * MS + offsetNs)
+    if (hit.done === undefined || hit.done > Math.min(device(g.downAt) + LONG_PRESS_MS * MS, device(g.upAt!))) return
+    const landed = landingOf(hit, g.pkg, home)
+    if (landed) landings.send({ type: 'capture:landed', sessionId, requestId, landed })
   }
 
   /** A gesture the client abandoned (#1115): no report, but the app saw its down, which iOS counts (`seq`). */

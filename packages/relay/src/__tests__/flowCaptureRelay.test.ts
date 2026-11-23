@@ -396,6 +396,24 @@ describe('Flow Capture through the relay', () => {
         .toEqual([{ ...observation, tapCount: 2, acted: true, seq: 1 }, observation])
     })
 
+    // #1214: where a touch went down, from the session's own agent, for a gesture the capture recorded.
+    it('keeps where a recorded touch went down, from the session\'s own agent only', async () => {
+      const alice = await browser(1)
+      await join(alice)
+      await tap(alice, 'r1')
+      agent.send(JSON.stringify({ type: 'capture:landed', sessionId, requestId: 'nobody', landed: { on: 'home' } }))
+      agent.send(JSON.stringify({ type: 'capture:landed', sessionId, requestId: 'r1', landed: { on: 'nowhere' } }))
+      const other = new WebSocket(`ws://localhost:${relayPort}`)
+      open.push(other)
+      await waitForOpen(other)
+      other.send(JSON.stringify({ type: 'agent:register', platform: 'ios', agentName: `other-agent-l-${seq}`, devices: [{ id: 'dev-9', name: 'iPhone 17', platform: 'ios', status: 'booted' }] }))
+      await waitForType(other, 'agent:registered')
+      other.send(JSON.stringify({ type: 'capture:landed', sessionId, requestId: 'r1', landed: { on: 'other' } }))
+      agent.send(JSON.stringify({ type: 'capture:landed', sessionId, requestId: 'r1', landed: { on: 'alert', id: 'com.apple.springboard' } }))
+      await expect.poll(async () => (await snapshot(1))!.entries.filter((e) => e.kind === 'landed'))
+        .toEqual([expect.objectContaining({ kind: 'landed', requestId: 'r1', landed: { on: 'alert', id: 'com.apple.springboard' } })])
+    })
+
     it('tells the agent it keeps them, on every boot', async () => {
       const alice = await browser(1)
       await join(alice)

@@ -1,4 +1,4 @@
-import type { ObservedElement, TouchObservation } from '@tapflowio/protocol'
+import type { ObservedElement, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { DECOR_IDS, toRole } from './uiTree.js'
 
 /**
@@ -97,6 +97,27 @@ export type Seen =
 
 const isWeb = (c: string) => /WebView/.test(c)
 const isFlutter = (c: string) => /flutter/i.test(c)
+/** The packages that draw a runtime permission prompt (AOSP and Google's build of it): an application window of its own,
+ *  but a prompt the app under test raised. */
+const PERMISSION_CONTROLLERS = new Set(['com.android.permissioncontroller', 'com.google.android.permissioncontroller'])
+
+/**
+ * Where a touch went down (#1214), from the topmost window at its point: the app under test (the soft keyboard over it
+ * included), the launcher, a prompt the app raised, a system surface (status bar, shade: not an application's window),
+ * or another app. A keyboard over anything but the app is `other` with the keyboard's package, never `home`: a launcher's
+ * search types there, and a picture of it would show the keys. `null` when no window was found.
+ */
+export function landingOf(hit: HitAnswer, appPackage: string, homePackage: string): TouchLanding | null {
+  if (hit.type === undefined) return null
+  const named = (on: TouchLanding['on'], id: string | undefined): TouchLanding => (id ? { on, id } : { on })
+  if (hit.type === TYPE_INPUT_METHOD) return hit.under === appPackage ? { on: 'app' } : named('other', hit.pkg)
+  if (hit.type !== TYPE_APPLICATION) return named('system', hit.pkg)
+  if (hit.pkg === appPackage) return { on: 'app' }
+  if (hit.pkg === homePackage) return { on: 'home', id: homePackage }
+  if (hit.pkg && PERMISSION_CONTROLLERS.has(hit.pkg)) return { on: 'alert', id: hit.pkg }
+  return named('other', hit.pkg)
+}
+
 // A view that draws through its own surface (GL, video, a game, a map): its frames are not the app's view drawing.
 const isOwnSurface = (c: string) => /SurfaceView|TextureView/.test(c)
 

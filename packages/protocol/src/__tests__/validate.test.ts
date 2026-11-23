@@ -536,3 +536,31 @@ describe('a keyboard read carries whether the home screen was in front', () => {
     expect(read({ shown: false, onHome: 'yes' })).toEqual({ shown: false })
   })
 })
+
+// #1214: where a recorded touch went down. A landing the relay cannot read is none, so the touch is judged as before.
+describe('a touch landing', () => {
+  const msg = (landed: unknown) => ({ type: 'capture:landed', sessionId: 's', requestId: 'r', landed })
+
+  it('keeps each place it can be, and what took it', () => {
+    for (const on of ['app', 'home', 'system', 'alert', 'other']) {
+      expect((ok(msg({ on })).msg as { landed: unknown }).landed).toEqual({ on })
+    }
+    expect((ok(msg({ on: 'other', id: 'com.google.android.googlequicksearchbox' })).msg as { landed: unknown }).landed)
+      .toEqual({ on: 'other', id: 'com.google.android.googlequicksearchbox' })
+  })
+
+  it('refuses a place it does not know, rather than guess one', () => {
+    expect(fail(msg({ on: 'lockscreen' })).reason).toBeDefined()
+    expect(fail(msg({})).reason).toBeDefined()
+  })
+
+  it('drops an id it cannot use and keeps the place', () => {
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(257) })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: '' })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(256) })).msg as { landed: { id: string } }).landed.id).toHaveLength(256)
+  })
+
+  it('is an agent message', () => {
+    expect(directionOf('capture:landed')).toBe('agent')
+  })
+})
