@@ -55,6 +55,9 @@ interface Gesture {
   /** The down and the latest moves, for the release's speed. */
   moves: Array<{ x: number; y: number; at: number }>
   hit: Promise<{ answer: string; writtenAt: number } | null>
+  /** The clock offset this gesture is judged by, fixed as its hit came in (`noteOffset`): the report and the landing
+   *  read the same one. */
+  offsetNs?: number
   tapCount: number
   /** The app under test when the finger went down: a launch while its report waits does not make it another app's. */
   pkg: string | undefined
@@ -106,15 +109,29 @@ export class TouchWatch {
     const downAt = this.now()
     const last = this.last
     const repeat = last?.tap && downAt - last.upAt <= DOUBLE_TAP_MS && Math.hypot(x - last.x, y - last.y) <= DOUBLE_TAP_SLOP
-    this.current = {
+    const g: Gesture = {
       downAt, x, y, point, moved: 0, moves: [{ x, y, at: downAt }],
       // Asked after the down was sent, never on its path; queued with the device's other UiAutomation requests.
-      hit: this.deps.hit(this.serial, x, y).catch(() => null),
+      hit: this.deps.hit(this.serial, x, y).catch(() => null).then((res) => { this.noteOffset(g, res); return res }),
       tapCount: repeat ? last.tapCount + 1 : 1,
       pkg: this.appPackage(),
       ...(last?.tap ? { previousTapUpAt: last.upAt } : {}),
       ...(last?.fling ? { swipeEndAt: last.upAt } : {}),
     }
+    this.current = g
+  }
+
+  /**
+   * A hit's clock sample, kept as it arrives rather than when its report's turn comes: a report waits 0.85 s for the
+   * app's frames, and a landing judged meanwhile without that sample would judge by a looser clock than the report
+   * (CodeRabbit on #1232). The gesture keeps the offset of that moment, which both read.
+   */
+  private noteOffset(g: Gesture, res: { answer: string; writtenAt: number } | null): void {
+    const hit = parseHit(res?.answer)
+    if (!res || !hit) return
+    this.offsets.push(hit.rx - res.writtenAt * MS)
+    if (this.offsets.length > OFFSET_SAMPLES) this.offsets.shift()
+    g.offsetNs = Math.min(...this.offsets)
   }
 
   move(x: number, y: number): void {
@@ -151,9 +168,9 @@ export class TouchWatch {
   private async land(landings: NonNullable<TouchWatchDeps['landings']>, sessionId: string, requestId: string, g: Gesture): Promise<void> {
     const [res, home] = await Promise.all([g.hit, landings.home(this.serial).catch(() => null)])
     const hit = parseHit(res?.answer)
-    if (this.stopped || !res || !hit || !g.pkg || !home) return
-    // The offset the report would use, without adding this sample to it: the report adds it, in its turn.
-    const offsetNs = Math.min(...this.offsets, hit.rx - res.writtenAt * MS)
+    if (this.stopped || !res || !hit || !g.pkg || !home || g.offsetNs === undefined) return
+    // The report's own offset for this gesture, so a hit it would drop as late places nothing either.
+    const offsetNs = g.offsetNs
     const device = (ms: number) => Math.round(ms * MS + offsetNs)
     if (hit.done === undefined || hit.done > Math.min(device(g.downAt) + LONG_PRESS_MS * MS, device(g.upAt!))) return
     const landed = landingOf(hit, g.pkg, home)
@@ -190,10 +207,8 @@ export class TouchWatch {
     const res = await g.hit
     const hit = parseHit(res?.answer)
     if (this.stopped) return
-    if (!res || !hit) { this.lost = true; return }
-    this.offsets.push(hit.rx - res.writtenAt * MS)
-    if (this.offsets.length > OFFSET_SAMPLES) this.offsets.shift()
-    const offsetNs = Math.min(...this.offsets)
+    if (!res || !hit || g.offsetNs === undefined) { this.lost = true; return }
+    const offsetNs = g.offsetNs
     const device = (ms: number) => Math.round(ms * MS + offsetNs)
     const downNs = device(g.downAt), upNs = device(g.upAt!)
     if (hit.done === undefined || hit.done > Math.min(downNs + LONG_PRESS_MS * MS, upNs)) { this.lost = true; return }

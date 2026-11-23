@@ -12,13 +12,13 @@ const framestats = (pid: number, completedHostMs: number[]) =>
   `** Graphics info for pid ${pid} [${APP}] **\n\n---PROFILEDATA---\n${HEADER}\n`
   + completedHostMs.map((t) => `0,0,${t * MS + OFFSET - 20 * MS},0,${t * MS + OFFSET}`).join('\n') + '\n---PROFILEDATA---\n'
 
-interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?: number; none?: boolean }
+interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?: number; none?: boolean; delayMs?: number }
 
 /**
  * A watch on a fake clock: `hit` answers as the jar would, its branch read `readAfterMs` after the request (on the
  * device's clock); `sleep` moves the clock. `frames` is what the app drew, in host ms.
  */
-function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined; home?: string | null } = {}) {
+function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined; home?: string | null; gate?: Promise<void> } = {}) {
   let now = 1_000
   const sent: CaptureTouched[] = []
   /** Landings (#1214), and the order both kinds were sent in. */
@@ -32,7 +32,8 @@ function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); p
     hit: vi.fn(async () => {
       const a = answers.shift() ?? {}
       if (a.none) return null
-      const rx = now * MS + OFFSET
+      // `delayMs`: the request took that long to reach the device, so its clock sample is that much larger.
+      const rx = now * MS + OFFSET + (a.delayMs ?? 0) * MS
       return {
         writtenAt: now,
         answer: JSON.stringify({
@@ -41,7 +42,7 @@ function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); p
         }),
       }
     }),
-    framestats: vi.fn(async () => framestats(opts.pid?.() ?? 4495, typeof opts.frames === 'function' ? opts.frames() : opts.frames ?? [])),
+    framestats: vi.fn(async () => { await opts.gate; return framestats(opts.pid?.() ?? 4495, typeof opts.frames === 'function' ? opts.frames() : opts.frames ?? []) }),
     ping: vi.fn(async () => {}),
     hold: vi.fn(async (_serial: string, on: boolean) => { holds.push(on) }),
     send: (m: CaptureTouched) => { sent.push(m); order.push('touched') },
@@ -375,6 +376,24 @@ describe('TouchWatch landings', () => {
     noApp.tap(0.2, 0.15)
     await noApp.watch.settled()
     expect(noApp.landed).toEqual([])
+  })
+
+  // CodeRabbit on #1232: a landing is judged by the clock its report uses. The report before it was still waiting for
+  // frames when a faster sample came in; judged without that sample, the third tap's late hit would have been placed.
+  it('places nothing from a hit its report drops as late, though earlier reports are still waiting', async () => {
+    let open!: () => void
+    const gate = new Promise<void>((r) => { open = r })
+    const { watch, landed, sent, tap } = rig({
+      home: HOME, gate,
+      answers: [{ delayMs: 60 }, { delayMs: 0 }, { delayMs: 60, readAfterMs: 50, pkg: HOME }],
+    })
+    tap(0.2, 0.15); await flush()
+    tap(0.4, 0.15); await flush()
+    tap(0.6, 0.15, 100); await flush()
+    open()
+    await watch.settled()
+    expect(landed.map((m) => m.landed)).toEqual([{ on: 'app' }, { on: 'app' }])
+    expect(sent).toHaveLength(2)
   })
 
   it('sends none to a relay that does not take them', async () => {
