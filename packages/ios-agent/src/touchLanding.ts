@@ -19,6 +19,15 @@ export interface Dispatch {
 /** SpringBoard's system-gesture layer: it is sent every touch on the screen, the app's included, so it lands nothing. */
 export const SYSTEM_GESTURE_WINDOW = '_UISystemGestureWindow'
 
+/**
+ * A line that says nothing about where a touch landed: SpringBoard's system-gesture layer, and a home-screen widget's
+ * renderer, which logs the touch beside SpringBoard's own home-screen window (iOS 26.5 and 27.0) and can be the first
+ * to: on iOS 27.0 a renderer logged a page swipe 28 ms after its down while SpringBoard, stalled, logged it 800 ms after.
+ */
+export function landsNothing(d: Dispatch): boolean {
+  return d.window === SYSTEM_GESTURE_WINDOW || /\/WidgetRenderer[^/]*\.app\//.test(d.image)
+}
+
 const MESSAGE = /^Sending UIEvent type: 0; subtype: 0; to window: <([A-Za-z_][A-Za-z0-9_]*): 0x[0-9a-fA-F]+>; contextId: 0x[0-9a-fA-F]+$/
 /** `log stream --style ndjson`'s timestamp: local time, microseconds, an offset without a colon. */
 const TIMESTAMP = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:\.(\d{1,9}))?([+-])(\d\d):?(\d\d)$/
@@ -139,13 +148,16 @@ export type Pick =
   | { kind: 'none' }
 
 const firstIn = (lines: readonly Dispatch[], from: number, to: number): Dispatch | undefined =>
-  lines.find((l) => l.at >= from && l.at < to && l.window !== SYSTEM_GESTURE_WINDOW)
+  lines.find((l) => l.at >= from && l.at < to && !landsNothing(l))
 
 /**
- * How much later than its first event a gesture's lift may be logged, relative to that first event's lag. A line
- * carries no touch phase, so the lift's own lag cannot be read; measured on iOS 26.5 (idle MacBook), first events 7–11 ms
- * behind and lifts 13–40 ms behind. The margin leans toward placing nothing: a gesture left unplaced is judged by the
- * reads as before, one placed on the gesture before it is wrong.
+ * How much later than its first event a gesture's lift may be logged, relative to that first event's lag: an assumption
+ * the measurements hold, not a bound. A line carries no touch phase, so the lift's own lag cannot be read. Measured as
+ * each gesture's last line after its up against its first line after its down, 130 taps and page swipes one at a time
+ * (renderer lines left out): the lift trailed the first line by at most 14 ms on iOS 26.5 (idle MacBook) and iOS 27.0
+ * at a load average of 51–104 (Mac mini, CPU loaded on purpose), and by 128 ms where the first line was 897 ms late
+ * (iOS 27.0 just after its boot, load ~25). The margin leans toward placing nothing: a gesture left unplaced is judged by
+ * the reads as before, one placed on the gesture before it is wrong.
  */
 const LIFT_LAG_FACTOR = 1.5
 const LIFT_LAG_SLACK_MS = 50
@@ -154,8 +166,8 @@ const LIFT_LAG_SLACK_MS = 50
  * The event that says where gesture `i` landed: the earliest one delivered at or after its down and before the next
  * gesture's. A line carries no touch phase, so a gesture's moves and lift log lines too, and a lagging log stamps them
  * after the next gesture went down: an app tap right after a swipe on the home screen would take the swipe's window.
- * So gesture `i` is placed only when the one before it has surely finished delivering before `i` went down: its lag
- * (first event − down), stretched by the lift's margin, shorter than the gap from its up to `i`'s down. Unknown lag
+ * So gesture `i` is placed only when the one before it is taken to have finished delivering before `i` went down: its
+ * lag (first event − down), stretched by the lift's margin, shorter than the gap from its up to `i`'s down. Unknown lag
  * counts as too long while the gap is inside the longest lag allowed. Lines must be in time order.
  */
 export function pickDispatch(lines: readonly Dispatch[], spans: readonly GestureSpan[], i: number): Pick {

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { landingOf, parseDispatch, parseLogTimestamp, pickDispatch, springBoardSurface, type Dispatch, type GestureSpan } from '../touchLanding.js'
+import { landingOf, landsNothing, parseDispatch, parseLogTimestamp, pickDispatch, springBoardSurface, type Dispatch, type GestureSpan } from '../touchLanding.js'
 import { DispatchLog, type DispatchLogDeps } from '../DispatchLog.js'
 
 // Captured from `simctl spawn … log stream --style ndjson` on iOS 26.5 (spike 3): a tap in an app, then one on the home
@@ -55,6 +55,20 @@ describe('parseDispatch', () => {
     const placed = [...new Set(real.map((d) => `${d.window}:${landingOf(bundle(d.image), d.window, ctx)?.on}`))]
     // The app's keyboard, a secure field's included, is the app's.
     expect(placed).toEqual(['SBAlertItemWindow:alert', 'UIWindow:app', 'UIRemoteKeyboardWindow:app', 'SBHomeScreenWindow:home', 'SBStatusBarWindow:system'])
+  })
+
+  it('takes nothing from a home-screen widget\'s renderer, which logs a touch beside SpringBoard and can be first', () => {
+    const renderer = '/private/var/run/com.apple.security.cryptexd/mnt/x/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/Applications/WidgetRenderer_Default.app/WidgetRenderer_Default'
+    const springboard = '/rt/System/Library/CoreServices/SpringBoard.app/SpringBoard'
+    expect(landsNothing({ at: 0, pid: 1, image: renderer, window: 'WidgetRenderer' })).toBe(true)
+    expect(landsNothing({ at: 0, pid: 1, image: springboard, window: '_UISystemGestureWindow' })).toBe(true)
+    expect(landsNothing({ at: 0, pid: 1, image: springboard, window: 'SBHomeScreenWindow' })).toBe(false)
+    // iOS 27.0, measured: the renderer logged a page swipe 28 ms after its down, SpringBoard 800 ms after.
+    const lines: Dispatch[] = [
+      { at: 1028, pid: 2, image: renderer, window: 'WidgetRenderer' },
+      { at: 1800, pid: 1, image: springboard, window: 'SBHomeScreenWindow' },
+    ]
+    expect(pickDispatch(lines, [{ down: 1000, up: 1200 }], 0)).toMatchObject({ kind: 'found', line: { window: 'SBHomeScreenWindow' } })
   })
 
   it('drops a message it does not know, a line that is not JSON and one missing a field', () => {

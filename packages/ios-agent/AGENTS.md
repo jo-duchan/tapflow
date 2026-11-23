@@ -533,7 +533,13 @@ functions, `IOSAgent.landTouch` pairs and sends. A device already up (picked up 
   down), stretched for the lift (×1.5 + 50 ms: lifts trailed by 13–40 ms where first events trailed by 7–11 ms, iOS
   26.5), shorter than the gap from its up to `i`'s down, an unknown lag counting as too long within `MAX_DISPATCH_LAG_MS`.
   A wrong landing outranks every read in flow-runner; a missing one leaves the reads, so doubt sends nothing. A pinch's
-  down is in the timeline though a pinch is not placed.
+  down is in the timeline though a pinch is not placed. **The lift margin is an assumption the measurements hold, not a
+  bound**: over 130 gestures (iOS 26.5 idle; 27.0 just after boot and at load 51–104) a lift trailed its first line by
+  at most 14 ms, and by 128 ms where the first line was 897 ms late.
+- **A home-screen widget's renderer is not a landing.** It logs a touch beside SpringBoard's home-screen window, and on
+  iOS 27.0 it logged a page swipe 28 ms after its down while a stalled SpringBoard logged it 800 ms after: taken first,
+  the swipe was `other` with the renderer's id. `landsNothing` leaves it out with the system-gesture layer. Lag is per
+  process, which is also why the margin above is measured on one.
 - **Classification** (`landingOf`): the app under test, any window — its keyboard's keys land in its own process, a
   secure field's too (measured on 26.5 and 27.0). SpringBoard by window class: `SBHomeScreenWindow` home; status bar, the switcher's
   status bar over an app (a tap at the top of the screen, which the app never sees), cover sheet, Control Center, banner

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { createLogger } from '@tapflowio/agent-core'
 import { killWithSigkillFallback } from './childProcessKill.js'
-import { parseDispatch, SYSTEM_GESTURE_WINDOW, type Dispatch } from './touchLanding.js'
+import { landsNothing, parseDispatch, type Dispatch } from './touchLanding.js'
 
 const execFileAsync = promisify(execFile)
 const logger = createLogger('ios-agent:dispatch-log')
@@ -189,7 +189,7 @@ export class DispatchLog {
       const d = parseDispatch(line)
       if (!d) continue
       this.seen = true
-      if (d.window === SYSTEM_GESTURE_WINDOW) continue
+      if (landsNothing(d)) continue
       // In time order: a line stamped before the last one kept goes in its place.
       let k = this.kept.length
       while (k > 0 && this.kept[k - 1]!.at > d.at) k--
