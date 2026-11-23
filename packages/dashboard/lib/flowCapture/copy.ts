@@ -111,8 +111,8 @@ export const copy = {
   putBackShort: 'Put back',
   putBack: 'Put back',
   leaveOut: 'Leave out',
-  putBackTile: (n: number) => `Put #${n} back in the replay`,
-  leaveOutTile: (n: number) => `Leave #${n} out of the replay again`,
+  putBackTile: (n: number) => `Put back #${n} in the replay`,
+  leaveOutTile: (n: number) => `Leave out #${n} from the replay again`,
   putBackAndMatch: 'Put back and match again',
   droppedTile: {
     'stopped-scroll': 'Not replayed: tapped while the list was still moving.',

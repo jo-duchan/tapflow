@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
-import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { askedReady, canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
 import { markOf, mirrorMark, touchOfMark } from '@/lib/flowCapture/marks'
 import type { ChromePayload } from '@tapflowio/protocol'
@@ -76,6 +76,16 @@ describe('a step put back in the replay', () => {
   it('changes nothing for a step that was not left out, or one never put back', () => {
     expect(reduce(loaded, { type: 'replay-dropped', index: 2 })).toBe(loaded)
     expect(reduce(loaded, { type: 'drop-again', index: 1 })).toBe(loaded)
+  })
+
+  // CodeRabbit on #1228: the last Match is of another flow once what it replays changes, with the range where it was.
+  it('takes Edit, Verify and Export away until the next Match, either way', () => {
+    const matched = { ...loaded, matchedRange: loaded.range, reached: 4 }
+    expect(reachedStep(matched)).toBe(4)
+    const back = reduce(matched, { type: 'replay-dropped', index: 1 })
+    expect(reachedStep(back)).toBe(0)
+    const out = reduce({ ...back, matchedRange: back.range, reached: 4 }, { type: 'drop-again', index: 1 })
+    expect(reachedStep(out)).toBe(0)
   })
 
   it('forgets what was put back when a capture loads', () => {

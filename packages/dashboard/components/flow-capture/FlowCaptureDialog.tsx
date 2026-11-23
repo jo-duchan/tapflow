@@ -163,7 +163,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   const keyboard = keyboardOf(snapshot, state.steps, state.range)
 
   // Match's end: to Edit, unless some taps the app did not respond to wait for the person's review there (P2c).
-  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
+  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched, state.putBack))
   const continueToEdit = () => dispatch({ type: 'review-continued' })
 
   // From `from`, not the render's `state`, when a change dispatched just now has not rendered yet (Put back, #1170).
@@ -179,6 +179,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     matchRange(tap, channel, lease, withAsked(from), from.range, bundleId, {
       signal,
       onTouch,
+      putBack: new Set(Object.keys(from.putBack).map(Number)),
       onReset: (report) => dispatch({ type: 'device-reset', report }),
       onStep: (step, screenshot, inserted) => {
         if (screenshot) run.keep(screenshot)
@@ -205,7 +206,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       },
     }, keyboard)
       // A run a later one replaced answers into nothing: its failure would be shown on the new one, its end would end it.
-      .then((matched) => { if (run.isCurrent(signal)) dispatch(matchEnded(from.steps, matched)) })
+      .then((matched) => { if (run.isCurrent(signal)) dispatch(matchEnded(from.steps, matched, from.putBack)) })
       .catch((e: unknown) => { if (run.isCurrent(signal)) dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }) })
       .finally(() => { if (run.isCurrent(signal)) setBusy(false) })
   }

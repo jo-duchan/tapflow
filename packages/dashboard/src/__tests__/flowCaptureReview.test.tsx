@@ -26,6 +26,12 @@ describe('the review state', () => {
     expect(reviewTaps(steps, [named(tap('Copy', { acted: false }))])).toEqual([])
   })
 
+  // Review of CodeRabbit's #1228 follow-up: a tap the person put back is sent by Match, so it is not offered to leave out.
+  it('does not offer a tap the person put back in the replay', () => {
+    expect(reviewTaps(steps, matched, { 0: 'retried' })).toEqual([{ index: 2, step: 2, repeat: true }])
+    expect(matchEnded(steps, matched, { 0: 'retried', 2: 'retried' })).toMatchObject({ type: 'match-finished' })
+  })
+
   // Design review of P2c: the review kept phase `matching`, which read as a run still going.
   it('is not a run: the stepper leads back to Range, and a replay clears it but keeps what was kept', () => {
     expect(isRunning(matching)).toBe(true)

@@ -19,14 +19,15 @@ const tap: CaptureTap = {
   chrome: () => null, postures: () => ({ postures: [], currentId: null }), surface: () => null,
 }
 
-const entry = (at: number, msg: Record<string, unknown>): CaptureEntry => ({ at, kind: 'input', msg: { sessionId: 's1', ...msg } as never })
+type InputMsg = Extract<CaptureEntry, { kind: 'input' }>['msg']
+const entry = (at: number, msg: InputMsg): CaptureEntry => ({ at, kind: 'input', msg })
 const snapshot: CaptureSnapshot = {
   id: 'snap', takenAt: 0, thinned: false,
   entries: [
-    entry(0, { type: 'app:install', requestId: 'i', buildId: 7 }),
-    entry(100, { type: 'app:launch', requestId: 'l', buildId: 7 }),
-    entry(200, { type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
-    entry(280, { type: 'input:touch:end', requestId: 't' }),
+    entry(0, { sessionId: 's1', type: 'app:install', requestId: 'i', buildId: 7 }),
+    entry(100, { sessionId: 's1', type: 'app:launch', requestId: 'l', buildId: 7 }),
+    entry(200, { sessionId: 's1', type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
+    entry(280, { sessionId: 's1', type: 'input:touch:end', requestId: 't' }),
   ],
 }
 
@@ -300,7 +301,7 @@ describe('RangeScreen', () => {
     it('puts it back from a button under its tile, no wider than the tile', () => {
       const dispatch = vi.fn()
       const { container } = draw(dropped, dispatch)
-      const button = screen.getByRole('button', { name: 'Put #2 back in the replay' })
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
       expect(tileOf(container, 1).contains(button)).toBe(true)
       expect(button.textContent).toBe('Put back')
       // Never wider than the tile's inner width, never wrapped (user, 2026-11-23).
@@ -318,7 +319,7 @@ describe('RangeScreen', () => {
       const { container } = draw(reduce(dropped, { type: 'replay-dropped', index: 1 }), dispatch)
       expect(tileOf(container, 1).textContent).toContain('Put back')
       expect(tileOf(container, 1).textContent).not.toContain('Not replayed')
-      fireEvent.click(screen.getByRole('button', { name: 'Leave #2 out of the replay again' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Leave out #2 from the replay again' }))
       expect(dispatch).toHaveBeenCalledWith({ type: 'drop-again', index: 1 })
     })
 
@@ -329,10 +330,10 @@ describe('RangeScreen', () => {
         return <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />
       }
       render(<Strip />)
-      const button = screen.getByRole('button', { name: 'Put #2 back in the replay' })
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
       button.focus()
       fireEvent.click(button)
-      const turned = screen.getByRole('button', { name: 'Leave #2 out of the replay again' })
+      const turned = screen.getByRole('button', { name: 'Leave out #2 from the replay again' })
       expect(turned).toBe(button)
       expect(turned).toHaveFocus()
     })
