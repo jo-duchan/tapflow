@@ -237,6 +237,15 @@ export class AppObserver {
     }
   }
 
+  /**
+   * Whether the app is off the screen — its background marker, or no process — asked directly, not behind the reads in
+   * line: a touch's landing waits on it. A check that fails throws, and the caller decides what doubt means.
+   */
+  async isAway(udid: string, bundleId: string): Promise<boolean> {
+    if (await this.markedAway(this.dir(udid), bundleId)) return true
+    return !(await this.host.appRunning(udid, bundleId))
+  }
+
   private async markedAway(dir: string, bundleId: string): Promise<boolean> {
     const marker = await readFile(join(dir, 'background'), 'utf8').catch(() => undefined)
     return marker === bundleId

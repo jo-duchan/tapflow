@@ -2107,16 +2107,16 @@ export interface CaptureTouched {
  *
  * - `app`: the app under test, the soft keyboard over it and a sheet it shows in its own window (iOS draws a share
  *   sheet's touches in the host, measured).
- * - `home`: the launcher's own surface — iOS SpringBoard below window level 0 (pages, Today view, dock, an icon's
- *   menu, editing), and Spotlight (`id` `com.apple.Spotlight`); Android the home package.
- * - `system`: a system surface over whatever is in front — iOS SpringBoard at level 0 up to 2000 (status bar,
- *   Notification Center, Control Center); Android a window that is not an application's (status bar, shade).
- * - `alert`: a prompt over the app — iOS SpringBoard at level 2000 and up (`UIWindowLevelAlert`: a permission alert);
+ * - `home`: the launcher's own surface — iOS SpringBoard's home screen window (pages, Today view, dock, an icon's
+ *   menu, editing, App Library), and Spotlight (`id` `com.apple.Spotlight`); Android the home package.
+ * - `system`: a system surface over whatever is in front — iOS SpringBoard's status bar, Notification Center, Control
+ *   Center or a banner; Android a window that is not an application's (status bar, shade).
+ * - `alert`: a prompt over the app — iOS SpringBoard's alert window while the app is in front (a permission alert);
  *   Android the permission controller.
  * - `other`: another app, named by `id` when known.
  *
- * Measured on iOS 26.5 (window levels: home −2, status bar 999, Notification Center 1050, Control Center 1080, alert
- * 2000) and Android 16; the plan is in the issue. The set is closed: a member added later needs its own relay feature,
+ * Measured on iOS 26.5 and 27.0 (iOS reads the window UIKit delivered the touch to, from its dispatch log) and
+ * Android 16; the plan is in the issue. The set is closed: a member added later needs its own relay feature,
  * since an older relay's validator drops a message carrying a value it does not know.
  */
 export type TouchLandedOn = 'app' | 'home' | 'system' | 'alert' | 'other'

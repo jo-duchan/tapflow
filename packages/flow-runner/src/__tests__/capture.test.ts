@@ -2091,6 +2091,34 @@ describe('the default range by where touches landed', () => {
     expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
   })
 
+  // iOS reads say the home screen for any app off the screen, a sheet another process shows over the app included: the
+  // landing outranks them (#1214, PR b), and the sheet with the app after it stays, with or without the app's report.
+  it('keeps another app\'s sheet the reads place on the home screen, when the app comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+      // As on Android, where the reads place the sheet in the app: the range starts in the app, no launch is missing.
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    }
+  })
+
+  it('skips another app the reads place on the home screen when the home screen comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.Maps')
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      expect(defaultRange(r.steps())).toEqual({ start: 4, end: 5 })
+    }
+  })
+
   // Design review: a banner, Control Center or the shade before the app opened is skipped as the home screen is.
   it('skips a system surface before the app', () => {
     const r = new Rec().install()
