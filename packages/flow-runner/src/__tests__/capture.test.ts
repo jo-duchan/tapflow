@@ -2106,7 +2106,20 @@ describe('the default range by where touches landed', () => {
       expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
       // A range ending on the sheet replays no step in the app: the app after it is not what it starts in.
       expect(rangeWarnings(steps, { start: 2, end: 3 })).toEqual(['no-launch-at-start'])
+      // Nor does one whose app step after the sheet is left out: the replay does not send it (CodeRabbit on #1236).
+      const dropped = steps.map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+      expect(rangeWarnings(dropped, { start: 2, end: 4 })).toEqual(['no-launch-at-start'])
     }
+  })
+
+  it('looks past a left-out step after the sheet for the app step the replay does send', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    read(r, APP).touch([[0.5, 0.6]]).landed('app')
+    const steps = r.steps().map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+    expect(rangeWarnings(steps, { start: 2, end: 5 })).toEqual([])
   })
 
   it('skips another app the reads place on the home screen when the home screen comes after it', () => {

@@ -136,12 +136,17 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
   return out
 }
 
-/** A run of another app's steps from `from`, with a step the agent placed in the app right after it, before `end`. */
+/**
+ * A run of another app's steps from `from`, with a step the agent placed in the app after it, before `end`: the next one
+ * the replay sends, since a step left out (`dropped`) raises nothing.
+ */
 function sheetBeforeApp(steps: readonly RawStep[], from: number, end: number): boolean {
   const landed = (s: RawStep | undefined) => (s && 'landed' in s ? s.landed : undefined)
   let j = from
   while (j < end && landed(steps[j])?.on === 'other' && !landedHome(landed(steps[j]))) j++
-  return j > from && j < end && landed(steps[j])?.on === 'app'
+  if (j === from) return false
+  while (j < end && steps[j]!.dropped) j++
+  return j < end && landed(steps[j])?.on === 'app'
 }
 
 /**
