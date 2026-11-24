@@ -11,7 +11,7 @@ import {
   type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
 import type { Step } from '../schema.js'
-import type { TouchObservation } from '@tapflowio/protocol'
+import type { TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
 import { matchSelector } from '../selector.js'
 
@@ -61,6 +61,13 @@ class Rec {
     const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
     const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
     this.entries.push({ at: this.t + 10, kind: 'touched', requestId, touched: { point: { x: 0, y: 0 }, ...touched } })
+    return this
+  }
+  /** Where the agent saw the last touch go down (#1214), keyed by its end as the relay keeps it. */
+  landed(on: TouchLanding['on'], id?: string): this {
+    const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
+    const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
+    this.entries.push({ at: this.t + 5, kind: 'landed', requestId, landed: id ? { on, id } : { on } })
     return this
   }
 }
@@ -2003,5 +2010,151 @@ describe('touch reports', () => {
     const [up, slanted] = new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).wait(300).touch([[0.2, 0.8], [0.4, 0.6], [0.6, 0.4]]).steps()
     expect(scrollDirectionOf(up!, {})).toBe('down')
     expect(scrollDirectionOf(slanted!, {})).toBeNull()
+  })
+})
+
+// #1214: the agent says where each touch went down. A landing settles its step; a step without one is judged as before.
+describe('the default range by where touches landed', () => {
+  const read = (r: Rec, keyboard: KeyboardState) => {
+    r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard, settled: false })
+    return r.wait(100)
+  }
+  const HOME: KeyboardState = { shown: false, onHome: true }
+  const APP: KeyboardState = { shown: false, onHome: false }
+  const FEED = 'com.google.android.googlequicksearchbox'
+
+  // The issue's recording: the app opened from its icon showed a permission dialog, the person allowed it, went home,
+  // and opened the app again before touching it. The reads alone left the Allow out with the trip home.
+  it('keeps a prompt the app raised, and the trip home after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.7]]).landed('alert', 'com.google.android.permissioncontroller')
+    read(r, HOME).touch([[0.5, 0.95], [0.5, 0.4]]).landed('app')
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 }).landed('app')
+    const steps = r.steps()
+    expect(defaultRange(steps)).toEqual({ start: 2, end: 6 })
+    // The same recording with no landings is what the issue reported: the Allow is left out.
+    const bare = new Rec().install()
+    read(bare, HOME).touch([[0.3, 0.4]])
+    read(bare, APP).touch([[0.5, 0.7]])
+    read(bare, HOME).touch([[0.5, 0.95], [0.5, 0.4]])
+    read(bare, HOME).touch([[0.3, 0.4]])
+    read(bare, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+    expect(defaultRange(bare.steps()).start).toBeGreaterThan(2)
+  })
+
+  it('places a step by its landing over the reads', () => {
+    const r = new Rec().install()
+    read(r, APP).touch([[0.3, 0.4]]).landed('home')
+    read(r, HOME).touch([[0.5, 0.4]]).landed('app')
+    read(r, HOME).touch([[0.5, 0.6]]).landed('alert', 'com.apple.springboard')
+    read(r, APP).touch([[0.5, 0.2]]).landed('other', 'com.apple.Spotlight')
+    const steps = r.steps()
+    expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, false, true])
+  })
+
+  // Neither the home screen nor the app: the reads say, so Match does not count the shade or another app as a step in
+  // the app (`stepsBeforeRange`), and a range starting there still warns.
+  it('leaves a system surface and another app to the reads', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.5, 0.01], [0.5, 0.5]]).landed('system', 'com.android.systemui')
+    read(r, HOME).touch([[0.9, 0.5], [0.2, 0.5]]).landed('other', FEED)
+    const steps = r.steps()
+    expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true])
+    const off = new Rec().install()
+    read(off, { shown: null }).touch([[0.5, 0.5]]).landed('other', 'com.google.android.gms')
+    const offSteps = off.steps()
+    expect(offSteps[1]!.onHome).toBeUndefined()
+    expect(stepsBeforeRange(offSteps, { start: 2, end: 2 })).toEqual([])
+    expect(rangeWarnings(offSteps, { start: 1, end: 2 })).toEqual(['no-launch-at-start'])
+  })
+
+  // #1194 by landings: the swipe onto the feed starts on the launcher, the swipe back on the feed, then home and the icon.
+  it('skips the feed when the home screen comes after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]]).landed('home')
+    read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]]).landed('other', FEED)
+    read(r, HOME).touch([[0.5, 0.9], [0.5, 0.2]]).landed('home')
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 5, end: 6 })
+  })
+
+  // Design review: a sheet the app raised as it opened (a sign-in, a purchase) is another app's window, with the app
+  // after it, not the home screen: it stays.
+  it('keeps another app\'s sheet when the app comes after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.8]]).landed('other', 'com.google.android.gms')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
+  })
+
+  // iOS reads say the home screen for any app off the screen, a sheet another process shows over the app included: the
+  // landing outranks them (#1214, PR b), and the sheet with the app after it stays, with or without the app's report.
+  it('keeps another app\'s sheet the reads place on the home screen, when the app comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+      // As on Android, where the reads place the sheet in the app: the range starts in the app, no launch is missing.
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+      // A range ending on the sheet replays no step in the app: the app after it is not what it starts in.
+      expect(rangeWarnings(steps, { start: 2, end: 3 })).toEqual(['no-launch-at-start'])
+      // Nor does one whose app step after the sheet is left out: the replay does not send it (CodeRabbit on #1236).
+      const dropped = steps.map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+      expect(rangeWarnings(dropped, { start: 2, end: 4 })).toEqual(['no-launch-at-start'])
+    }
+  })
+
+  it('looks past a left-out step after the sheet for the app step the replay does send', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    read(r, APP).touch([[0.5, 0.6]]).landed('app')
+    const steps = r.steps().map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+    expect(rangeWarnings(steps, { start: 2, end: 5 })).toEqual([])
+  })
+
+  it('skips another app the reads place on the home screen when the home screen comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.Maps')
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      expect(defaultRange(r.steps())).toEqual({ start: 4, end: 5 })
+    }
+  })
+
+  // Design review: a banner, Control Center or the shade before the app opened is skipped as the home screen is.
+  it('skips a system surface before the app', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.5, 0.01], [0.5, 0.5]]).landed('system', 'com.android.systemui')
+    read(r, APP).touch([[0.5, 0.1]]).landed('system', 'com.android.systemui')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 3, end: 4 })
+  })
+
+  it('stops at a touch it cannot place, as before', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, { shown: null }).touch([[0.5, 0.8]])
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
+  })
+
+  it('keeps the first landing of a gesture', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home').landed('app')
+    const step = r.steps()[1]!
+    expect('landed' in step ? step.landed : undefined).toEqual({ on: 'home' })
   })
 })

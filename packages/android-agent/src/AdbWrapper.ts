@@ -9,7 +9,7 @@ import { defaultRunner, type AdbRunner } from './adb.js'
 import { FocusedServers, type FocusedOp } from './FocusedServer.js'
 import type { LaunchOptions, ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
-import { androidLaunchExtras } from './launchExtras.js'
+import { androidLaunchExtras, shellQuote } from './launchExtras.js'
 import { parseKeyguard } from './postures.js'
 
 const logger = createLogger('android-agent:adb-wrapper')
@@ -424,12 +424,18 @@ export class AdbWrapper {
    * returns before the app even has focus (measured 0.2–0.36 s against 0.5–0.9 s), so a step sent right after the
    * reply could reach the launcher instead. Monkey stays as the fallback, and its error text is what a failure says.
    */
-  async launchApp(serial: string, packageName: string, options?: LaunchOptions, defaultsOnly = false): Promise<LaunchOptions | undefined> {
+  async launchApp(
+    serial: string,
+    packageName: string,
+    options?: LaunchOptions,
+    defaultsOnly = false,
+    onStart?: (deviceTime: string | undefined) => void
+  ): Promise<LaunchOptions | undefined> {
     // Resolved once and reused by whichever launch follows, so a default that falls back costs no second resolve.
     let resolved: { component: string | undefined } | undefined
     if (hasLaunchOptions(options)) {
       if (!defaultsOnly) {
-        await this.launchFresh(serial, packageName, options!)
+        await this.launchFresh(serial, packageName, options!, undefined, onStart)
         return options
       }
       // The relay's per-app defaults, none of them asked for by the caller: what this device cannot take is left out
@@ -437,14 +443,68 @@ export class AdbWrapper {
       resolved = { component: await this.launcherComponent(serial, packageName) }
       const deliverable = deliverableDefaults(packageName, options!, resolved.component)
       if (deliverable) {
-        await this.launchFresh(serial, packageName, deliverable, resolved.component)
+        await this.launchFresh(serial, packageName, deliverable, resolved.component, onStart)
         return deliverable
       }
     }
     const component = resolved ? resolved.component : await this.launcherComponent(serial, packageName)
-    if (component && await this.startAndWait(serial, component)) return undefined
-    await this.launchWithMonkey(serial, packageName)
+    if (component && await this.startAndWait(serial, component, onStart)) return undefined
+    await this.launchWithMonkey(serial, packageName, onStart)
     return undefined
+  }
+
+  async getAppUid(serial: string, packageName: string, timeoutMs = 2_000): Promise<number | null> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '-U', packageName]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packageLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) =>
+      line.startsWith(`package:${packageName} `) || line === `package:${packageName}`
+    )
+    // Match a comma-separated list of UIDs, e.g. uid:10123,1010123
+    const uidText = packageLine?.match(/(?:^|\s)uid:([\d,]+)(?:\s|$)/)?.[1]
+    if (!uidText) return null
+
+    const uids = uidText.split(',')
+      .map((s) => Number(s))
+      .filter((uid) => Number.isSafeInteger(uid) && uid >= 0)
+    if (uids.length === 0) return null
+    if (uids.length === 1) return uids[0]!
+
+    // The app is installed for multiple users. The launch targets the current user.
+    const userArgs = ['-s', serial, 'shell', 'am', 'get-current-user']
+    const userOut = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...userArgs)
+      : await this.runner.exec(...userArgs)
+    const currentUser = Number(userOut.trim())
+
+    if (Number.isSafeInteger(currentUser) && currentUser >= 0) {
+      // Android UIDs are userId * 100000 + appId.
+      const targetUid = uids.find((uid) => Math.floor(uid / 100000) === currentUser)
+      if (targetUid !== undefined) return targetUid
+    }
+
+    // Another user's uid would stream that user's copy of the app, so an unknown current user streams nothing.
+    return null
+  }
+
+  async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '--uid', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packages = output.split(/\r?\n/).map((line) =>
+      /^package:([^\s]+)(?:\s|$)/.exec(line.trim())?.[1]
+    ).filter((name): name is string => name !== undefined)
+    return [...new Set(packages)]
+  }
+
+  async hasAppProcessForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<boolean> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID', '-u', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    return output.split(/\r?\n/).some((line) => /^\d+$/.test(line.trim()))
   }
 
   /**
@@ -455,7 +515,13 @@ export class AdbWrapper {
    * - `-S` stops the app first in the same command, since a running app would only be brought forward and its intent
    *   never re-read; and the two `Activity not started` warnings, which the plain launch counts as launched, fail.
    */
-  private async launchFresh(serial: string, packageName: string, options: LaunchOptions, resolved?: string): Promise<void> {
+  private async launchFresh(
+    serial: string,
+    packageName: string,
+    options: LaunchOptions,
+    resolved?: string,
+    onStart?: (deviceTime: string | undefined) => void
+  ): Promise<void> {
     if (Object.keys(options.env ?? {}).length > 0) {
       throw new ValidationError('env is iOS-only: Android has no way to set an app\'s environment. Pass it in arguments instead, read from the intent extras')
     }
@@ -465,6 +531,7 @@ export class AdbWrapper {
     }
     let out: string
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-S', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         ...androidLaunchExtras(options.arguments),
@@ -508,9 +575,23 @@ export class AdbWrapper {
   // `Status: timeout` (slow, but started) are launches. `-W` waits for the first frame, which can be never (an app
   // that does not draw, a locked screen) while the dashboard's launch has no deadline of its own: the device-side
   // `timeout` bounds it, and running out counts as launched, since the intent was delivered.
-  private async startAndWait(serial: string, component: string): Promise<boolean> {
+  private async readDeviceTime(serial: string): Promise<string | undefined> {
+    try {
+      const args = ['-s', serial, 'shell', 'date', shellQuote('+%m-%d %H:%M:%S.%3N')]
+      const output = this.runner.execBounded
+        ? await this.runner.execBounded(2_000, ...args)
+        : await this.runner.exec(...args)
+      const value = output.trim()
+      return /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async startAndWait(serial: string, component: string, onStart?: (deviceTime: string | undefined) => void): Promise<boolean> {
     let out: string
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         // Measured on API 36: errors go to stdout and the exit status is 0. Folded in on the device for an image that
@@ -524,12 +605,13 @@ export class AdbWrapper {
     return !out.split('\n').some((l) => l.trim().startsWith('Error'))
   }
 
-  private async launchWithMonkey(serial: string, packageName: string): Promise<void> {
+  private async launchWithMonkey(serial: string, packageName: string, onStart?: (deviceTime: string | undefined) => void): Promise<void> {
     // monkey reserves 2% of its events for system keys, and on a device with no physical system
     // keys — an emulator whose AVD profile has hw.mainKeys=no, as Pixel profiles do — it aborts
     // with exit 251 before sending any event, the launch included ("SYS_KEYS has no physical keys
     // but with factor 2.0%"). Options must precede the count: monkey stops parsing at it.
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'monkey', '--pct-syskeys', '0', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1']
       await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
     } catch (e) {

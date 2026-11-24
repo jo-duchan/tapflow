@@ -9,7 +9,8 @@
 import type {
   AgentDevices, AgentDevicesApplied, AgentRegister, AgentRegistered, AgentResourceReport, AgentToBrowser, AgentsList, AgentsListed,
   AppClearState, AppClearStateDone, AppClearStateError, AppInstallDone, AppInstallError, AppInstallToAgent,
-  AppInstallToRelay, AppLaunchDone, AppLaunchError, AppLaunchToAgent, AppLaunchToRelay, BrowserInbound,
+  AppInstallToRelay, AppLaunchDone, AppLaunchError, AppLaunchToAgent, AppLaunchToRelay,
+  AppLog, BrowserInbound,
   BrowserToRelay, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite, ClipboardWriteDone,
   NetworkError, NetworkSet, NetworkState, NetworkStatePayload,
   DeviceBoot, DeviceBootError, DeviceBootWaiting, DeviceBooting, DeviceLease, DeviceLeased, DeviceLeaseRefused, DeviceReady, DeviceShutdown, DeviceShutdownDone,
@@ -20,7 +21,7 @@ import type {
   ScreenshotError, ScreenshotRequest, SessionAgentAway, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionJoined, SessionLeave, SessionRebound, SessionStart, SessionTerminated, StreamRegister,
   AgentControlOutbound, StreamToRelay,
-  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiReachRequest, UiReachResponse, UiFieldRequest, UiFieldResponse, CaptureTouched, DeviceKeyboardReset,
+  StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiReachRequest, UiReachResponse, UiFieldRequest, UiFieldResponse, CaptureTouched, CaptureLanded, DeviceKeyboardReset,
   UiKeyboardRequest, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
   NetworkRequestState,
@@ -142,6 +143,7 @@ export const _AppLaunchDone: AppLaunchDone['type'] = 'app:launch-done'
 export const _AppLaunchError: AppLaunchError['type'] = 'app:launch-error'
 export const _AppLaunchToAgent: AppLaunchToAgent['type'] = 'app:launch'
 export const _AppLaunchToRelay: AppLaunchToRelay['type'] = 'app:launch'
+export const _AppLog: AppLog['type'] = 'app:log'
 export const _ClipboardData: ClipboardData['type'] = 'clipboard:data'
 export const _ClipboardError: ClipboardError['type'] = 'clipboard:error'
 export const _NetworkSet: NetworkSet['type'] = 'network:set'
@@ -238,6 +240,7 @@ export const _UiReachResponse: UiReachResponse['type'] = 'ui:reach:response'
 export const _UiTreeError: UiTreeError['type'] = 'ui:tree:error'
 export const _UiFieldResponse: UiFieldResponse['type'] = 'ui:field:response'
 export const _CaptureTouched: CaptureTouched['type'] = 'capture:touched'
+export const _CaptureLanded: CaptureLanded['type'] = 'capture:landed'
 export const _WatchStart: WatchStart['type'] = 'watch:start'
 export const _WatchStop: WatchStop['type'] = 'watch:stop'
 export const _WatchStarted: WatchStarted['type'] = 'watch:started'

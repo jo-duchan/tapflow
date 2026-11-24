@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { judgeTouch, parseFramestats, parseHit, seenAt, type HitAnswer, type HitNode, type TouchFacts } from '../touchObservation.js'
+import { judgeTouch, parseFramestats, parseHit, seenAt, type HitAnswer, type HitNode, type TouchFacts, landingOf } from '../touchObservation.js'
 
 const APP = 'dev.tapflow.sample.compose'
 
@@ -167,5 +167,28 @@ describe('judgeTouch', () => {
   it('is not moving where the app goes on drawing through the touch', () => {
     const through = frames(-150, -133, -117, -100, -83, -67, -50, -33, -17, 0, 17, 33, 50, 67, 83, 100, 117, 133)
     expect(judgeTouch(facts({ frames: through, swipeEndNs: DOWN - 1_000 * ms, seen: seen({ scrollable: true }) })).moving).toBe(false)
+  })
+})
+
+// #1214: where a touch went down, from the topmost window at its point.
+describe('landingOf', () => {
+  const APP = 'dev.tapflow.sample', HOME = 'com.google.android.apps.nexuslauncher', GBOARD = 'com.google.android.inputmethod.latin'
+  const at = (type: number | undefined, pkg?: string, under?: string) =>
+    landingOf({ rx: 0, done: 1, w: 1000, h: 2000, ...(type !== undefined ? { type } : {}), ...(pkg ? { pkg } : {}), ...(under ? { under } : {}) }, APP, HOME)
+
+  it('places each window', () => {
+    expect(at(1, APP)).toEqual({ on: 'app' })
+    expect(at(1, HOME)).toEqual({ on: 'home', id: HOME })
+    expect(at(1, 'com.android.permissioncontroller')).toEqual({ on: 'alert', id: 'com.android.permissioncontroller' })
+    expect(at(1, 'com.google.android.gms')).toEqual({ on: 'other', id: 'com.google.android.gms' })
+    expect(at(3, 'com.android.systemui')).toEqual({ on: 'system', id: 'com.android.systemui' })
+    expect(at(undefined)).toBeNull()
+  })
+
+  // A launcher's search types on a keyboard over the launcher: its keys must not read as the home screen's, whose
+  // pictures the relay keeps.
+  it('places the keyboard with the app it types into, and anywhere else as the keyboard', () => {
+    expect(at(2, GBOARD, APP)).toEqual({ on: 'app' })
+    expect(at(2, GBOARD, HOME)).toEqual({ on: 'other', id: GBOARD })
   })
 })

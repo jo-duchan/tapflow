@@ -127,11 +127,13 @@ import { TouchHelper } from '../TouchHelper'
 import { XCUITreeReader } from '../XCUITreeReader'
 import { AppObserver, type AppTouch, type AppTouchReport } from '../AppObserver'
 import { AppAccessibility } from '../AppAccessibility'
+import { DispatchLog } from '../DispatchLog'
+import { PassThrough } from 'stream'
 import { PanelState } from '../PanelState'
 import { PhysicalOrientation, type DeviceOrientation } from '../PhysicalOrientation'
 import type { GuestHelperNative } from '../GuestHelper'
 import { EventEmitter } from 'events'
-import { barrier, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
+import { barrier, waitForMessage, waitForOpen, waitForType, waitForTypeOrNull } from '@tapflowio/test-utils'
 import type { SessionJoined } from '@tapflowio/protocol'
 const MockTouchHelper = vi.mocked(TouchHelper)
 const MockAudioStreamer = vi.mocked(AudioCaptureStreamer)
@@ -205,7 +207,8 @@ function mockSimctl(booted: boolean | 'unknown' = false): SimctlWrapper {
     // Absent until L5 added the first `open-url` tests — which is why the handler had none.
     openUrl: vi.fn().mockResolvedValue(undefined),
     installApp: vi.fn().mockResolvedValue(undefined),
-    launchApp: vi.fn().mockResolvedValue(undefined),
+    launchApp: vi.fn().mockResolvedValue(null),
+    getAppExecutablePath: vi.fn().mockResolvedValue('/sim/Example.app/Example'),
     screenshot: vi.fn().mockResolvedValue(Buffer.from('png')),
     syncKeyboardsFromLanguages: vi.fn().mockResolvedValue(undefined),
     resetKeyboardLanguage: vi.fn().mockResolvedValue(undefined),
@@ -832,11 +835,11 @@ describe('IOSAgent', () => {
       handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
       sendMsg(msg: { type: string }): void
     }
-    async function bootedAgent(simctl: SimctlWrapper = mockSimctl(true), boot = true) {
+    async function bootedAgent(simctl: SimctlWrapper = mockSimctl(true), boot = true, options: Partial<ConstructorParameters<typeof IOSAgent>[0]> = {}) {
       vi.spyOn(XCUITreeReader.prototype, 'warm').mockImplementation(() => {})
       const browser = new WebSocket(`ws://localhost:${port}`)
       await waitForOpen(browser)
-      const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+      const agent = new IOSAgent({ intervalMs: 50, ...options }, simctl)
       await agent.connect(`ws://localhost:${port}`)
       browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId, clientKind: 'dashboard' }))
       await waitForType(browser, 'session:joined')
@@ -1241,6 +1244,311 @@ describe('IOSAgent', () => {
       expect(take).not.toHaveBeenCalled()
       watch.mockRestore(); take.mockRestore()
       agent.disconnect()
+      browser.close()
+    })
+
+    // #1214: where each recorded touch landed, read from UIKit's dispatch log. The stream is a real `DispatchLog` over a
+    // fake process; a line's bundle is the name of the `.app` its executable sits in.
+    function dispatchStreams() {
+      const procs: Array<EventEmitter & { stdout: PassThrough; kill: ReturnType<typeof vi.fn> }> = []
+      const factory = vi.fn((udid: string) => new DispatchLog(udid, {
+        spawn: () => {
+          const p = Object.assign(new EventEmitter(), { stdout: new PassThrough(), kill: vi.fn(() => true) })
+          procs.push(p)
+          return p as never
+        },
+        bundleOf: async (image) => image.split('/').at(-2)!.replace(/\.app$/, ''),
+        findOrphans: async () => [],
+        killPid: () => {},
+        now: () => Date.now(),
+      }))
+      const stamp = (ms: number) => new Date(ms).toISOString().replace('T', ' ').replace('Z', '000+0000')
+      const emit = (at: number, bundle: string, window: string) => procs.at(-1)!.stdout.write(JSON.stringify({
+        timestamp: stamp(at), processID: 1, processImagePath: `/rt/${bundle}.app/Exe`,
+        eventMessage: `Sending UIEvent type: 0; subtype: 0; to window: <${window}: 0x1>; contextId: 0x2`,
+      }) + '\n')
+      return { factory, procs, emit }
+    }
+    const landed = (sent: Array<{ type: string; [k: string]: unknown }>) =>
+      sent.filter((m) => m.type === 'capture:landed').map((m) => [m['requestId'], m['landed']])
+
+    it('sends where each recorded touch landed, read from the dispatch log, for a relay that takes it', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1))
+      expect(d.factory).toHaveBeenCalledWith('dev-1')
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const gesture = async (id: string, bundle: string, window: string) => {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+        d.emit(Date.now() + 5, bundle, window)
+        await new Promise((r) => setTimeout(r, 20))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await new Promise((r) => setTimeout(r, 120))
+      }
+      await gesture('g1', 'com.apple.springboard', 'SBHomeScreenWindow')
+      await gesture('g2', 'com.app', 'UIWindow')
+      await gesture('g3', 'com.apple.springboard', 'SBControlCenterWindow')
+      await gesture('g4', 'com.apple.Spotlight', 'SPUISecureWindow')
+      await gesture('g5', 'com.apple.springboard', 'SBSomethingNewWindow')
+      await vi.waitFor(() => expect(landed(sent)).toHaveLength(4), { timeout: 2000 })
+      await new Promise((r) => setTimeout(r, 100))
+      expect(landed(sent)).toEqual([
+        ['g1', { on: 'home' }], ['g2', { on: 'app' }], ['g3', { on: 'system' }], ['g4', { on: 'other', id: 'com.apple.Spotlight' }],
+      ])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('places an alert over an app that is in front as the app\'s prompt, and one over the home screen as a system surface', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const away = vi.spyOn(AppObserver.prototype, 'isAway').mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockRejectedValueOnce(new Error('no launchctl'))
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      for (const id of ['a1', 'a2', 'a3']) {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.6 } } as never)
+        d.emit(Date.now() + 5, 'com.apple.springboard', 'SBAlertItemWindow')
+        await new Promise((r) => setTimeout(r, 20))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await vi.waitFor(() => expect(landed(sent).map(([r]) => r)).toContain(id), { timeout: 2000 })
+        await new Promise((r) => setTimeout(r, 80))
+      }
+      // A check that failed keeps the alert: doubt does not move a prompt out of the recording.
+      expect(landed(sent)).toEqual([['a1', { on: 'alert' }], ['a2', { on: 'system' }], ['a3', { on: 'alert' }]])
+      expect(away).toHaveBeenCalledWith('dev-1', 'com.app', expect.any(Number))
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('places no touch after one whose events may still be arriving: its lift would be taken for this touch', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      // A swipe on the home screen whose log trails it by 400 ms, then an app tap 50 ms after its lift.
+      const t0 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.8, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 's1' } as never)
+      await new Promise((r) => setTimeout(r, 50))
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 't2' } as never)
+      d.emit(t0 + 400, 'com.apple.springboard', 'SBHomeScreenWindow')
+      d.emit(t0 + 420, 'com.apple.springboard', 'SBHomeScreenWindow')
+      d.emit(t0 + 460, 'com.app', 'UIWindow')
+      // Even the swipe's first event is stamped after the tap went down: neither can be told apart, so neither is placed.
+      await new Promise((r) => setTimeout(r, 2300))
+      expect(landed(sent)).toEqual([])
+      // The same two gestures with the log 10 ms behind: both are.
+      const t1 = Date.now()
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.8, y: 0.5 } } as never)
+      d.emit(t1 + 10, 'com.apple.springboard', 'SBHomeScreenWindow')
+      await new Promise((r) => setTimeout(r, 30))
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 's3' } as never)
+      d.emit(Date.now() + 10, 'com.apple.springboard', 'SBHomeScreenWindow')
+      await new Promise((r) => setTimeout(r, 150))
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+      d.emit(Date.now() + 10, 'com.app', 'UIWindow')
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 't4' } as never)
+      await vi.waitFor(() => expect(landed(sent)).toEqual([['s3', { on: 'home' }], ['t4', { on: 'app' }]]), { timeout: 2500 })
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit on #1236: an alert still waiting on its away check must not replace the home landing after it, which a
+    // SpringBoard field's keys then take.
+    it('gives SpringBoard\'s keyboard the landing before it in time, whichever gesture finished placing first', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      vi.spyOn(AppObserver.prototype, 'isAway')
+        .mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(false), 500)))
+        .mockResolvedValue(true)
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const gesture = async (id: string, window: string) => {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+        d.emit(Date.now() + 2, 'com.apple.springboard', window)
+        await new Promise((r) => setTimeout(r, 15))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      await gesture('k1', 'SBAlertItemWindow')
+      await gesture('k2', 'SBHomeScreenWindow')
+      await vi.waitFor(() => expect(landed(sent).map(([r]) => r)).toContain('k1'), { timeout: 2000 })
+      await gesture('k3', 'UIRemoteKeyboardWindow')
+      await vi.waitFor(() => expect(landed(sent)).toHaveLength(3), { timeout: 2000 })
+      expect(landed(sent)).toEqual([['k2', { on: 'home' }], ['k1', { on: 'alert' }], ['k3', { on: 'home' }]])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('gives SpringBoard\'s keyboard no landing made after it', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      // The key's away check is slow; the home touch after it is placed meanwhile.
+      vi.spyOn(AppObserver.prototype, 'isAway').mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(true), 500)))
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      for (const [id, window] of [['f1', 'UIRemoteKeyboardWindow'], ['f2', 'SBHomeScreenWindow']] as const) {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+        d.emit(Date.now() + 2, 'com.apple.springboard', window)
+        await new Promise((r) => setTimeout(r, 15))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: id } as never)
+        await new Promise((r) => setTimeout(r, 150))
+      }
+      await new Promise((r) => setTimeout(r, 600))
+      expect(landed(sent)).toEqual([['f2', { on: 'home' }]])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('does not give a touch the events of a pinch after it', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      // A touch whose own event never came (before the stream attached, say), then a pinch in the app.
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.3, y: 0.4 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
+      await new Promise((r) => setTimeout(r, 30))
+      internals.handleRelayMessage({ type: 'input:pinch:start', sessionId: agent.sessionId!, payload: { f0: { x: 0.4, y: 0.4 }, f1: { x: 0.6, y: 0.6 } } } as never)
+      d.emit(Date.now() + 5, 'com.app', 'UIWindow')
+      internals.handleRelayMessage({ type: 'input:pinch:end', sessionId: agent.sessionId!, requestId: 'p1' } as never)
+      await new Promise((r) => setTimeout(r, 2200))
+      expect(landed(sent)).toEqual([])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('says once when a stream that speaks places nothing, a window it does not know included, and not for a key it skips on purpose', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      vi.spyOn(AppObserver.prototype, 'isAway').mockResolvedValue(false)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      const warned = () => warn.mock.calls.filter((c) => c.some((a) => String(a).includes('placed none of the last'))).length
+      const gestures = async (n: number, window: string) => {
+        for (let k = 0; k < n; k++) {
+          internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+          d.emit(Date.now() + 2, 'com.apple.springboard', window)
+          await new Promise((r) => setTimeout(r, 15))
+          internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: `${window}-${k}` } as never)
+          await new Promise((r) => setTimeout(r, 60))
+        }
+      }
+      // SpringBoard's keyboard with the app in front places nothing, on purpose: no warning however many.
+      await gestures(12, 'UIRemoteKeyboardWindow')
+      expect(warned()).toBe(0)
+      // A window it does not know: what a renamed one looks like.
+      await gestures(12, 'SBRenamedHomeWindow')
+      await vi.waitFor(() => expect(warned()).toBe(1), { timeout: 2000 })
+      expect(landed(sent)).toEqual([])
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('places every touch of a quick burst while the log trails, not only the last eight', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      // Twelve taps 120 ms apart; each one's line is stamped 5 ms after its down but delivered only after the burst.
+      const downs: number[] = []
+      for (let k = 0; k < 12; k++) {
+        internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.5, y: 0.5 } } as never)
+        downs.push(Date.now())
+        await new Promise((r) => setTimeout(r, 20))
+        internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: `b${k}` } as never)
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      for (const t of downs) d.emit(t + 5, 'com.app', 'UIWindow')
+      await vi.waitFor(() => expect(landed(sent)).toHaveLength(12), { timeout: 3000 })
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('reads the dispatch log only for a recorded boot on a relay that takes landings, and stops it with the watch', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      const boot = async (n: number, payload: Record<string, boolean>) => {
+        internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: `rq-${n}`, payload: { deviceId: 'dev-1', ...payload } } as never)
+        await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(n), { timeout: 3000 })
+      }
+      await boot(1, { observed: true })
+      expect(d.factory).not.toHaveBeenCalled()
+      await boot(2, { observed: true, touchObservations: true })
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1))
+      expect(d.procs[0]!.kill).not.toHaveBeenCalled()
+      // Picked up again: the first stream stops, a second reads.
+      await boot(3, { observed: true, touchObservations: true })
+      await vi.waitFor(() => expect(d.procs).toHaveLength(2))
+      expect(d.procs[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+      expect(d.procs[1]!.kill).not.toHaveBeenCalled()
+      // A boot nobody records ends it.
+      await boot(4, {})
+      expect(d.procs[1]!.kill).toHaveBeenCalledWith('SIGTERM')
+      await boot(5, { observed: true, touchObservations: true })
+      await vi.waitFor(() => expect(d.procs).toHaveLength(3))
+      const internal = agent as unknown as { cleanupDeviceState(s: unknown): void; deviceStates: Map<string, unknown>; relayFeatures: string[] }
+      internal.cleanupDeviceState(internal.deviceStates.get(agent.sessionId!))
+      expect(d.procs[2]!.kill).toHaveBeenCalledWith('SIGTERM')
+      // A relay from before #1214: nothing is read.
+      internal.relayFeatures = internal.relayFeatures.filter((f) => f !== 'touch-landings')
+      await boot(6, { observed: true, touchObservations: true })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(d.procs).toHaveLength(3)
+      vi.restoreAllMocks()
+      agent.disconnect()
+      browser.close()
+    })
+
+    it('stops the dispatch log when the agent disconnects', async () => {
+      vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const d = dispatchStreams()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { dispatchLog: d.factory })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      await vi.waitFor(() => expect(d.procs).toHaveLength(1))
+      expect(d.procs[0]!.kill).not.toHaveBeenCalled()
+      agent.disconnect()
+      expect(d.procs[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+      vi.restoreAllMocks()
       browser.close()
     })
 
@@ -3893,12 +4201,28 @@ describe('IOSAgent', () => {
       async function bootedAgent() {
         const simctl = mockSimctl(false)
         const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+        // Session admission reads the agent's latest resource sample. Keep this device-boot fixture
+        // independent of the machine running Vitest; the resource gate has its own relay tests.
+        const resources = (agent as unknown as {
+          resources: {
+            getMemoryUsage(): Promise<{ memUsedMB: number; memTotalMB: number }>
+            getMemoryPressure(): Promise<undefined>
+            getCpuPercent(): number
+          }
+        }).resources
+        vi.spyOn(resources, 'getMemoryUsage').mockResolvedValue({ memUsedMB: 1, memTotalMB: 1024 })
+        vi.spyOn(resources, 'getMemoryPressure').mockResolvedValue(undefined)
+        vi.spyOn(resources, 'getCpuPercent').mockReturnValue(0)
         await agent.connect(`ws://localhost:${port}`)
         const browser = new WebSocket(`ws://localhost:${port}`)
         await waitForOpen(browser)
-        const ready = waitForType(browser, 'device:ready')
+        const joinedReply = waitForMessage(browser)
         browser.send(JSON.stringify({ type: 'session:start', sessionId: agent.sessionId }))
-        await waitForType(browser, 'session:joined')
+        const joined = await joinedReply
+        if (joined.type !== 'session:joined') {
+          throw new Error(`session:start was refused: ${String(joined['message'] ?? joined.type)}`)
+        }
+        const ready = waitForType(browser, 'device:ready')
         browser.send(JSON.stringify({
           type: 'device:boot', requestId: 'rq-fix-11', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' },
         }))
@@ -4070,6 +4394,24 @@ describe('IOSAgent', () => {
       })
 
       // #1047. The wire handler calls simctl itself rather than `DeviceAgent.launchApp`, so the frame is what is tested.
+      it('log stream setup failure does not turn a successful app launch into an error', async () => {
+        const { simctl, agent, browser } = await bootedAgent()
+        vi.mocked(simctl.launchApp).mockResolvedValueOnce(456)
+        vi.mocked(simctl.getAppExecutablePath).mockRejectedValueOnce(new Error('app image unavailable'))
+
+        const done = waitForType(browser, 'app:launch-done')
+        deliver(agent, {
+          type: 'app:launch',
+          requestId: 'rq-log-setup',
+          sessionId: agent.sessionId,
+          payload: { bundleId: 'com.example.app' },
+        })
+
+        expect((await done).requestId).toBe('rq-log-setup')
+        await vi.waitFor(() => expect(simctl.getAppExecutablePath).toHaveBeenCalledWith('dev-1', 'com.example.app'))
+        agent.disconnect(); browser.close()
+      })
+
       it('launch passes arguments and env through and reports their names, never their values', async () => {
         const { simctl, agent, browser } = await bootedAgent()
 

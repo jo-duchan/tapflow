@@ -1,4 +1,4 @@
-import type { RawStep } from './segment.js'
+import { landedHome, type RawStep } from './segment.js'
 
 export interface StepRange {
   /** Indexes into the steps, `end` exclusive. */
@@ -34,8 +34,7 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
     // there — a step they cannot place stops it, and a visit home later is the person's own — unless the app's first
     // report says the app had not been touched yet (`pastOtherSurfaces`).
     start = clean + 1
-    let inApp = start
-    while (inApp < steps.length && steps[inApp]!.onHome === true && findsTheApp(steps[inApp]!)) inApp++
+    let inApp = pastLanded(steps, start)
     inApp = pastOtherSurfaces(steps, inApp)
     if (inApp < steps.length) start = inApp
   }
@@ -52,6 +51,38 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
 }
 
 /**
+ * Past the steps that found the app, from `from`: the run the reads or the agent place on the home screen, a system
+ * surface the agent placed (a banner, Control Center or the shade pulled down before the app opened), and a run of
+ * another app's touches with the home screen after it (Android's Google feed, swiped back from) — #1214. Another app's
+ * touches with the app after them are a sheet the app raised as it opened (a sign-in, a purchase) and stay, as does a
+ * prompt (`alert`) or a step nothing places.
+ */
+function pastLanded(steps: readonly RawStep[], from: number): number {
+  const landed = (s: RawStep) => ('landed' in s ? s.landed : undefined)
+  let i = from
+  while (i < steps.length && findsTheApp(steps[i]!)) {
+    const s = steps[i]!
+    if (homeHere(s) || landed(s)?.on === 'system') { i++; continue }
+    if (landed(s)?.on !== 'other' || landedHome(landed(s))) break
+    let j = i
+    while (j < steps.length && findsTheApp(steps[j]!) && landed(steps[j]!)?.on === 'other' && !landedHome(landed(steps[j]!))) j++
+    if (j < steps.length && steps[j]!.onHome === true && findsTheApp(steps[j]!)) { i = j; continue }
+    break
+  }
+  return i
+}
+
+/**
+ * On the home screen by its reads, unless the agent placed it on another app: iOS reads say home for any app off the
+ * screen, a sheet another process shows over the app included, and that sheet with the app after it stays (#1214).
+ */
+function homeHere(s: RawStep): boolean {
+  const landed = 'landed' in s ? s.landed : undefined
+  if (landed?.on === 'other' && !landedHome(landed)) return false
+  return s.onHome === true
+}
+
+/**
  * Past the screens beside the home screen (#1194): Android reads only the launcher as home, and the Google feed a swipe
  * right opens is another package (`googlequicksearchbox`, measured on Android 16), so the skip stopped there with the
  * drawer's swipe and the icon's tap still to come. The swipe onto it is not placed either: home before it and not home
@@ -62,8 +93,9 @@ export function defaultRange(steps: readonly RawStep[]): StepRange {
  * before it whose report was not paired is a step in the app. Anything but a touch or a navigation button (a link, a
  * launch, typing) stops it here.
  *
- * What this cannot tell: a tap on a dialog the app opened (another package, so unreported), then a trip home and back
- * before the app's first touch, reads like the feed's swipe and is left out (adversarial review; #1214).
+ * What this cannot tell from order alone: a tap on a dialog the app opened (another package, so unreported), then a trip
+ * home and back before the app's first touch, reads like the feed's swipe. An agent that says where each touch landed
+ * settles it (#1214): a step it placed on the app or on a prompt the app raised is never skipped here.
  */
 function pastOtherSurfaces(steps: readonly RawStep[], from: number): number {
   // From `from`: a report before the clean start is another run of the app.
@@ -74,8 +106,9 @@ function pastOtherSurfaces(steps: readonly RawStep[], from: number): number {
   let start = from
   for (let i = from; i < firstReported; i++) {
     const s = steps[i]!
-    if (!findsTheApp(s)) break
-    if (s.onHome) start = i + 1
+    const on = 'landed' in s ? s.landed?.on : undefined
+    if (!findsTheApp(s) || on === 'app' || on === 'alert') break
+    if (homeHere(s)) start = i + 1
   }
   return start
 }
@@ -93,13 +126,27 @@ export function rangeWarnings(steps: readonly RawStep[], range: StepRange): Rang
   while (at < range.end - 1 && steps[at]?.dropped) at++
   const first = steps[at]
   const out: RangeWarning[] = []
-  // A step the reads place in the app needs no launch of its own to start from: the replay launches the app first.
-  if (first?.kind !== 'launch' && first?.onHome !== false) out.push('no-launch-at-start')
+  // A step the reads place in the app needs no launch of its own to start from: the replay launches the app first. So
+  // does another app's sheet the app's own touch follows, which the range keeps (`pastLanded`) and iOS reads as home.
+  if (first?.kind !== 'launch' && first?.onHome !== false && !sheetBeforeApp(steps, at, range.end)) out.push('no-launch-at-start')
   const before = steps.slice(0, range.start)
   const lastLaunch = before.map((s) => s.kind).lastIndexOf('launch')
   const cleanBefore = before.some((s, i) => (s.kind === 'clearState' || s.kind === 'install') && s.outcome !== 'refused' && i > lastLaunch)
   if (first?.kind === 'launch' && !cleanBefore) out.push('no-clean-start')
   return out
+}
+
+/**
+ * A run of another app's steps from `from`, with a step the agent placed in the app after it, before `end`: the next one
+ * the replay sends, since a step left out (`dropped`) raises nothing.
+ */
+function sheetBeforeApp(steps: readonly RawStep[], from: number, end: number): boolean {
+  const landed = (s: RawStep | undefined) => (s && 'landed' in s ? s.landed : undefined)
+  let j = from
+  while (j < end && landed(steps[j])?.on === 'other' && !landedHome(landed(steps[j]))) j++
+  if (j === from) return false
+  while (j < end && steps[j]!.dropped) j++
+  return j < end && landed(steps[j])?.on === 'app'
 }
 
 /**

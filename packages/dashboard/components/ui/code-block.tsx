@@ -56,8 +56,9 @@ function CodeBlockActions({ className, ...props }: React.ComponentProps<'div'>) 
  * Copies `value`, and says so for a moment. `copy` is the page's own (a plain-HTTP page has no clipboard API, and the
  * caller may say so somewhere else); without one it is the browser's.
  */
-function CodeBlockCopyButton({ value, copy, className, onClick, ...props }: React.ComponentProps<typeof Button> & {
-  value: string
+function CodeBlockCopyButton({ value, copy, className, onClick, ...props }: Omit<React.ComponentProps<typeof Button>, 'value'> & {
+  /** A function is read at click time, for a value too large to rebuild on every render (the app log). */
+  value: string | (() => string)
   copy?: (text: string) => Promise<boolean>
 }) {
   const [copied, setCopied] = React.useState(false)
@@ -72,7 +73,7 @@ function CodeBlockCopyButton({ value, copy, className, onClick, ...props }: Reac
       <Button
         data-slot="code-block-copy-button" data-copied={copied || undefined} variant="ghost" size="icon"
         aria-label={copied ? 'Copied' : 'Copy'} className={cn('size-7', className)}
-        onClick={(event) => { onClick?.(event); void write(value).then((ok) => { if (ok) setCopied(true) }) }}
+        onClick={(event) => { onClick?.(event); void write(typeof value === 'function' ? value() : value).then((ok) => { if (ok) setCopied(true) }) }}
         {...props}
       >
         {copied ? <Check aria-hidden="true" className="size-3.5" /> : <Copy aria-hidden="true" className="size-3.5" />}

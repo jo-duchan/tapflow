@@ -71,6 +71,22 @@ describe('the door rejects what it cannot name', () => {
   })
 })
 
+describe('app log frames', () => {
+  it('keeps the app text unchanged in the agent direction', () => {
+    const text = 'first line\n\u0000\ud83d\ude80'
+    const parsed = ok({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
+    expect(directionOf(parsed.msg.type)).toBe('agent')
+    expect(parsed.msg).toEqual({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
+  })
+
+  it('rejects app log chunks over the wire limit', () => {
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: 'x'.repeat(8193) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: '🚀'.repeat(2049) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'unscoped' }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: '', text: 'unscoped' }).reason).toBe('bad-shape')
+  })
+})
+
 describe('an empty correlator is not a correlator', () => {
   // The predicates this replaced (`isAddressed` / `isCorrelated`) rejected `''` as well as absence,
   // and a bare `z.string()` accepts it. Losing that half is invisible to every type-level assertion:
@@ -534,5 +550,33 @@ describe('a keyboard read carries whether the home screen was in front', () => {
 
   it('reads an onHome that is not a boolean as absent, keeping the keyboard', () => {
     expect(read({ shown: false, onHome: 'yes' })).toEqual({ shown: false })
+  })
+})
+
+// #1214: where a recorded touch went down. A landing the relay cannot read is none, so the touch is judged as before.
+describe('a touch landing', () => {
+  const msg = (landed: unknown) => ({ type: 'capture:landed', sessionId: 's', requestId: 'r', landed })
+
+  it('keeps each place it can be, and what took it', () => {
+    for (const on of ['app', 'home', 'system', 'alert', 'other']) {
+      expect((ok(msg({ on })).msg as { landed: unknown }).landed).toEqual({ on })
+    }
+    expect((ok(msg({ on: 'other', id: 'com.google.android.googlequicksearchbox' })).msg as { landed: unknown }).landed)
+      .toEqual({ on: 'other', id: 'com.google.android.googlequicksearchbox' })
+  })
+
+  it('refuses a place it does not know, rather than guess one', () => {
+    expect(fail(msg({ on: 'lockscreen' })).reason).toBeDefined()
+    expect(fail(msg({})).reason).toBeDefined()
+  })
+
+  it('drops an id it cannot use and keeps the place', () => {
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(257) })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: '' })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(256) })).msg as { landed: { id: string } }).landed.id).toHaveLength(256)
+  })
+
+  it('is an agent message', () => {
+    expect(directionOf('capture:landed')).toBe('agent')
   })
 })
