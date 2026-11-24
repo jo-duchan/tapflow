@@ -64,13 +64,23 @@ export class AppLogWatch {
     private readonly onError: (error: Error) => void,
     private readonly deps: AppLogWatchDeps,
     private readonly now: () => number = Date.now,
-  ) {}
+    /** The run the watch's previous stream left unfinished (`stop()`'s answer), so a stream raised again after a boot
+     *  or an install still says `exited` before the next run, or nothing if that run is still up. */
+    previousRun: number | null = null,
+  ) {
+    this.current = previousRun
+  }
+
+  private warnedNoUid = false
 
   async start(): Promise<void> {
     const uid = await this.deps.uid().catch(() => null)
     if (this.stopped) return
     if (uid === null) {
-      this.onError(new Error(`no app log watch for ${this.packageName}: not installed, or its uid is shared`))
+      // Asked again, later each time: a failed adb call reads the same as a package not there yet.
+      if (!this.warnedNoUid) this.onError(new Error(`no app log watch for ${this.packageName} yet: not installed, its uid is shared, or adb did not answer`))
+      this.warnedNoUid = true
+      this.scheduleRestart()
       return
     }
     this.uid = uid
@@ -82,8 +92,10 @@ export class AppLogWatch {
       this.endCurrent()
       this.current = running
       this.push({ kind: 'run', event: 'running', pid: running })
-      this.flush()
+    } else if (running === undefined) {
+      this.endCurrent()
     }
+    this.flush()
     const time = await this.deps.deviceTime().catch(() => undefined)
     if (this.stopped) return
     this.spawnStream(uid, time)
@@ -93,8 +105,9 @@ export class AppLogWatch {
     }
   }
 
-  stop(): void {
-    if (this.stopped) return
+  /** Returns the run still unfinished, for the next stream of the same watch. */
+  stop(): number | null {
+    if (this.stopped) return null
     this.stopped = true
     for (const timer of [this.retryTimer, this.restartTimer]) if (timer) clearTimeout(timer)
     if (this.exitPoll) clearInterval(this.exitPoll)
@@ -104,6 +117,7 @@ export class AppLogWatch {
     const child = this.child
     this.child = null
     if (child && child.exitCode === null && !child.killed) child.kill('SIGTERM')
+    return this.current !== null && !this.exited.has(this.current) ? this.current : null
   }
 
   private spawnStream(uid: number, time: string | undefined): void {
@@ -221,13 +235,14 @@ export class AppLogWatch {
   private async checkExit(): Promise<void> {
     if (this.stopped || this.polling || this.uid === null || this.current === null || this.exited.has(this.current)) return
     this.polling = true
+    // Taken before the answer: a run started while `ps` ran is not in that answer, and must not be ended by it.
+    const current = this.current
     try {
       const processes = await this.deps.processes(this.uid)
       if (this.stopped) return
       this.note(processes)
-      const current = this.current
       // Lines still waiting to be placed may belong to the run: it ends after them.
-      if (current !== null && !processes.some((p) => p.pid === current) && this.lines.length === 0) {
+      if (this.current === current && !processes.some((p) => p.pid === current) && this.lines.length === 0) {
         this.endCurrent()
         this.flush()
       }

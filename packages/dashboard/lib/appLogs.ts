@@ -10,6 +10,8 @@ export const APP_LOG_TRIM_STEP = 1_000
  * output (lines of 80–250 characters) reaches the line cap first: 50,000 of them measured 32–37 MB of heap in all.
  */
 export const APP_LOG_MAX_CHARS = 16_000_000
+/** Text the feed holds waiting for a frame before it applies it anyway (a hidden tab runs none). */
+export const APP_LOG_PENDING_CHARS = 1_000_000
 
 /**
  * The launched app's output as lines (#1233). Appended to in place and never copied, since the viewer holds it in a ref
@@ -123,6 +125,7 @@ export class AppLogFeed {
   private version = 0
   // Text and separators since the last frame, in order: a separator must land after the text before it.
   private pending: Array<{ text: string } | { mark: string }> = []
+  private pendingChars = 0
   private frame: number | null = null
   private snapshot: AppLogSnapshot
   private readonly listeners = new Set<() => void>()
@@ -136,6 +139,7 @@ export class AppLogFeed {
       if (this.frame !== null) cancelAnimationFrame(this.frame)
       this.frame = null
       this.pending = []
+      this.pendingChars = 0
       this.buffer = new AppLogBuffer()
       this.version = 0
       this.active = false
@@ -152,18 +156,32 @@ export class AppLogFeed {
     if (event.kind === 'mark') this.pending.push({ mark: event.text })
     else if (last && 'text' in last) last.text += event.text
     else this.pending.push({ text: event.text })
+    this.pendingChars += event.text.length
+    // A hidden tab runs no frames, and a watched app writes all session: past this much, applied without waiting, so
+    // what waits stays within the buffer's own cap.
+    if (this.pendingChars > APP_LOG_PENDING_CHARS) {
+      if (this.frame !== null) cancelAnimationFrame(this.frame)
+      this.frame = null
+      this.apply()
+      return
+    }
     if (this.frame !== null) return
     this.frame = requestAnimationFrame(() => {
       this.frame = null
-      const items = this.pending
-      this.pending = []
-      for (const item of items) {
-        if ('mark' in item) this.buffer.mark(item.mark)
-        else this.buffer.append(item.text)
-      }
-      this.version++
-      this.changed()
+      this.apply()
     })
+  }
+
+  private apply(): void {
+    const items = this.pending
+    this.pending = []
+    this.pendingChars = 0
+    for (const item of items) {
+      if ('mark' in item) this.buffer.mark(item.mark)
+      else this.buffer.append(item.text)
+    }
+    this.version++
+    this.changed()
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {

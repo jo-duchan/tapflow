@@ -300,6 +300,8 @@ interface DeviceState {
   appLogWatch: { watchId: string; bundleId: string } | null
   appLogWatcher: AppLogWatch | null
   appLogWatchGeneration: number
+  /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
+  appLogWatchRun: { watchId: string; pid: number } | null
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
   // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
@@ -806,6 +808,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         appLogWatch: null,
         appLogWatcher: null,
         appLogWatchGeneration: 0,
+        appLogWatchRun: null,
         streamReader: null,
         captureStreamer: null,
         bootSeq: 0,
@@ -957,7 +960,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
   private stopAppLogWatcher(state: DeviceState): number {
     const generation = ++state.appLogWatchGeneration
-    state.appLogWatcher?.stop()
+    const watchId = state.appLogWatch?.watchId
+    const pid = state.appLogWatcher?.stop() ?? null
+    if (pid !== null && watchId) state.appLogWatchRun = { watchId, pid }
     state.appLogWatcher = null
     return generation
   }
@@ -978,6 +983,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       .then((processImagePath) => {
         if (!current() || state.appLogWatcher) return
         const sessionId = state.sessionId
+        // A per-launch stream on this device would be taken for an orphan by the watch's sweep: ended here instead.
+        this.stopAppLogStream(state)
+        const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
+        state.appLogWatchRun = null
         const watcher = new AppLogWatch(
           state.deviceId,
           processImagePath,
@@ -990,6 +999,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           },
           (error) => logger.warn('app log watch:', error.message),
           this.appLogWatchDeps,
+          Date.now,
+          previous,
         )
         state.appLogWatcher = watcher
         return watcher.start()
@@ -2626,7 +2637,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
             if (
               this.relayFeatures.includes('app-logs') &&
               // A watched app's output comes from the watch, whichever way the app was opened.
-              !launchState.appLogWatch &&
+              launchState.appLogWatch?.bundleId !== bundleId &&
               typeof pid === 'number' &&
               Number.isSafeInteger(pid) &&
               pid > 0 &&

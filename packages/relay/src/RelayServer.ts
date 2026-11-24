@@ -3911,13 +3911,12 @@ export class RelayServer {
     const current = this.appLogWatches.get(session.id)
     let bundleId: string | null = null
     if (hasCapability(session.agentCapabilities, 'app-log-watch') && !isAiClientKind(session.holderKind)) {
-      bundleId = options.bundleId ?? current?.bundleId ?? null
-      if (session.installed) {
-        const build = getDb().prepare('SELECT bundle_id FROM builds WHERE id = ?').get(session.installed.buildId) as { bundle_id: string | null } | undefined
-        bundleId = build?.bundle_id ?? bundleId
-      } else if (!options.bundleId) {
-        bundleId = null
-      }
+      // The app launched, else the one installed, else the one already watched: a cold boot clears the install record
+      // and the agent keeps the watch across it, so the record going is no reason to end the watch.
+      const installed = session.installed
+        ? (getDb().prepare('SELECT bundle_id FROM builds WHERE id = ?').get(session.installed.buildId) as { bundle_id: string | null } | undefined)?.bundle_id
+        : undefined
+      bundleId = options.bundleId ?? installed ?? current?.bundleId ?? null
     }
     if (bundleId === null) {
       this.endAppLogWatch(session.id)

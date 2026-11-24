@@ -296,6 +296,8 @@ interface DeviceState {
   appLogWatch: { watchId: string; bundleId: string } | null
   appLogWatcher: AppLogWatch | null
   appLogWatchGeneration: number
+  /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
+  appLogWatchRun: { watchId: string; pid: number } | null
   /** Why each abandoned boot was abandoned, keyed by **the seq it lost**. A single slot would tell the
    *  wrong story the moment two boots overlap: boot A, boot B, then a shutdown leaves one slot saying
    *  `shut-down`, which is what B lost to — A lost to B.
@@ -799,6 +801,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         appLogWatch: null,
         appLogWatcher: null,
         appLogWatchGeneration: 0,
+        appLogWatchRun: null,
         touchHelper: null,
         booted: false,
         streamWs: null,
@@ -957,7 +960,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
   private stopAppLogWatcher(state: DeviceState): void {
     ++state.appLogWatchGeneration
-    state.appLogWatcher?.stop()
+    const watchId = state.appLogWatch?.watchId
+    const pid = state.appLogWatcher?.stop() ?? null
+    if (pid !== null && watchId) state.appLogWatchRun = { watchId, pid }
     state.appLogWatcher = null
   }
 
@@ -969,6 +974,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     if (!wanted || !state.booted || !serial || state.appLogWatcher) return
     const generation = ++state.appLogWatchGeneration
     const sessionId = state.sessionId
+    this.stopAppLogStream(state)
+    const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
+    state.appLogWatchRun = null
     const current = () => state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(sessionId) === state
     const deps: AppLogWatchDeps = {
       ...this.appLogWatchDeps,
@@ -994,6 +1002,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       },
       (error) => logger.warn('app log watch:', error.message),
       deps,
+      Date.now,
+      previous,
     )
     state.appLogWatcher = watcher
     void watcher.start()
@@ -3297,7 +3307,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             if (
               this.relayFeatures.includes('app-logs') &&
               // A watched app's output comes from the watch, whichever way the app was opened.
-              !state!.appLogWatch &&
+              state!.appLogWatch?.bundleId !== bundleId &&
               state!.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId) === state
             ) {

@@ -201,6 +201,59 @@ describe('app log routing', () => {
       agent.close(); browser.close()
     })
 
+    it('keeps the watch over a cold boot, which clears the install record but not the app the agent watches', async () => {
+      const { agent, sessionId } = await register()
+      const browser = await join(sessionId)
+      const first = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      await install(agent, browser, sessionId)
+      const { watchId } = await first
+      const again = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      agent.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { cold: true } }))
+      expect((await again).watchId).toBe(watchId)
+      expect(await waitForTypeOrNull(agent, 'app:logs:unwatch', 0)).toBeNull()
+      agent.close(); browser.close()
+    })
+
+    it('ends the watch while an MCP client borrows the device, sends it nothing, and watches again for the person', async () => {
+      const { agent, sessionId } = await register()
+      const person = await join(sessionId)
+      const first = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      await install(agent, person, sessionId)
+      const { watchId } = await first
+      person.close()
+      await barrier(agent)
+      const unwatch = waitForType<AppLogsUnwatch>(agent, 'app:logs:unwatch')
+      const mcp = await join(sessionId, 'mcp')
+      expect((await unwatch).watchId).toBe(watchId)
+      agent.send(JSON.stringify({ type: 'app:log', sessionId, watchId, text: 'private\n' }))
+      agent.send(JSON.stringify({ type: 'app:log:run', sessionId, watchId, event: 'started', pid: 1 }))
+      await barrier(agent)
+      await barrier(mcp)
+      expect(await waitForTypeOrNull(mcp, 'app:log', 0)).toBeNull()
+      expect(await waitForTypeOrNull(mcp, 'app:log:run', 0)).toBeNull()
+      mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+      await barrier(mcp)
+      const again = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      const back = await join(sessionId)
+      expect((await again).watchId).not.toBe(watchId)
+      agent.close(); mcp.close(); back.close()
+    })
+
+    it('drops text for a full socket but never a run boundary', async () => {
+      const { agent, sessionId } = await register()
+      const browser = await join(sessionId)
+      const watch = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      await install(agent, browser, sessionId)
+      const { watchId } = await watch
+      const held = (server as unknown as { sessions: { get(id: string): { browserSocket: WebSocket } } }).sessions.get(sessionId).browserSocket
+      Object.defineProperty(held, 'bufferedAmount', { get: () => 1 << 30 })
+      agent.send(JSON.stringify({ type: 'app:log', sessionId, watchId, text: 'dropped\n' }))
+      agent.send(JSON.stringify({ type: 'app:log:run', sessionId, watchId, event: 'exited', pid: 7 }))
+      expect(await waitForType(browser, 'app:log:run')).toMatchObject({ event: 'exited', pid: 7 })
+      expect(await waitForTypeOrNull(browser, 'app:log', 0)).toBeNull()
+      agent.close(); browser.close()
+    })
+
     it('ends the watch when the session ends', async () => {
       const { agent, sessionId } = await register()
       const browser = await join(sessionId)

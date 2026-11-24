@@ -11,7 +11,7 @@ function fakeChild() {
   return Object.assign(new EventEmitter(), { stdout, exitCode: null, killed: false, kill: vi.fn() }) as unknown as ChildProcess & { stdout: EventEmitter }
 }
 
-function setup(over: Partial<AppLogWatchDeps> = {}) {
+function setup(over: Partial<AppLogWatchDeps> = {}, previousRun: number | null = null) {
   const children: Array<ReturnType<typeof fakeChild>> = []
   const procs: Array<{ pid: number; name: string }> = []
   const deps: AppLogWatchDeps = {
@@ -23,7 +23,7 @@ function setup(over: Partial<AppLogWatchDeps> = {}) {
     ...over,
   }
   const items: AppLogWatchItem[] = []
-  const watch = new AppLogWatch('emulator-5594', PKG, (item) => { items.push(structuredClone(item)); return true }, vi.fn(), deps)
+  const watch = new AppLogWatch('emulator-5594', PKG, (item) => { items.push(structuredClone(item)); return true }, vi.fn(), deps, Date.now, previousRun)
   const shown = () => items.map((i) => (i.kind === 'run' ? `[${i.event} ${i.pid}]` : i.text)).join('')
   const settle = () => vi.advanceTimersByTimeAsync(0)
   return { deps, children, procs, items, watch, shown, settle }
@@ -97,6 +97,39 @@ describe('Android app log watch', () => {
     const { deps, watch } = setup({ uid: vi.fn(async () => null) })
     await watch.start()
     expect(deps.spawn).not.toHaveBeenCalled()
+    watch.stop()
+  })
+
+  it('asks for the uid again when adb did not answer, rather than giving up for the session', async () => {
+    const { deps, watch } = setup({ uid: vi.fn().mockResolvedValueOnce(null).mockResolvedValue(10193) })
+    await watch.start()
+    expect(deps.spawn).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_RESTART_MIN_MS)
+    expect(deps.spawn).toHaveBeenCalledTimes(1)
+    watch.stop()
+  })
+
+  it('does not end a run that started while a poll was out', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    vi.mocked(deps.processes).mockResolvedValueOnce([{ pid: 9, name: PKG }])
+    await watch.start()
+    let release!: (value: Array<{ pid: number; name: string }>) => void
+    vi.mocked(deps.processes)
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+      .mockResolvedValue([{ pid: 10, name: PKG }])
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_EXIT_POLL_MS)
+    children[0]!.stdout.emit('data', line(10, 'new'))
+    await settle()
+    release([])
+    await settle()
+    expect(shown()).toBe('[running 9][exited 9][started 10]new\n')
+    watch.stop()
+  })
+
+  it('raised again after a boot or an install, ends the run the last stream left', async () => {
+    const { shown, watch } = setup({}, 55)
+    await watch.start()
+    expect(shown()).toBe('[exited 55]')
     watch.stop()
   })
 

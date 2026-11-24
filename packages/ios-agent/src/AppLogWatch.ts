@@ -103,7 +103,11 @@ export class AppLogWatch {
     private readonly onError: (error: Error) => void,
     private readonly deps: AppLogWatchDeps = defaultAppLogWatchDeps,
     private readonly now: () => number = Date.now,
+    /** The run the watch's previous stream left unfinished (`stop()`'s answer), so a stream raised again after a boot
+     *  or an install still says `exited` before the next run, or nothing if that run is still up. */
+    previousRun: number | null = null,
   ) {
+    this.current = previousRun
     const exec = basename(processImagePath)
     this.imageSuffix = `/${basename(dirname(processImagePath))}/${exec}`
     this.entry = new RegExp(`^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+ \\S+ +${escapeRegExp(exec)}\\[(\\d+):`)
@@ -120,8 +124,10 @@ export class AppLogWatch {
       this.endCurrent()
       this.current = running
       this.push({ kind: 'run', event: 'running', pid: running })
-      this.flush()
+    } else if (running === null) {
+      this.endCurrent()
     }
+    this.flush()
     this.spawnStream()
     if (!this.exitPoll) {
       this.exitPoll = setInterval(() => this.checkExit(), APP_LOG_WATCH_EXIT_POLL_MS)
@@ -129,8 +135,9 @@ export class AppLogWatch {
     }
   }
 
-  stop(): void {
-    if (this.stopped) return
+  /** Returns the run still unfinished, for the next stream of the same watch. */
+  stop(): number | null {
+    if (this.stopped) return null
     this.stopped = true
     for (const timer of [this.retryTimer, this.restartTimer]) if (timer) clearTimeout(timer)
     if (this.exitPoll) clearInterval(this.exitPoll)
@@ -139,6 +146,7 @@ export class AppLogWatch {
     const child = this.child
     this.child = null
     if (child && child.exitCode === null && !child.killed) child.kill('SIGTERM')
+    return this.current !== null && !this.exited.has(this.current) ? this.current : null
   }
 
   private spawnStream(): void {

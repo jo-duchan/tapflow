@@ -44,7 +44,8 @@ describe('DeviceViewer app log feed', () => {
   // The log's rows are a lazy chunk; loaded up front so a test can read them in the same frame.
   beforeAll(() => loadAppLogRows())
   beforeEach(() => {
-    send.mockClear()
+    // Reset, not cleared: a test that has the relay take each send must not leave it doing so for the next.
+    send.mockReset()
     deliver = null
     frames = []
     layout = fakeAppLogLayout()
@@ -206,6 +207,34 @@ describe('DeviceViewer app log feed', () => {
       run('started', 200)
       flushFrames()
       expect(rows()).toEqual(['── App started (pid 100) ──', 'first run', '── App exited (pid 100) ──', '── App started (pid 200) ──'])
+    })
+
+    it('shows nothing an install emptied it of, until the next run starts', () => {
+      // The viewer empties the log only for a send the relay took.
+      send.mockReturnValue(true)
+      render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
+      act(() => { deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs', 'app-log-watch'] }) })
+      act(() => { deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } }) })
+      expect(sent('app:install').keepIfInstalled).toBeUndefined()
+      log('the old app, still writing\n')
+      run('exited', 50)
+      flushFrames()
+      expect(output()).toBeNull()
+      run('started', 60)
+      log('new\n')
+      flushFrames()
+      expect(rows()).toEqual(['── App started (pid 60) ──', 'new'])
+    })
+
+    it('follows Launch again when the agent that comes back does not watch', () => {
+      watchedInstalled()
+      act(() => { deliver!({ type: 'session:rebound', sessionId: 'mine', capabilities: ['app-logs'] }) })
+      act(() => { deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } }) })
+      act(() => { deliver!({ type: 'session:chrome', sessionId: 'mine', payload: CHROME }) })
+      const launchId = launch()
+      act(() => { deliver!({ type: 'app:log', sessionId: 'mine', launchId, text: 'old agent\n' }) })
+      flushFrames()
+      expect(lines()).toEqual(['old agent'])
     })
 
     it('is not opened by an exit alone, which is all a cleared app would show', () => {

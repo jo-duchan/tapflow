@@ -18,7 +18,7 @@ function fakeChild() {
   return Object.assign(new EventEmitter(), { stdout, exitCode: null, killed: false, kill: vi.fn() }) as unknown as ChildProcess & { stdout: EventEmitter }
 }
 
-function setup(over: Partial<AppLogWatchDeps> = {}) {
+function setup(over: Partial<AppLogWatchDeps> = {}, previousRun: number | null = null) {
   const children: Array<ReturnType<typeof fakeChild>> = []
   const alive = new Set<number>()
   const deps: AppLogWatchDeps = {
@@ -31,7 +31,7 @@ function setup(over: Partial<AppLogWatchDeps> = {}) {
   }
   const items: AppLogWatchItem[] = []
   let accept = true
-  const watch = new AppLogWatch('U1', IMAGE, (item) => { if (!accept) return false; items.push(structuredClone(item)); return true }, vi.fn(), deps)
+  const watch = new AppLogWatch('U1', IMAGE, (item) => { if (!accept) return false; items.push(structuredClone(item)); return true }, vi.fn(), deps, Date.now, previousRun)
   /** What the holder would see: text joined, a run boundary as its own marker. */
   const shown = () => items.map((i) => (i.kind === 'run' ? `[${i.event} ${i.pid}]` : i.text)).join('')
   return { deps, children, alive, items, watch, shown, block: (b: boolean) => { accept = !b } }
@@ -89,6 +89,20 @@ describe('iOS app log watch', () => {
     children[0]!.stdout.emit('data', entry(300, 'still here'))
     expect(shown()).toBe(`[running 300]${entry(300, 'still here')}`)
     watch.stop()
+  })
+
+  it('raised again after a boot or an install, ends the run the last stream left, or carries on with it', async () => {
+    const gone = setup({}, 100)
+    await gone.watch.start()
+    expect(gone.shown()).toBe('[exited 100]')
+    gone.watch.stop()
+
+    const up = setup({ findRunning: vi.fn(async () => 100) }, 100)
+    up.alive.add(100)
+    await up.watch.start()
+    up.children[0]!.stdout.emit('data', entry(100, 'still'))
+    expect(up.shown()).toBe(entry(100, 'still'))
+    expect(up.watch.stop()).toBe(100)
   })
 
   it('ends the streams an earlier agent left before starting its own (#1235)', async () => {

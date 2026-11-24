@@ -191,6 +191,9 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   /** The agent watches the app (`app-log-watch`): its output comes however the app was opened, runs are marked in one
    *  log, and only Install and Clear state empty it. Otherwise the box follows this viewer's own Launch, as before. */
   const appLogWatchRef = useRef(false);
+  /** Emptied by an install or a clear state: the app's output still in flight from before is not shown, until the
+   *  next run starts. */
+  const appLogQuietRef = useRef(false);
   const [swKeyboardVisible, setSwKeyboardVisible] = useState(false);
   /** The same length `useNetworkControl` gives its own request, and for the same reason: an
    *  uncorrelated request whose only answer may never come. */
@@ -288,6 +291,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'app:log') {
       if (msg.watchId !== undefined) {
+        if (appLogQuietRef.current) return;
         appLogFeed.handle({ kind: 'open' });
         appLogFeed.handle({ kind: 'text', text: msg.text });
         return;
@@ -297,6 +301,10 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       return;
     }
     if (msg.type === 'app:log:run') {
+      if (appLogQuietRef.current) {
+        if (msg.event === 'exited') return;
+        appLogQuietRef.current = false;
+      }
       // An exit alone does not open the box: after a clear state it is all there would be to show.
       if (msg.event !== 'exited') appLogFeed.handle({ kind: 'open' });
       appLogFeed.handle({ kind: 'mark', text: appLogMarkText(msg.event, msg.pid), onlyIfShown: true });
@@ -355,6 +363,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     if (msg.type === 'session:rebound') {
       appLogLaunchIdRef.current = null;
       if (!appLogWatchRef.current) appLogFeed.handle({ kind: 'clear' });
+      // Another agent, maybe of another version: whether it watches is its own answer.
+      appLogWatchRef.current = msg.capabilities.includes('app-log-watch');
       // The agent restarted under us. Nothing is streaming, but until the new agent answers, every
       // flag here still describes the old one — and the relay cannot tell a viewer to stop, since
       // its own "agent offline" check sees a live socket (the new agent's). So tear down first,
@@ -687,6 +697,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     const sent = relaySend(msg);
     if (sent) thumbnailsRef.current?.note(msg);
     if (sent && (appLogWatchRef.current ? emptiesWatchedLog(msg) : endsShownLaunch(msg, appLogLaunchIdRef.current))) {
+      if (appLogWatchRef.current) appLogQuietRef.current = true;
       appLogLaunchIdRef.current = null;
       appLogFeed.handle({ kind: 'clear' });
     }

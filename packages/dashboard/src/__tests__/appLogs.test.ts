@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { AppLogBuffer, appLogMarkText, emptiesWatchedLog, endsShownLaunch } from '@/lib/appLogs'
+import { APP_LOG_PENDING_CHARS, AppLogBuffer, AppLogFeed, appLogMarkText, emptiesWatchedLog, endsShownLaunch } from '@/lib/appLogs'
+import { vi } from 'vitest'
 
 describe('app log buffer', () => {
   const rows = (buffer: AppLogBuffer) => Array.from({ length: buffer.rowCount }, (_, i) => buffer.row(i))
@@ -130,3 +131,19 @@ describe('run separators', () => {
   })
 })
 
+describe('app log feed', () => {
+  it('applies text without a frame once enough waits, as in a hidden tab that runs none', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    try {
+      const feed = new AppLogFeed()
+      feed.handle({ kind: 'open' })
+      feed.handle({ kind: 'text', text: 'a\n' })
+      expect(feed.getSnapshot().rows).toBe(0)
+      feed.handle({ kind: 'text', text: `${'x'.repeat(APP_LOG_PENDING_CHARS)}\n` })
+      expect(feed.getSnapshot().rows).toBe(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
