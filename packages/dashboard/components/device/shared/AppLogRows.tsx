@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useCallback, useLayoutEffect, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { AppLogBuffer } from '@/lib/appLogs'
 import { cn } from '@/lib/utils'
@@ -36,12 +36,15 @@ interface AppLogRowsProps {
  * without its identity changing. `version` is why this re-renders on every append.
  */
 export default function AppLogRows({ scrollElement, buffer, version, rows, dropped }: AppLogRowsProps) {
+  // Stable until lines are dropped: a new key function makes the virtualizer rebuild every row's position (up to
+  // 50,000) on any render, a scroll included. A drop shifts the keys and rebuilds them anyway.
+  const getItemKey = useCallback((index: number) => dropped + index, [dropped])
   // eslint-disable-next-line react-hooks/incompatible-library -- skipped by the compiler on purpose, see above
   const virtualizer = useVirtualizer({
     count: rows,
     getScrollElement: () => scrollElement,
     estimateSize: () => ROW_ESTIMATE,
-    getItemKey: (index) => dropped + index,
+    getItemKey,
     paddingStart: dropped > 0 ? DROPPED_NOTE_HEIGHT : 0,
     overscan: 8,
     anchorTo: 'end',
@@ -50,6 +53,12 @@ export default function AppLogRows({ scrollElement, buffer, version, rows, dropp
   })
   // `followOnAppend` follows a count that grows. Mounted with lines already held (the box opened again after a
   // collapse, or this chunk arrived after the first output), there is no growth to follow: start at the tail instead.
+  // The virtualizer keeps each drawn row's measured height by key and forgets none, so over a long stream it would
+  // hold one for every line ever shown. Keys below `dropped` name lines that are gone. A trim happens once per
+  // thousand lines, and the cache holds at most the lines drawn since, so the scan is small.
+  useLayoutEffect(() => {
+    for (const key of virtualizer.itemSizeCache.keys()) if ((key as number) < dropped) virtualizer.itemSizeCache.delete(key)
+  }, [dropped, virtualizer])
   const startedAtTail = useRef(false)
   useLayoutEffect(() => {
     // The box reaches the viewer's state a commit after it mounts, and reopened it is a new element.

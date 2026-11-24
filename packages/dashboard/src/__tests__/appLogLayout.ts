@@ -9,7 +9,7 @@
 /** The rows' height here: the viewer's estimate for one line, so a row lands where it was estimated to. */
 export const FAKE_ROW_HEIGHT = 27
 
-export function fakeAppLogLayout({ viewport = 220, rowHeight = (_text: string) => FAKE_ROW_HEIGHT } = {}) {
+export function fakeAppLogLayout({ viewport = 220, rowHeight = (_text: string): number => FAKE_ROW_HEIGHT } = {}) {
   const scrollTops = new WeakMap<Element, number>()
   const pending = new WeakSet<Element>()
   const isBox = (el: Element) => el.getAttribute('aria-label') === 'App log output'

@@ -5,6 +5,21 @@ import { loadAppLogRows } from '@/components/device/shared/appLogRowsChunk'
 import { APP_LOG_MAX_LINES, APP_LOG_TRIM_STEP } from '@/lib/appLogs'
 import { FAKE_ROW_HEIGHT, fakeAppLogLayout } from './appLogLayout'
 
+// The real virtualizer, passed straight through; the tests only keep a handle on what it was given and what it holds.
+type Virtualizer = ReturnType<typeof import('@tanstack/react-virtual')['useVirtualizer']>
+const virtualizers: { instance: Virtualizer; getItemKey: unknown }[] = []
+vi.mock('@tanstack/react-virtual', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-virtual')>()
+  return {
+    ...actual,
+    useVirtualizer: ((options: Parameters<typeof actual.useVirtualizer>[0]) => {
+      const instance = actual.useVirtualizer(options)
+      virtualizers.push({ instance, getItemKey: options.getItemKey })
+      return instance
+    }) as typeof actual.useVirtualizer,
+  }
+})
+
 function makeHandlerRef() {
   return { current: null as AppLogHandler | null }
 }
@@ -295,6 +310,37 @@ describe('AppLogViewer', () => {
       expect(box.scrollTop).toBe(box.scrollHeight - box.clientHeight)
       expect(lines()).toContain(`more ${i}`)
     }
+  })
+
+  // A new key function makes the virtualizer rebuild every row's position, 50,000 of them, on a render that only scrolled.
+  it('keeps the row key function across renders that drop nothing', () => {
+    const { send } = launched()
+    send('line\n'.repeat(200))
+    flushFrames()
+    flushFrames()
+    const before = virtualizers.at(-1)!.getItemKey
+    layout.scrollBox(output(), 0)
+    flushFrames()
+    send('more\n')
+    flushFrames()
+    expect(virtualizers.at(-1)!.getItemKey).toBe(before)
+  })
+
+  // Every row drawn leaves its measured height behind, keyed by line number: kept for dropped lines, that grows with
+  // everything the stream ever showed rather than with the cap.
+  it('forgets the measured heights of dropped lines', () => {
+    layout.restore()
+    layout = fakeAppLogLayout({ rowHeight: () => FAKE_ROW_HEIGHT + 13 })
+    const { send } = launched()
+    send(Array.from({ length: APP_LOG_MAX_LINES }, (_, i) => `line ${i}`).join('\n') + '\n')
+    flushFrames()
+    flushFrames()
+    send(Array.from({ length: APP_LOG_TRIM_STEP }, (_, i) => `more ${i}`).join('\n') + '\n')
+    flushFrames()
+    flushFrames()
+    const keys = [...virtualizers.at(-1)!.instance.itemSizeCache.keys()] as number[]
+    expect(keys.length).toBeGreaterThan(0)
+    expect(Math.min(...keys)).toBeGreaterThanOrEqual(APP_LOG_TRIM_STEP)
   })
 
   it('is focusable for keyboard users and is not a live region', () => {
