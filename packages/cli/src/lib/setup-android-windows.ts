@@ -532,6 +532,12 @@ export function registerWindowsUserEnv(deps: WindowsSetupDeps, sdk: string): 'ad
 
 // ── AVDs ───────────────────────────────────────────────────────────────────
 
+/**
+ * The exit status is not read: a failed `-list-avds` would read as "no AVDs", and the AVD step would then
+ * offer to create the whole set with `--force`. No path to that was found — the SDK step requires
+ * emulator.exe, and listing and creating share `sdkToolEnv`, so they look in the same AVD home — but a change
+ * to either assumption should make a failed listing "unknown" rather than empty.
+ */
 export function listAvdsWindows(deps: WindowsSetupDeps, sdk: string): string[] {
   const emulator = emulatorOf(sdk)
   if (!deps.exists(emulator)) return []
@@ -574,9 +580,11 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
     else unavailable.push(spec)
   }
   const unavailableNote = unavailable.length > 0
-    ? ` This avdmanager offers no device for ${unavailable.map((s) => `${s.name} (${s.deviceCandidates.join(', ')})`).join('; ')}, so ${unavailable.length === 1 ? 'it was' : 'they were'} left out.`
+    ? ` This avdmanager offers no device for ${unavailable.map((s) => `${s.name} (${s.deviceCandidates.join(', ')})`).join('; ')}, so ${unavailable.length === 1 ? 'it cannot' : 'they cannot'} be created here.`
     : ''
-  if (creatable.length === 0) return stop({ label: 'AVD', ok: false, warn: true, detail: `${situation}${unavailableNote}` })
+  if (creatable.length === 0) return stop({ label: 'AVD', ok: false, warn: true, detail: `${situation}${unavailableNote} ${manualHint}` })
+  // A decline is not remembered: the next run offers the same names again, and `--yes` (the person's
+  // consent for every prompt) creates them. That is the meaning of "offered", not an oversight.
   const names = creatable.map((c) => c.spec.name).join(', ')
   const question = finishing
     ? `An earlier run did not create every tapflow AVD. Create ${names} now?`
