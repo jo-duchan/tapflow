@@ -60,7 +60,7 @@ function fakePc(opts: {
     env,
     arch: 'x64',
     home: HOME,
-    installDir: () => env['TAPFLOW_HOME'] || p.join(HOME, '.tapflow'),
+    toolsHome: () => env['TAPFLOW_HOME'] || p.join(HOME, '.tapflow'),
     exists: (f) => files.has(f) || [...files].some((x) => x.startsWith(`${f}\\`)),
     readdir: (dir) => [...new Set([...files].filter((x) => x.startsWith(`${dir}\\`)).map((x) => x.slice(dir.length + 1).split('\\')[0]!))],
     mkdirp: () => {},
@@ -232,9 +232,34 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(results[2]).toMatchObject({ label: 'AVD', ok: false, warn: true })
     expect(results[2]!.detail).toContain('Could not create: tapflow-tablet.')
     expect(results[2]!.detail).toContain('Created: tapflow-compact, tapflow-phone, tapflow-large.')
+    expect(results[2]!.detail).toContain('Re-run tapflow setup android to try it again.')
   })
 
-  it('keeps the managed JDK in the resolved tapflow install, not always ~/.tapflow', async () => {
+  it('leaves out a set member avdmanager offers no device for, without failing or promising a re-run', async () => {
+    const noTablet = DEVICE_LIST.replace(/id: 4 or "pixel_tablet"\n/, '')
+    const listNoTablet = (c: Call) => (c.args.join(' ').includes('"list" "device"') ? { status: 0, stdout: noTablet, stderr: '' } : undefined)
+    const pc = fakePc({ files: PARTIAL_SDK, respond: listNoTablet })
+    const first = await runSetupAndroidWindows(pc.deps)
+    expect(first[2]).toMatchObject({ label: 'AVDs created: tapflow-compact, tapflow-phone, tapflow-large', ok: true })
+    expect(first[2]!.detail).toContain('offers no device for tapflow-tablet (pixel_tablet, pixel_c, Nexus 10)')
+    expect(first[2]!.detail).not.toContain('Re-run')
+
+    // The next run neither asks again nor fails: there is nothing it could make.
+    const prompts = pc.prompts.length
+    const second = await checkAndFixAvdWindows(pc.deps, SDK, true, { javaHome: null, javaExe: JAVA17, major: 17 })
+    expect(second).toMatchObject({ ok: true })
+    expect(pc.prompts.length).toBe(prompts)
+  })
+
+  it('passes with an incomplete tapflow set when the person declines to finish it', async () => {
+    const pc = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, AVDMANAGER, p.join(IMAGE_DIR, 'system.img')], answers: [false] })
+    pc.avds.push('tapflow-compact')
+    const r = await checkAndFixAvdWindows(pc.deps, SDK, true, { javaHome: null, javaExe: JAVA17, major: 17 })
+    expect(r).toMatchObject({ label: 'AVD ready: 1 device(s)', ok: true })
+    expect(r.detail).toContain('Skipped.')
+  })
+
+  it('keeps the managed JDK in the per-machine tapflow home (TAPFLOW_HOME here), not the current directory', async () => {
     const install = 'D:\\work\\my-tapflow'
     const pc = fakePc({
       files: [TAR],
@@ -247,7 +272,7 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
         return undefined
       },
     })
-    pc.deps.installDir = () => install
+    pc.deps.toolsHome = () => install
     const { result } = await checkAndFixJdkWindows(pc.deps)
     expect(result).toMatchObject({ ok: true, state: 'created' })
     expect(result.detail).toContain(`${install}\\tools\\jdk`)
