@@ -272,7 +272,9 @@ describe('findAapt: resolves via ANDROID_SDK_ROOT and Linux path (parity with do
     const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-sdkroot-'))
     const btDir = path.join(sdk, 'build-tools', '99.0.0')
     fs.mkdirSync(btDir, { recursive: true })
-    const aaptPath = path.join(btDir, 'aapt')
+    // The file name build-tools ship on this host: findAapt looks for `aapt.exe` on Windows (#1100),
+    // and the relay suite also runs on windows-latest.
+    const aaptPath = path.join(btDir, process.platform === 'win32' ? 'aapt.exe' : 'aapt')
     fs.writeFileSync(aaptPath, '')
     const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-emptyhome-')) // neutralize the real-SDK home candidate
     delete process.env.ANDROID_HOME
