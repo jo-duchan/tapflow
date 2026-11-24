@@ -90,10 +90,10 @@ tapflow setup android
 | `[platform]` | `ios` or `android`; omit to auto-detect |
 | `--yes`, `-y` | Windows, `setup android` only: answer yes to the download, install and create-AVD prompts, also without a terminal (a remote shell, a script). It accepts the Android SDK licences as those installs do. It never elevates: winget is skipped, because its installer can raise a UAC prompt, so a missing JDK comes from the per-user Temurin zip. It does not turn on Windows features. Elsewhere it is ignored with a warning, and it never answers sudo, the iOS steps or the network-filter approval. |
 
-Runs in one pass, asking for consent before each install (interactive terminals only; non-interactive runs print the command instead). On both platforms it installs Homebrew first when it is missing.
+Runs in one pass, asking for consent before each install (interactive terminals only; non-interactive runs print the command instead). The exception is `setup android --yes` on Windows: the flag is your consent, so it runs without a terminal, and it never elevates. On macOS, both platforms install Homebrew first when it is missing; `setup android` on Windows does not use Homebrew.
 
 - **iOS**: opens the App Store for Xcode, accepts the license / runs first-launch (needs sudo), downloads a simulator runtime.
-- **Android**: installs a JDK, builds a self-contained SDK at `~/Library/Android/sdk` (command-line tools, platform-tools, emulator, system image — no Android Studio GUI), and creates a set of AVDs across form factors.
+- **Android**: installs a JDK, builds a self-contained SDK at `~/Library/Android/sdk` (command-line tools, platform-tools, emulator, system image — no Android Studio GUI), and creates a set of AVDs across form factors. On Windows the SDK goes to `%LOCALAPPDATA%\Android\Sdk`, an SDK already there only gets the packages it is missing, and setup ends by saying whether the emulator has hardware acceleration. `ANDROID_HOME` and the SDK's tool folders are added to your user environment, and any `%VARIABLE%` entries already in your user PATH stay as they are.
 
 Exits with code `0` when every step is ready and `1` whenever it prints `SETUP INCOMPLETE`. That is stricter than `doctor`, which passes a check that only warns: setup reports whether the work it was asked to do got done, not whether the Mac is usable.
 

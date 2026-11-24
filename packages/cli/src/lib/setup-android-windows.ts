@@ -379,14 +379,13 @@ export function missingSdkPackages(deps: WindowsSetupDeps, sdk: string): string[
 }
 
 /**
- * A system image counts as installed only when the extracted image is actually there — the large
- * download can drop partway and leave the package directory behind (the very failure the retry loop
- * exists for). Checking a file the finished package contains, rather than the bare directory, keeps a
- * half-extracted image in `missing` so the retry re-fetches it instead of reporting a usable SDK.
+ * A system image counts as installed only when `system.img` itself is there — the large download can
+ * drop partway and leave the package directory behind (the very failure the retry loop exists for).
+ * `system.img` is the file the emulator boots, so no other marker (`source.properties` is small and
+ * could outlive a half-finished extraction) is accepted in its place.
  */
 function isSystemImageInstalled(deps: WindowsSetupDeps, sdk: string, image: string): boolean {
-  const dir = winPath.join(sdk, ...image.split(';'))
-  return deps.exists(winPath.join(dir, 'system.img')) || deps.exists(winPath.join(dir, 'source.properties'))
+  return deps.exists(winPath.join(sdk, ...image.split(';'), 'system.img'))
 }
 
 /** sdkmanager/avdmanager need the JDK and the SDK root; PATH gets the JDK first so `java` resolves. */
@@ -460,12 +459,13 @@ export async function checkAndFixAndroidSdkWindows(
     return { result: { label: 'Android SDK', ok: false, detail }, sdk, ok: false }
   }
   const reg = registerWindowsUserEnv(deps, sdk)
+  const envNote = reg === 'added' ? ` ${WINDOWS_NEW_TERMINAL_HINT}` : reg === null ? ` ${WINDOWS_ENV_WRITE_FAILED}` : ''
   return {
     result: {
       label: 'Android SDK installed',
       ok: true,
       state: 'created',
-      detail: `SDK at ${sdk}.${reg === 'added' ? ` ${WINDOWS_NEW_TERMINAL_HINT}` : ''}`,
+      detail: `SDK at ${sdk}.${envNote}`,
     },
     sdk,
     ok: true,
@@ -477,23 +477,39 @@ export async function checkAndFixAndroidSdkWindows(
 export const WINDOWS_NEW_TERMINAL_HINT =
   'ANDROID_HOME and PATH were added to your user environment — open a new terminal to use them.'
 
+export const WINDOWS_ENV_WRITE_FAILED =
+  'Could not write ANDROID_HOME and PATH to your user environment: set ANDROID_HOME to the SDK and add its platform-tools and emulator folders to your user PATH, then open a new terminal.'
+
 /**
  * Persist ANDROID_HOME and the SDK's platform-tools/emulator on the **user** PATH (HKCU, no admin),
- * the Windows counterpart of the macOS rc-file block. `setx` is avoided on purpose: it truncates at
- * 1024 characters and would fold the machine PATH into the user one. Values travel through env vars,
- * not the command text, so nothing in a path needs quoting for PowerShell.
+ * the Windows counterpart of the macOS rc-file block. Values travel through env vars, not the command
+ * text, so nothing in a path needs quoting for PowerShell.
+ *
+ * The user Path is read and written through the registry, not `[Environment]::Get/SetEnvironmentVariable`.
+ * On Windows PowerShell (.NET Framework) those expand the value on read and store REG_SZ on write, so
+ * every `%USERPROFILE%`-style entry would be frozen to today's absolute path and the value would stop
+ * being REG_EXPAND_SZ — the same class of damage `setx` does (which also truncates at 1024 characters).
+ * Here the raw value is read with DoNotExpandEnvironmentNames, compared entry by entry in expanded form
+ * (so `%LOCALAPPDATA%\Android\Sdk\platform-tools` already counts), and written back as ExpandString.
+ * Setting ANDROID_HOME through `SetEnvironmentVariable` afterwards is what broadcasts WM_SETTINGCHANGE,
+ * so a terminal opened from Explorer sees both. `TAPFLOW_ENV_KEY` exists for the Windows-only test,
+ * which points the script at a scratch key under HKCU\Software and skips that broadcast.
  */
 export const REGISTER_ENV_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   '$sdk = $env:TAPFLOW_SDK',
-  "$changed = $false",
-  "if ([Environment]::GetEnvironmentVariable('ANDROID_HOME', 'User') -ne $sdk) { [Environment]::SetEnvironmentVariable('ANDROID_HOME', $sdk, 'User'); $changed = $true }",
-  "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($null -eq $p) { $p = '' }",
+  "$keyName = if ($env:TAPFLOW_ENV_KEY) { $env:TAPFLOW_ENV_KEY } else { 'Environment' }",
+  '$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($keyName)',
+  "$changed = $key.GetValue('ANDROID_HOME') -ne $sdk",
+  "$p = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')",
   // @(...) keeps $parts an array: a one-entry user PATH makes Where-Object return a bare string, and
   // `$parts += $d` would then concatenate the directory onto it with no separator, corrupting PATH.
   "$parts = @($p.Split(';') | Where-Object { $_ -ne '' })",
-  "foreach ($d in @((Join-Path $sdk 'platform-tools'), (Join-Path $sdk 'emulator'))) { if ($parts -notcontains $d) { $parts += $d; $changed = $true } }",
-  "if ($changed) { [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User'); 'added' } else { 'present' }",
+  "$seen = @($parts | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') })",
+  "foreach ($d in @((Join-Path $sdk 'platform-tools'), (Join-Path $sdk 'emulator'))) { if ($seen -notcontains $d) { $parts += $d; $seen += $d; $changed = $true } }",
+  "if ($changed) { $key.SetValue('Path', ($parts -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString); if ($keyName -eq 'Environment') { [Environment]::SetEnvironmentVariable('ANDROID_HOME', $sdk, 'User') } else { $key.SetValue('ANDROID_HOME', $sdk) } }",
+  '$key.Close()',
+  "if ($changed) { 'added' } else { 'present' }",
 ].join('; ')
 
 export function registerWindowsUserEnv(deps: WindowsSetupDeps, sdk: string): 'added' | 'present' | null {
@@ -523,6 +539,8 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
   const avds = listAvdsWindows(deps, sdk)
   if (avds.length > 0) return { label: `AVD ready: ${avds.length} device(s)`, ok: true, state: 'found' }
   const manualHint = 'Create an AVD with avdmanager.bat (see Android docs).'
+  // avdmanager.bat is a Java tool: without a JDK it fails, and the result would blame the AVDs.
+  if (!jdk) return { label: 'AVD', ok: false, detail: 'No AVD found. Install a JDK 17+ first (avdmanager needs Java), then re-run tapflow setup android.' }
   if (!deps.interactive()) return { label: 'AVD', ok: false, warn: true, detail: `No AVD found. ${manualHint}` }
   if (!(await deps.confirm('No Android Virtual Device found. Create a set of AVDs now?'))) {
     return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${manualHint}` }

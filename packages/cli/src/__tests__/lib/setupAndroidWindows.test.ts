@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { win32 as p } from 'node:path'
 import {
-  ACCEL_GUIDANCE, SDKMANAGER_INSTALL_ATTEMPTS, WINGET_JDK_ID, adoptiumApiUrl, checkAccelWindows, checkAndFixJdkWindows, cmdLine, missingSdkPackages,
+  ACCEL_GUIDANCE, REGISTER_ENV_SCRIPT, SDKMANAGER_INSTALL_ATTEMPTS, WINDOWS_ENV_WRITE_FAILED, WINGET_JDK_ID, adoptiumApiUrl,
+  checkAccelWindows, checkAndFixAvdWindows, checkAndFixJdkWindows, cmdLine, missingSdkPackages,
   parseAdoptiumAssets, parseCmdlineToolsArchive, parseDeviceIds, parseJavaMajor, runSetupAndroidWindows,
   runTool, sdkToolEnv, windowsSdkDir, windowsSystemImage,
   type JdkFound, type RunOptions, type RunResult, type WindowsSetupDeps,
@@ -405,11 +407,72 @@ describe('Windows setup android: helpers', () => {
     // With system.img present the image counts as installed.
     const complete = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, p.join(image, 'system.img')] })
     expect(missingSdkPackages(complete.deps, SDK)).not.toContain('system-images;android-35;google_apis;x86_64')
-    // source.properties alone (sdkmanager's own marker) also counts.
+    // source.properties without system.img is still a half-finished image: the emulator boots system.img.
     const marked = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, p.join(image, 'source.properties')] })
-    expect(missingSdkPackages(marked.deps, SDK)).not.toContain('system-images;android-35;google_apis;x86_64')
+    expect(missingSdkPackages(marked.deps, SDK)).toContain('system-images;android-35;google_apis;x86_64')
   })
 
+  it('does not run avdmanager without a JDK, and says to install one', async () => {
+    const pc = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, AVDMANAGER, p.join(IMAGE_DIR, 'system.img')] })
+    const r = await checkAndFixAvdWindows(pc.deps, SDK, true, null)
+    expect(r).toMatchObject({ label: 'AVD', ok: false })
+    expect(r.detail).toContain('Install a JDK 17+ first')
+    expect(pc.prompts).toEqual([])
+    expect(pc.calls.some((c) => c.args.join(' ').includes('avdmanager.bat'))).toBe(false)
+  })
+
+  it('says so when the user environment could not be written', async () => {
+    const pc = fakePc({
+      files: PARTIAL_SDK,
+      respond: (c) => (c.file === 'powershell.exe' ? { status: 1, stdout: '', stderr: 'blocked by policy' } : undefined),
+    })
+    const results = await runSetupAndroidWindows(pc.deps)
+    expect(results[1]).toMatchObject({ label: 'Android SDK installed', ok: true })
+    expect(results[1]!.detail).toContain(WINDOWS_ENV_WRITE_FAILED)
+  })
+
+  it('reads and writes the user Path through the registry, keeping it expandable', () => {
+    // [Environment]::Get/SetEnvironmentVariable on Windows PowerShell expand on read and store REG_SZ.
+    expect(REGISTER_ENV_SCRIPT).toContain("'DoNotExpandEnvironmentNames'")
+    expect(REGISTER_ENV_SCRIPT).toContain('[Microsoft.Win32.RegistryValueKind]::ExpandString')
+    expect(REGISTER_ENV_SCRIPT).not.toContain("GetEnvironmentVariable('Path'")
+    expect(REGISTER_ENV_SCRIPT).not.toContain("SetEnvironmentVariable('Path'")
+  })
+})
+
+// The script above only means anything in PowerShell, so on a Windows host it is run for real —
+// against a scratch key under HKCU\Software, never the user's Environment key, and deleted after.
+describe.runIf(process.platform === 'win32')('REGISTER_ENV_SCRIPT on a real Windows registry', () => {
+  const ps = (command: string, env: NodeJS.ProcessEnv) =>
+    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { env: { ...process.env, ...env }, encoding: 'utf8' })
+
+  it('keeps %VAR% entries and REG_EXPAND_SZ, appends the SDK folders once, and is idempotent', () => {
+    const key = `Software\\tapflow-test-${process.pid}-${Date.now()}`
+    const sdk = 'C:\\tapflow-test-sdk'
+    try {
+      // A one-entry Path, as REG_EXPAND_SZ, holding a variable: the shape Windows itself writes.
+      const seed = ps("$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($env:K); $k.SetValue('Path', '%USERPROFILE%\\bin', [Microsoft.Win32.RegistryValueKind]::ExpandString); $k.Close()", { K: key })
+      expect(seed.status, seed.stderr).toBe(0)
+
+      const first = ps(REGISTER_ENV_SCRIPT, { TAPFLOW_ENV_KEY: key, TAPFLOW_SDK: sdk })
+      expect(first.status, first.stderr).toBe(0)
+      expect(first.stdout.trim()).toBe('added')
+
+      const read = ps("$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($env:K); [string]$k.GetValueKind('Path'); $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); $k.GetValue('ANDROID_HOME'); $k.Close()", { K: key })
+      const [kind, raw, androidHome] = read.stdout.trim().split(/\r?\n/)
+      expect(kind).toBe('ExpandString')
+      expect(raw).toBe(`%USERPROFILE%\\bin;${sdk}\\platform-tools;${sdk}\\emulator`)
+      expect(androidHome).toBe(sdk)
+
+      const second = ps(REGISTER_ENV_SCRIPT, { TAPFLOW_ENV_KEY: key, TAPFLOW_SDK: sdk })
+      expect(second.stdout.trim()).toBe('present')
+    } finally {
+      ps('[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($env:K, $false)', { K: key })
+    }
+  })
+})
+
+describe('Windows setup android: the JDK the SDK tools run on', () => {
   it('drops an older inherited JAVA_HOME when the accepted JDK came from PATH', () => {
     const pathJdk: JdkFound = { javaHome: null, javaExe: JAVA17, major: 17 }
     const pc = fakePc({ files: PARTIAL_SDK, env: { JAVA_HOME: 'C:\\Java\\jdk-8' } })

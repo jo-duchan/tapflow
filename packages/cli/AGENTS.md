@@ -46,4 +46,4 @@ Each command has exactly one responsibility. `tapflow start` is for local develo
 ## HOW NOT
 
 - Do not add commands that access external systems (cloud, remote infrastructure) — this is a local tool.
-- Only `reset` tears down running state (shutting down simulators/emulators). `setup` may install/configure the local environment (Homebrew packages, JDK, Android SDK, shell rc) but only after explicit consent and only in interactive (TTY) sessions — non-interactive runs print guidance instead. No command deletes user data.
+- Only `reset` tears down running state (shutting down simulators/emulators). `setup` may install/configure the local environment (Homebrew packages, JDK, Android SDK, shell rc) but only after explicit consent and only in interactive (TTY) sessions — non-interactive runs print guidance instead. The one exception is `setup android --yes` on Windows: typing the flag is the consent, so it proceeds without a TTY, and it never elevates (winget is skipped because its installer can raise UAC). `--yes` is ignored everywhere else and never answers sudo, the iOS steps or the network-filter approval. No command deletes user data.
