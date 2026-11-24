@@ -274,10 +274,11 @@ describe('iOS app log stream', () => {
       expect(text()).toBe('')
     })
 
-    it('does not hold a long first line waiting for its end', () => {
+    it('does not hold a long first line waiting for its end, even one that starts like the header', () => {
       const { stdout, text, stream } = streamWithChild()
-      stdout.emit('data', 'y'.repeat(9000))
-      expect(text()).toBe('y'.repeat(9000))
+      const long = `Filtering the log data using ${'x'.repeat(9000)}`
+      stdout.emit('data', long)
+      expect(text()).toBe(long)
       stream.stop()
     })
   })

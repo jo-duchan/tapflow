@@ -4452,7 +4452,9 @@ describe('IOSAgent', () => {
         deliver(agent, { type: 'app:launch', requestId: 'rq-B', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
         await vi.waitFor(() => expect(order).toContain('spawn'))
         releaseA!('/sim/Example.app/Example')
-        await new Promise((r) => setTimeout(r, 50))
+        // Launch A's continuation touches nothing but these mocks, so it settles within microtasks, all of which run
+        // before a macrotask: this is its completion, not a deadline.
+        await new Promise((r) => setImmediate(r))
 
         expect(order).toEqual(['find', 'kill 77', 'spawn'])
         agent.disconnect(); browser.close()
