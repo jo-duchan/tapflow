@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { AgentRegistry } from '@tapflowio/agent-core'
+import { findOnPath } from '@tapflowio/agent-core/utils'
 import type { AgentConnectOpts } from '@tapflowio/agent-core'
 import { AndroidAgent } from './AndroidAgent.js'
 
@@ -13,6 +14,8 @@ export { ScrcpyControl } from './scrcpy/ScrcpyControl.js'
 export { ScrcpyVideo } from './scrcpy/ScrcpyVideo.js'
 
 function hasAdb(): boolean {
+  // Windows has no `which`, so the agent never registered there even with `adb.exe` on PATH (#1100).
+  if (process.platform === 'win32') return findOnPath('adb') !== null
   try {
     return execSync('which adb', { encoding: 'utf8', stdio: 'pipe' }).trim().length > 0
   } catch {

@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import { banner, step } from '../lib/print.js'
+import { requireOnPath } from '../lib/hostTools.js'
 
 export async function cmdReset(): Promise<void> {
   const rl = readline.createInterface({ input, output })
@@ -27,7 +28,7 @@ export async function cmdReset(): Promise<void> {
 
   // Android
   try {
-    execSync('which adb', { stdio: 'pipe' })
+    requireOnPath('adb')
     const out = execSync('adb devices', { encoding: 'utf8', stdio: 'pipe' })
     const emulators = out.trim().split('\n').slice(1)
       .filter((l) => l.startsWith('emulator-'))

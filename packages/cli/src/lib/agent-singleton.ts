@@ -1,4 +1,5 @@
 import net from 'node:net'
+import { createHash } from 'node:crypto'
 import { unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -38,7 +39,16 @@ const MACHINE_DIR = '/tmp'
  * rather than taken over. That is rare, it is the safe direction, and it gets its own sentence
  * instead of being reported as "already running".
  */
-export function claimPath(platform: string, dir = MACHINE_DIR): string {
+export function claimPath(platform: string, dir = MACHINE_DIR, host: NodeJS.Platform = process.platform): string {
+  // **On Windows Node's IPC server is a named pipe**, and its docs require the path to sit in
+  // `\\?\pipe\` or `\\.\pipe\`. A `/tmp/...` path fails to bind, which this module reads as "already
+  // running", so every agent start would be refused. A pipe in `\\.\pipe\` is machine-wide like
+  // `/tmp`, and it goes away with the process that holds it, so there is no corpse to clear. A
+  // non-default `dir` (tests) gets its own pipe name.
+  if (host === 'win32') {
+    const scope = dir === MACHINE_DIR ? '' : `-${createHash('sha256').update(dir).digest('hex').slice(0, 12)}`
+    return `\\\\.\\pipe\\tapflow-agent-${platform}${scope}`
+  }
   return join(dir, `tapflow-agent-${platform}.sock`)
 }
 
@@ -80,6 +90,8 @@ export async function claimAgentSlot(platform: string, dir = MACHINE_DIR): Promi
   // A corpse: the file outlived the process that bound it. Clearing it is safe *because* nothing
   // answered, and the retry is single because a second `EADDRINUSE` means somebody won the race in
   // between — which is the correct answer, not something to keep trying past.
+  // A named pipe (Windows) leaves no file behind, so there is nothing to unlink — only the retry.
+  if (process.platform === 'win32') return (await listenOn(path)) ?? { held: false, reason: 'in-use' }
   try {
     unlinkSync(path)
   } catch (e) {

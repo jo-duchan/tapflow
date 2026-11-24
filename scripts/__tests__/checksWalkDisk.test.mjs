@@ -177,8 +177,8 @@ describe('static checks enumerate the tree from disk, not from git', () => {
   it('does not walk into the dashboard build\'s copy, which another test in this suite deletes', () => {
     // `clientOutboundTyped.test.mjs` walks all of `packages/`, and `dashboardFirstLoadBudget.test.mjs`
     // runs `pnpm --filter @tapflowio/dashboard build` in the same `pnpm test:scripts` invocation — whose
-    // last step is `rm -rf ../relay/public && cp -r dist/. ../relay/public/`. A walk inside that
-    // directory while the `rm -rf` runs dies on ENOENT, which is a failure about nothing.
+    // last step replaces `../relay/public` with the contents of `dist`. A walk inside that
+    // directory while the copy is replaced dies on ENOENT, which is a failure about nothing.
     //
     // **Two halves, and neither touches the real directory.** Planting a probe inside
     // `packages/relay/public` is what the first version of this did, and it reproduced the very race

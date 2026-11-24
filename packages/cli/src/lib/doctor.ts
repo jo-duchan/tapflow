@@ -1,9 +1,9 @@
 import { execSync, spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { LeanStore } from '@tapflowio/ios-agent'
+import { androidSdkCandidates as hostSdkCandidates, findOnPath, hostExecutableName } from '@tapflowio/agent-core/utils'
 import {
   isFilterEnforcing, isNetFilterCurrent, isNewer, readNetFilterState, removalSteps, shellQuote, shippedHookPath,
 } from './net-filter.js'
@@ -359,18 +359,15 @@ function buildAndroidChecks(adb: AdbResolution | null): DoctorCheck[] {
   return [checkAndroidSdk(), checkAdbStatus(adb), checkAaptAvailable(), checkAvdAvailable()]
 }
 
+// ANDROID_HOME, ANDROID_SDK_ROOT, then the host's default SDK location — %LOCALAPPDATA%\Android\Sdk on
+// Windows (#1100). Shared with the agent and the relay's findAapt, so all three agree.
 function androidSdkCandidates(): string[] {
-  return [
-    process.env.ANDROID_HOME,
-    process.env.ANDROID_SDK_ROOT,
-    join(homedir(), 'Library', 'Android', 'sdk'), // macOS
-    join(homedir(), 'Android', 'Sdk'), // Linux
-  ].filter(Boolean) as string[]
+  return hostSdkCandidates()
 }
 
 function androidSdkDir(): string | null {
   for (const c of androidSdkCandidates()) {
-    if (existsSync(join(c, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'))) return c
+    if (existsSync(join(c, 'cmdline-tools', 'latest', 'bin', hostExecutableName('sdkmanager')))) return c
   }
   return null
 }
@@ -405,7 +402,7 @@ function findAaptInSdk(sdkDir: string): string | null {
   if (!existsSync(buildToolsDir)) return null
   try {
     for (const v of readdirSync(buildToolsDir)) {
-      const aapt = join(buildToolsDir, v, 'aapt')
+      const aapt = join(buildToolsDir, v, hostExecutableName('aapt'))
       if (existsSync(aapt)) return aapt
     }
   } catch {
@@ -426,7 +423,9 @@ function checkAdbStatus(adb: AdbResolution | null): DoctorCheck {
     label: 'adb (not in PATH)',
     ok: false,
     warn: true,
-    detail: `adb found at ${adb.path} but not in PATH. Open a new terminal or run: exec $SHELL, then re-run tapflow doctor`,
+    detail: process.platform === 'win32'
+      ? `adb found at ${adb.path} but not in PATH. Open a new terminal (tapflow setup android adds it to your user PATH), then re-run tapflow doctor`
+      : `adb found at ${adb.path} but not in PATH. Open a new terminal or run: exec $SHELL, then re-run tapflow doctor`,
   }
 }
 
@@ -580,7 +579,11 @@ export interface AdbResolution {
 }
 
 export function resolveAdb(): AdbResolution | null {
-  try {
+  // Windows has no `which`; agent-core's PATH lookup stands in for it there (#1100).
+  if (process.platform === 'win32') {
+    const found = findOnPath('adb')
+    if (found) return { path: found, inPath: true }
+  } else try {
     const found = execSync('which adb', { encoding: 'utf8', stdio: 'pipe', timeout: PROBE_TIMEOUT_MS }).trim()
     if (found) return { path: found, inPath: true }
   } catch {
@@ -593,13 +596,7 @@ export function resolveAdb(): AdbResolution | null {
 }
 
 function standardAdbPaths(): string[] {
-  const paths: string[] = []
-  if (process.env.ANDROID_HOME) paths.push(join(process.env.ANDROID_HOME, 'platform-tools', 'adb'))
-  if (process.env.ANDROID_SDK_ROOT) paths.push(join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'adb'))
-  const home = homedir()
-  paths.push(join(home, 'Library', 'Android', 'sdk', 'platform-tools', 'adb')) // macOS
-  paths.push(join(home, 'Android', 'Sdk', 'platform-tools', 'adb')) // Linux
-  return paths
+  return androidSdkCandidates().map((sdk) => join(sdk, 'platform-tools', hostExecutableName('adb')))
 }
 
 function checkAdb(path: string): DoctorCheck {
@@ -610,13 +607,13 @@ function checkAdb(path: string): DoctorCheck {
 // iOS Simulator와 대칭: SDK/emulator 자체가 없으면 fail(✗), emulator는 있는데 AVD만 없으면 warn(⚠).
 function checkAvdAvailable(): DoctorCheck {
   const dir = androidSdkDir()
-  const emulator = dir ? join(dir, 'emulator', 'emulator') : null
+  const emulator = dir ? join(dir, 'emulator', hostExecutableName('emulator')) : null
   if (!emulator || !existsSync(emulator)) {
     return { label: 'AVD', ok: false, detail: 'Android SDK/emulator not found. Run: tapflow setup android' }
   }
   try {
     const out = spawnSync(emulator, ['-list-avds'], { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS }).stdout ?? ''
-    const avds = out.trim() ? out.trim().split('\n').map((l) => l.trim()).filter(Boolean) : []
+    const avds = out.trim() ? out.trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
     if (avds.length > 0) {
       return { label: `AVD available: ${avds[0]}`, ok: true }
     }
