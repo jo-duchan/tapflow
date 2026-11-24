@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { AppLogBuffer, endsShownLaunch } from '@/lib/appLogs'
+import { APP_LOG_PENDING_CHARS, AppLogBuffer, AppLogFeed, appLogMarkText, emptiesWatchedLog, endsShownLaunch } from '@/lib/appLogs'
+import { vi } from 'vitest'
 
 describe('app log buffer', () => {
   const rows = (buffer: AppLogBuffer) => Array.from({ length: buffer.rowCount }, (_, i) => buffer.row(i))
@@ -88,5 +89,61 @@ describe('what ends the shown launch', () => {
   it("is not the viewer's own launch, nor an input", () => {
     expect(endsShownLaunch({ type: 'app:launch', sessionId: 's', requestId: 'shown', buildId: 1 }, 'shown')).toBe(false)
     expect(endsShownLaunch({ type: 'input:key', sessionId: 's', payload: { code: 'KeyA' } } as never, 'shown')).toBe(false)
+  })
+})
+
+describe('run separators', () => {
+  it('ends an unfinished line before the separator, and copies it as text', () => {
+    const buffer = new AppLogBuffer()
+    buffer.append('crash')
+    buffer.mark(appLogMarkText('exited', 5344))
+    buffer.mark(appLogMarkText('started', 5407))
+    buffer.append('again\n')
+    expect(buffer.lines).toEqual(['crash', '── App exited (pid 5344) ──', '── App started (pid 5407) ──', 'again'])
+    expect([0, 1, 2, 3].map((i) => buffer.isMark(i))).toEqual([false, true, true, false])
+    expect(buffer.text()).toBe('crash\n── App exited (pid 5344) ──\n── App started (pid 5407) ──\nagain')
+  })
+
+  it('keeps marking the same lines after the oldest are dropped', () => {
+    const buffer = new AppLogBuffer(4, 2)
+    buffer.append('a\nb\n')
+    buffer.mark('── x ──')
+    buffer.append('c\nd\ne\n')
+    expect(buffer.dropped).toBe(2)
+    expect(buffer.lines).toEqual(['── x ──', 'c', 'd', 'e'])
+    expect(buffer.isMark(0)).toBe(true)
+    expect(buffer.isMark(1)).toBe(false)
+    buffer.append('f\ng\n')
+    expect(buffer.lines[0]).toBe('d')
+    expect(buffer.isMark(0)).toBe(false)
+  })
+
+  it('names each boundary', () => {
+    expect(appLogMarkText('running', 1)).toBe('── App running (pid 1) ──')
+    expect(appLogMarkText('device-restarted')).toBe('── Device restarted ──')
+  })
+
+  it('is emptied only by an install or a clear state when the app is watched', () => {
+    expect(emptiesWatchedLog({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 1 })).toBe(true)
+    expect(emptiesWatchedLog({ type: 'app:clear-state', sessionId: 's', requestId: 'r', payload: { bundleId: 'b' } })).toBe(true)
+    expect(emptiesWatchedLog({ type: 'app:launch', sessionId: 's', requestId: 'r', buildId: 1 })).toBe(false)
+    expect(emptiesWatchedLog({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 1, keepIfInstalled: true })).toBe(false)
+  })
+})
+
+describe('app log feed', () => {
+  it('applies text without a frame once enough waits, as in a hidden tab that runs none', () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    try {
+      const feed = new AppLogFeed()
+      feed.handle({ kind: 'open' })
+      feed.handle({ kind: 'text', text: 'a\n' })
+      expect(feed.getSnapshot().rows).toBe(0)
+      feed.handle({ kind: 'text', text: `${'x'.repeat(APP_LOG_PENDING_CHARS)}\n` })
+      expect(feed.getSnapshot().rows).toBe(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

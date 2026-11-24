@@ -388,6 +388,9 @@ export class RelayServer {
   private audioDropHandlers = new Map<string, () => void>()
   /** The holder request that owns each current app log stream, plus its drop warning budget. */
   private readonly appLogLaunches = new Map<string, { requestId: string; holder: WebSocket; onDrop: () => void }>()
+  /** Each session's app log watch, for an agent naming `app-log-watch`: which app, under which id. Forwarded output
+   *  naming another id is dropped. */
+  private readonly appLogWatches = new Map<string, { watchId: string; bundleId: string; onDrop: () => void }>()
   // Per-session keyframe-aware sender: drops to the next keyframe under backpressure (no H.264 P-frame tearing).
   private droppers = new Map<string, KeyframeAwareSender>()
   // Per-session throttled "request an IDR from the agent" callbacks (drop recovery).
@@ -1180,6 +1183,8 @@ export class RelayServer {
     // Here and not in `forgetSessionState`, which `session:leave` also runs: an MCP client that borrowed the device and
     // leaves must not take the person's capture with it (a borrow has sealed it already, at the join).
     this.captures.seal(sessionId)
+    // Before the removal, which takes the agent socket the unwatch goes out on.
+    this.endAppLogWatch(sessionId)
     this.sessions.remove(sessionId)
     this.forgetSessionState(sessionId)
     this.gateEvent({ kind: 'session-removed', sessionId })
@@ -1190,6 +1195,7 @@ export class RelayServer {
     this.dropHandlers.delete(`${sessionId} watchers`)
     this.audioDropHandlers.delete(sessionId)
     this.appLogLaunches.delete(sessionId)
+    this.endAppLogWatch(sessionId)
     this.droppers.delete(sessionId)
     this.idrRequesters.delete(sessionId)
     this.networkStateRequesters.get(sessionId)?.dispose()
@@ -1952,13 +1958,31 @@ export class RelayServer {
         this.gateEvent({ kind: 'ready', hostKey: hostKeyOf(session), sessionId: session.id, cold: facts.cold })
         this.sessions.updateDeviceStatus(session.id, 'booted')
         this.sessions.setReadySent(session.id, true)
+        // Again on every ready: an agent that restarted has lost the watch, and one that did not changes nothing.
+        this.syncAppLogWatch(session, { resend: true })
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
         this.forwardToWatchers(session.id, raw)
         break
       }
+      case 'app:log:run':
       case 'app:log': {
+        if (msg.watchId !== undefined) {
+          const session = this.sessions.get(msg.sessionId)
+          const watch = this.appLogWatches.get(msg.sessionId)
+          if (session?.agentSocket !== ws || watch?.watchId !== msg.watchId || isAiClientKind(session.holderKind)) break
+          const browserSocket = session.browserSocket
+          if (browserSocket?.readyState !== WebSocket.OPEN) break
+          // A run boundary is tens of bytes and never dropped: losing an `exited` would join two runs into one.
+          if (msg.type === 'app:log' && browserSocket.bufferedAmount >= APP_LOG_BACKPRESSURE_BYTES) {
+            watch.onDrop()
+            break
+          }
+          browserSocket.send(JSON.stringify(raw))
+          break
+        }
+        if (msg.type !== 'app:log') break
         const session = this.sessions.get(msg.sessionId)
         const launch = this.appLogLaunches.get(msg.sessionId)
         if (session?.agentSocket !== ws || !launch || launch.requestId !== msg.launchId || launch.holder !== session.browserSocket) break
@@ -2788,7 +2812,7 @@ export class RelayServer {
     // which only held while every device got a session — now that some are rebound, the arrays have
     // different lengths and index alignment would hand the agent someone else's session id.
     const registeredSessions = devices.map((d) => ({ deviceId: d.id, sessionId: byDeviceId.get(d.id)! }))
-    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates', 'touch-landings', 'app-logs'] })
+    this.sendTo(ws, { type: 'agent:registered', registeredSessions, features: ['device-updates', 'touch-landings', 'app-logs', 'app-log-watch'] })
 
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
@@ -3168,6 +3192,8 @@ export class RelayServer {
       type: 'session:joined', sessionId: msg.sessionId, capabilities: session.agentCapabilities ?? [],
       ...(isAiClientKind(msg.clientKind) ? this.watchUrlField(msg.sessionId) : {}),
     })
+    // Who holds it decides whether the app is watched at all (`syncAppLogWatch`).
+    this.syncAppLogWatch(session)
     if (agentAway) {
       // Joining into a held session. Refusing instead would be worse than it sounds: the viewer
       // sends `session:start` exactly once per reconnect and ignores a plain `error`, so a browser
@@ -3874,6 +3900,53 @@ export class RelayServer {
   }
 
   /**
+   * Starts, moves or ends the session's app log watch to match what is installed and who holds the device. Watched
+   * only for a person: an MCP or flow-runner holder gets no watch, so a CI session streams nothing and an AI client
+   * borrowing someone's device is not sent their app's output. The agent keeps the watch itself across boots,
+   * installs and run resets; `resend` sends it again unchanged for an agent that may have restarted.
+   * `bundleId` names the app an install or a Launch chose; nothing else changes which app is watched.
+   */
+  private syncAppLogWatch(session: Session, options: { resend?: boolean; bundleId?: string } = {}): void {
+    const current = this.appLogWatches.get(session.id)
+    let bundleId: string | null = null
+    // A person holds it: no holder (one who left, before an install they started finished) is nobody to watch for.
+    if (hasCapability(session.agentCapabilities, 'app-log-watch') && session.holderKind !== null && !isAiClientKind(session.holderKind)) {
+      // The app an install or a launch names, else the one already watched, else the one installed. Only those two choose
+      // the app: a re-join or a ready keeps it, and a cold boot clearing the install record is no reason to end it.
+      bundleId = options.bundleId ?? current?.bundleId ?? this.bundleOfBuild(session.installed) ?? null
+    }
+    if (bundleId === null) {
+      this.endAppLogWatch(session.id)
+      return
+    }
+    if (current?.bundleId === bundleId) {
+      if (options.resend) this.sendTo(session.agentSocket, { type: 'app:logs:watch', sessionId: session.id, watchId: current.watchId, bundleId })
+      return
+    }
+    const watch = { watchId: randomUUID(), bundleId, onDrop: createAppLogDropWarn(session.id) }
+    this.appLogWatches.set(session.id, watch)
+    this.sendTo(session.agentSocket, { type: 'app:logs:watch', sessionId: session.id, watchId: watch.watchId, bundleId })
+  }
+
+  /** By id **and** stored path, as `InstalledBuild` keeps both: a deleted build's id is handed to the next upload, which
+   *  is not the app on the device. */
+  private bundleOfBuild(build: InstalledBuild | undefined): string | null {
+    if (!build) return null
+    const row = getDb().prepare('SELECT bundle_id FROM builds WHERE id = ? AND file_path = ?').get(build.buildId, build.filePath) as { bundle_id: string | null } | undefined
+    return row?.bundle_id ?? null
+  }
+
+  private endAppLogWatch(sessionId: string): void {
+    const watch = this.appLogWatches.get(sessionId)
+    if (!watch) return
+    this.appLogWatches.delete(sessionId)
+    const agentSocket = this.sessions.get(sessionId)?.agentSocket
+    if (agentSocket?.readyState === WebSocket.OPEN) {
+      this.sendTo(agentSocket, { type: 'app:logs:unwatch', sessionId, watchId: watch.watchId })
+    }
+  }
+
+  /**
    * An agent answered an install. Only the latest one sent says what is on the device: a reply to one it replaced is
    * forwarded as before and changes no record. Read whether or not a browser holds the session — an install that
    * finishes while the tester is reconnecting is exactly the one they are coming back to.
@@ -3883,6 +3956,8 @@ export class RelayServer {
     if (!pending || pending.requestId !== requestId) return
     session.pendingInstall = undefined
     session.installed = done ? { buildId: pending.buildId, filePath: pending.filePath } : undefined
+    const installedBundle = done ? this.bundleOfBuild(pending) : null
+    this.syncAppLogWatch(session, installedBundle ? { bundleId: installedBundle } : {})
     for (const waiter of pending.waiters) {
       // The agent's own reason. Its reply goes out under the original id, which a reconnected viewer has let go of.
       this.answerInstallWaiter(session, waiter, done ? null : (reason ?? 'The install this was waiting on failed'))
@@ -3984,17 +4059,23 @@ export class RelayServer {
 
     // See `handleBrowserAppInstall` — the correlator rides across the rebuild, and only a test says the
     // value is the request's.
+    // Before the launch, so the app's first lines have a watch to land in. Normally there is one already, from the
+    // install; this covers an app installed before the relay last started.
+    const watched = hasCapability(session.agentCapabilities, 'app-log-watch')
+    if (watched) this.syncAppLogWatch(session, { bundleId: build.bundle_id })
     this.sendTo(session.agentSocket, {
       type: 'app:launch',
       sessionId,
       requestId,
       payload: { bundleId: build.bundle_id, ...options, ...(merged.defaultsOnly ? { defaultsOnly: true } : {}) },
     })
-    this.appLogLaunches.set(sessionId, {
-      requestId,
-      holder: ws,
-      onDrop: createAppLogDropWarn(sessionId),
-    })
+    if (!watched) {
+      this.appLogLaunches.set(sessionId, {
+        requestId,
+        holder: ws,
+        onDrop: createAppLogDropWarn(sessionId),
+      })
+    }
     this.captures.recordInput(sessionId, captureHolder(session), msg)
     this.tellWatchersAction(sessionId, { kind: 'launch' })
   }

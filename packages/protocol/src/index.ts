@@ -545,8 +545,10 @@ export interface AgentRegistered {
 /** Values of `AgentRegistered.features`. An agent meeting one it does not know ignores it.
  *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`.
  *  `'touch-landings'`: the relay takes `capture:landed` (#1214).
- *  `'app-logs'`: the relay takes `app:log` and forwards it to the session's holder (#1132). */
-export type RelayAgentFeature = 'device-updates' | 'touch-landings' | 'app-logs'
+ *  `'app-logs'`: the relay takes `app:log` and forwards it to the session's holder (#1132).
+ *  `'app-log-watch'`: the relay sends `app:logs:watch` / `app:logs:unwatch` and takes `app:log` with a `watchId` and
+ *  `app:log:run`, so the app's output is shown however it was opened, not only after a Launch. */
+export type RelayAgentFeature = 'device-updates' | 'touch-landings' | 'app-logs' | 'app-log-watch'
 
 /** The relay's answer to `agent:devices`: the sessions it made for devices that appeared, and the ones it removed
  *  for devices that left. Not correlated: the agent sends at most one list at a time per socket, and a list lost
@@ -814,6 +816,8 @@ export type RelayToAgent =
   | UiKeyboardRequest
   | DeviceKeyboardSet
   | DeviceRunReset
+  | AppLogsWatch
+  | AppLogsUnwatch
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1006,13 +1010,45 @@ export interface SessionScoped {
 }
 
 /** Raw text emitted by the active app's native log stream. Chunks are ordered, but relay backpressure may drop
- *  them, so joining `text` values does not guarantee a complete stream. */
+ *  them, so joining `text` values does not guarantee a complete stream. Carries exactly one owner: the `app:launch`
+ *  that started a per-launch stream (an agent without `app-log-watch`), or the watch that streams the app for the
+ *  session (`AppLogsWatch`). */
 export interface AppLog {
   type: 'app:log'
   sessionId: string
   /** The app:launch request that owns this stream. Lets a viewer discard late chunks from an older app. */
-  launchId: string
+  launchId?: string
+  /** The `app:logs:watch` that owns this stream. Exactly one of the two is set (the relay's door checks it). */
+  watchId?: string
   text: string
+}
+
+/** relay → agent: stream this app's output for the session, whichever way it is opened (a Launch, the home screen, a
+ *  relaunch after a crash), until `app:logs:unwatch`. The agent keeps it as wanted state and raises the stream again
+ *  after a boot, an install or a run reset. Sent again with the same values, it changes nothing. */
+export interface AppLogsWatch {
+  type: 'app:logs:watch'
+  sessionId: string
+  watchId: string
+  bundleId: string
+}
+
+/** relay → agent: stop the watch named. One naming another watch is ignored. */
+export interface AppLogsUnwatch {
+  type: 'app:logs:unwatch'
+  sessionId: string
+  watchId: string
+}
+
+/** agent → relay → holder: a run boundary in a watch's stream, in order with its `app:log` text. `started`: a new
+ *  process of the app; `running`: one already up when the stream began (a reconnect), not a start; `exited`: that
+ *  process is gone. An `exited` always comes before the next run's `started`. */
+export interface AppLogRun {
+  type: 'app:log:run'
+  sessionId: string
+  watchId: string
+  event: 'started' | 'running' | 'exited'
+  pid: number
 }
 
 export interface AppInstallError extends SessionScoped {
@@ -1829,6 +1865,7 @@ export interface ClipboardWriteDone {
 export type AgentToBrowser =
   | RelayOrAgentToBrowser
   | AppLog
+  | AppLogRun
   | DeviceBooting
   | DeviceShutdownDone
   | AppLaunchDone

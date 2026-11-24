@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest, RelayAgentFeature,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, AppLogsUnwatch, AppLogsWatch, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest, RelayAgentFeature,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -55,6 +55,9 @@ import { execFile } from 'child_process'
 import { AdbWrapper } from './AdbWrapper.js'
 import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
 import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
+import { spawn } from 'child_process'
+import { AppLogWatch, type AppLogWatchDeps } from './AppLogWatch.js'
+import { getAdbPath } from './sdk.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
@@ -86,7 +89,7 @@ const APP_LOG_PID_RETRY_INTERVAL_MS = 250
 // string on its own is what puts a control on screen.
 const AGENT_CAPABILITIES: AgentCapability[] = [
   'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
-  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch',
 ]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
@@ -288,6 +291,13 @@ interface DeviceState {
   sessionId: string
   appLogStream: AppLogStream | null
   appLogGeneration: number
+  /** The app the relay asked to watch (`app:logs:watch`): wanted state, kept while the stream is down (a boot, an
+   *  install, which can give the package a new uid) and raised again after. */
+  appLogWatch: { watchId: string; bundleId: string } | null
+  appLogWatcher: AppLogWatch | null
+  appLogWatchGeneration: number
+  /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
+  appLogWatchRun: { watchId: string; pid: number } | null
   /** Why each abandoned boot was abandoned, keyed by **the seq it lost**. A single slot would tell the
    *  wrong story the moment two boots overlap: boot A, boot B, then a shutdown leaves one slot saying
    *  `shut-down`, which is what B lost to — A lost to B.
@@ -404,6 +414,8 @@ export function pickAndroidBackend(serial: string, env: NodeJS.ProcessEnv = proc
 }
 
 export interface AndroidAgentOptions {
+  /** How a watched app's logcat is spawned (`app:logs:watch`). Under vitest the default spawns nothing. */
+  appLogWatchDeps?: Pick<AppLogWatchDeps, 'spawn' | 'adbPath'>
   /** How often the device list is re-read for a relay that takes updates. Injectable for tests. */
   deviceRereadMs?: number
   /** An AVD's Android version by name, for one that is not running. Defaults to its system image (`avdConfig`). */
@@ -483,6 +495,7 @@ const EMULATOR_GONE_RESTART =
 
 export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private readonly adb: AdbWrapper
+  private readonly appLogWatchDeps: Pick<AppLogWatchDeps, 'spawn' | 'adbPath'>
   private readonly launcher: EmulatorLauncher
   private ws: WebSocket | null = null
   private relayFeatures: RelayAgentFeature[] = []
@@ -572,6 +585,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
   constructor(options: AndroidAgentOptions = {}, adb?: AdbWrapper) {
     this.adb = adb ?? new AdbWrapper()
+    this.appLogWatchDeps = options.appLogWatchDeps ?? {
+      spawn: process.env.VITEST ? ((() => { throw new Error('no app log watch under test') }) as unknown as typeof spawn) : spawn,
+      adbPath: getAdbPath,
+    }
     this.launcher = new EmulatorLauncher()
     this.deviceFilter = options.deviceFilter
     this.token = options.token
@@ -659,7 +676,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           this.relayFeatures = Array.isArray(msg.features)
             ? msg.features.filter(
                 (feature: unknown): feature is RelayAgentFeature =>
-                  feature === 'device-updates' || feature === 'app-logs'
+                  feature === 'device-updates' || feature === 'app-logs' || feature === 'app-log-watch'
               )
             : []
           clearTimeout(timer)
@@ -781,6 +798,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         deviceId,
         appLogStream: null,
         appLogGeneration: 0,
+        appLogWatch: null,
+        appLogWatcher: null,
+        appLogWatchGeneration: 0,
+        appLogWatchRun: null,
         touchHelper: null,
         booted: false,
         streamWs: null,
@@ -911,6 +932,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
   private cleanupDeviceState(state: DeviceState): void {
     this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     this.touchWatches.get(state.deviceId)?.stop()
     this.touchWatches.delete(state.deviceId)
     if (state.screenWatch) clearInterval(state.screenWatch)
@@ -933,6 +955,58 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // A restart still waiting to start belongs to the stream torn down above; it will see it lost its
     // seq and return. Left set, the next stream's own death would not restart it until then.
     state.restarting = false
+  }
+
+  /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
+  private stopAppLogWatcher(state: DeviceState): void {
+    ++state.appLogWatchGeneration
+    const watchId = state.appLogWatch?.watchId
+    const pid = state.appLogWatcher?.stop() ?? null
+    if (pid !== null && watchId) state.appLogWatchRun = { watchId, pid }
+    state.appLogWatcher = null
+  }
+
+  /** (Re)starts the stream for the session's watch when there is one and the device is up: on the watch itself, when
+   *  the device is ready, and after an install. A stream already up for the watch is left as it is. */
+  private raiseAppLogWatch(state: DeviceState): void {
+    const wanted = state.appLogWatch
+    const serial = this.adb.getSerial(state.deviceId)
+    if (!wanted || !state.booted || !serial || state.appLogWatcher) return
+    const generation = ++state.appLogWatchGeneration
+    const sessionId = state.sessionId
+    this.stopAppLogStream(state)
+    const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
+    state.appLogWatchRun = null
+    const current = () => state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(sessionId) === state
+    const deps: AppLogWatchDeps = {
+      ...this.appLogWatchDeps,
+      uid: async () => {
+        const uid = await this.adb.getAppUid(serial, wanted.bundleId, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+        if (uid === null) return null
+        const packages = await this.adb.getPackagesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+        // A shared uid's stream would carry another package's output: refused, as the Launch stream refuses it.
+        return packages.length === 1 && packages[0] === wanted.bundleId ? uid : null
+      },
+      processes: (uid) => this.adb.processesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS),
+      deviceTime: () => this.adb.deviceTime(serial),
+    }
+    const watcher = new AppLogWatch(
+      serial,
+      wanted.bundleId,
+      (item) => {
+        if (!current()) return true
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT) return false
+        if (item.kind === 'text') this.sendMsg({ type: 'app:log', sessionId, watchId: wanted.watchId, text: item.text })
+        else this.sendMsg({ type: 'app:log:run', sessionId, watchId: wanted.watchId, event: item.event, pid: item.pid })
+        return true
+      },
+      (error) => logger.warn('app log watch:', error.message),
+      deps,
+      Date.now,
+      previous,
+    )
+    state.appLogWatcher = watcher
+    void watcher.start()
   }
 
   private stopAppLogStream(state: DeviceState): number {
@@ -2467,6 +2541,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }, serial, () => this.appPackages.get(avdId)))
       }
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
+      this.raiseAppLogWatch(state)
       // Clear a network condition the last session left behind, then report (#607).
       //
       // **At boot rather than at teardown**, because airplane mode lives in the AVD's userdata and
@@ -3140,6 +3215,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.stopAppLogStream(state)
+        // Reinstalled, the package can get another uid: the watch's stream is raised again after the install.
+        this.stopAppLogWatcher(state)
         const doInstall = async () => {
           // Not past a run reset's `pm clear` still running: it would land on the app installed here. A client that
           // joined without booting (MCP's `connect_device`) reaches this without the boot's own wait.
@@ -3173,10 +3250,13 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           .then(() => {
             if (bundleId) this.appPackages.set(state.deviceId, bundleId)
             respond({ type: 'app:install-done' })
+            this.raiseAppLogWatch(state)
           })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
+            // Stopped for the install: an install that failed leaves the app it found, and the relay sends no new watch.
+            this.raiseAppLogWatch(state)
           })
         break
       }
@@ -3228,6 +3308,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
             if (
               this.relayFeatures.includes('app-logs') &&
+              // A watched app's output comes from the watch, whichever way the app was opened.
+              state!.appLogWatch?.bundleId !== bundleId &&
               state!.appLogGeneration === appLogGeneration &&
               this.deviceStates.get(sessionId) === state
             ) {
@@ -3859,6 +3941,27 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
             type: 'ui:keyboard:response', sessionId, requestId, keyboard: keyboardStateOf(ime, screen, this.frameTurn(state), home),
           }))
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
+        break
+      }
+      case 'app:logs:watch': {
+        const { watchId, bundleId } = msg as unknown as Partial<AppLogsWatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || typeof watchId !== 'string' || !watchId || typeof bundleId !== 'string' || !bundleId) break
+        const same = state.appLogWatch?.watchId === watchId && state.appLogWatch?.bundleId === bundleId
+        if (same && state.appLogWatcher) break
+        if (!same) {
+          this.stopAppLogWatcher(state)
+          state.appLogWatch = { watchId, bundleId }
+        }
+        this.raiseAppLogWatch(state)
+        break
+      }
+      case 'app:logs:unwatch': {
+        const { watchId } = msg as unknown as Partial<AppLogsUnwatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || state.appLogWatch?.watchId !== watchId) break
+        state.appLogWatch = null
+        this.stopAppLogWatcher(state)
         break
       }
       case 'device:run-reset': {

@@ -499,6 +499,34 @@ export class AdbWrapper {
     return [...new Set(packages)]
   }
 
+  /** The uid's processes with their names (`ps -A -o PID,NAME -u <uid>`): an app's main process is named as its
+   *  package, and its others (`:remote`, workers) after it. */
+  async processesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<Array<{ pid: number; name: string }>> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID,NAME', '-u', String(uid)]
+    let output: string
+    try {
+      output = this.runner.execBounded
+        ? await this.runner.execBounded(timeoutMs, ...args)
+        : await this.runner.exec(...args)
+    } catch (e) {
+      // `ps` exits 1 when the uid has no process (measured, API 34), with its header on stdout: none, not a failure.
+      const stdout = (e as { stdout?: unknown }).stdout
+      if (typeof stdout !== 'string' || !/^\s*PID\b/.test(stdout)) throw e
+      output = stdout
+    }
+    const processes: Array<{ pid: number; name: string }> = []
+    for (const line of output.split(/\r?\n/)) {
+      const m = /^\s*(\d+)\s+(\S+)\s*$/.exec(line)
+      if (m) processes.push({ pid: Number(m[1]), name: m[2]! })
+    }
+    return processes
+  }
+
+  /** The device's clock as logcat's `-T` reads it, or undefined. */
+  deviceTime(serial: string): Promise<string | undefined> {
+    return this.readDeviceTime(serial)
+  }
+
   async hasAppProcessForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<boolean> {
     const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID', '-u', String(uid)]
     const output = this.runner.execBounded

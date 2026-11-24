@@ -211,9 +211,12 @@ describe('browser-inbound routing matches the protocol union', () => {
   // empty set. L2 shipped exactly that mistake in the other direction — a lazy regex truncated a
   // nested literal to 6 of 11 fields and the by-name assertion passed anyway.
   it('the parser reached every forward site', () => {
-    expect(forwarded.size).toBe(31)
+    // 32 with `app:log:run`, which shares the app-log block.
+    expect(forwarded.size).toBe(32)
     const sends = (relaySrc.match(/browserSocket\.send\(JSON\.stringify\(raw\)\)/g) ?? []).length
-    expect(sends).toBe(10) // 7 single-label blocks + the 15-label block + owner-gated and app-log blocks
+    // 7 single-label blocks + the 15-label block + owner-gated and app-log blocks, the app-log block's two: a launch's
+    // stream and a watch's.
+    expect(sends).toBe(11)
   })
 
   it('forwards an agent\'s boot error as it arrived, less only the relay-owned reason', () => {
@@ -318,7 +321,9 @@ describe('browser-inbound routing matches the protocol union', () => {
       'clipboard:data': 'payload requestId sessionId',
       'clipboard:write-done': 'requestId sessionId',
       'network:state': 'payload requestId? sessionId',
-      'app:log': 'launchId sessionId text',
+      'app:log': 'launchId? sessionId text watchId?',
+      // An app log watch's run boundary, holder only, never dropped for backpressure.
+      'app:log:run': 'event pid sessionId watchId',
     },
     RelayOrAgentToBrowser: {
       'session:chrome': 'payload sessionId',
@@ -407,6 +412,9 @@ describe('browser-inbound routing matches the protocol union', () => {
       'device:keyboard-set': 'payload requestId sessionId',
       // #1139: forwarded unchanged from the browser, to an agent naming `run-reset`.
       'device:run-reset': 'payload requestId sessionId',
+      // The app log watch: relay-made, sent only to an agent naming `app-log-watch`, for a dashboard holder.
+      'app:logs:watch': 'bundleId sessionId watchId',
+      'app:logs:unwatch': 'sessionId watchId',
     },
     RelayToBrowser: {
       'agents:listed': 'features? sessions',

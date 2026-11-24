@@ -10,8 +10,7 @@ import { usePerfMode } from '@/hooks/usePerfMode';
 import { IOSViewer } from './device/IOSViewer';
 import { AndroidViewer } from './device/AndroidViewer';
 import { SimulatorInfoCard } from './device/shared/SimulatorInfoCard';
-import type { AppLogHandler } from './device/shared/AppLogViewer';
-import { endsShownLaunch } from '@/lib/appLogs';
+import { AppLogFeed, appLogMarkText, emptiesWatchedLog, endsShownLaunch } from '@/lib/appLogs';
 import type { AndroidChrome, ChromeData, BrowserInbound, PosturesPayload } from '@/lib/types';
 import type { FrameTiming, PerfHook } from './perf/types';
 import { parseEnvelopeHeader, HEADER_SIZE, CODEC_H264, CODEC_AUDIO, type BinaryFrameHandler } from '@/lib/envelope';
@@ -156,7 +155,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const [installing, setInstalling] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
-  const appLogHandlerRef = useRef<AppLogHandler | null>(null);
+  // Held here, not by the box: the device's view is taken down while it boots, and a watched app's log carries on.
+  const [appLogFeed] = useState(() => new AppLogFeed());
   const [bootError, setBootError] = useState<string | null>(null);
   // Set while the relay holds this viewer's boot behind another on the same Mac; cleared by anything that
   // ends the wait — the boot starting, finishing or failing.
@@ -188,6 +188,12 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const appInstallIdsRef = useRef<Set<string>>(new Set());
   const appLaunchIdsRef = useRef<Set<string>>(new Set());
   const appLogLaunchIdRef = useRef<string | null>(null);
+  /** The agent watches the app (`app-log-watch`): its output comes however the app was opened, runs are marked in one
+   *  log, and only Install and Clear state empty it. Otherwise the box follows this viewer's own Launch, as before. */
+  const appLogWatchRef = useRef(false);
+  /** Emptied by an install or a clear state: the app's output still in flight from before is not shown, until the
+   *  next run starts. */
+  const appLogQuietRef = useRef(false);
   const [swKeyboardVisible, setSwKeyboardVisible] = useState(false);
   /** The same length `useNetworkControl` gives its own request, and for the same reason: an
    *  uncorrelated request whose only answer may never come. */
@@ -284,14 +290,35 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     for (const listener of captureListenersRef.current) listener(msg);
 
     if (msg.type === 'app:log') {
+      if (msg.watchId !== undefined) {
+        if (appLogQuietRef.current) return;
+        appLogFeed.handle({ kind: 'open' });
+        appLogFeed.handle({ kind: 'text', text: msg.text });
+        return;
+      }
       if (msg.launchId !== appLogLaunchIdRef.current) return;
-      appLogHandlerRef.current?.({ kind: 'text', text: msg.text });
+      appLogFeed.handle({ kind: 'text', text: msg.text });
+      return;
+    }
+    if (msg.type === 'app:log:run') {
+      if (appLogQuietRef.current) {
+        if (msg.event === 'exited') return;
+        appLogQuietRef.current = false;
+      }
+      // An exit alone does not open the box: after a clear state it is all there would be to show.
+      if (msg.event !== 'exited') appLogFeed.handle({ kind: 'open' });
+      appLogFeed.handle({ kind: 'mark', text: appLogMarkText(msg.event, msg.pid), onlyIfShown: true });
       return;
     }
 
     if (msg.type === 'session:joined') {
-      appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      const watching = (msg.capabilities ?? []).includes('app-log-watch');
+      // A reconnect keeps a watched app's log: the next watch says whether the app is still running.
+      if (!(watching && appLogWatchRef.current && resetSentRef.current)) {
+        appLogLaunchIdRef.current = null;
+        appLogFeed.handle({ kind: 'clear' });
+      }
+      appLogWatchRef.current = watching;
       // A join starts a boot cycle of its own (socket blip, re-entry). Any rebind still waiting for
       // a `device:ready` will never get one, and leaving it pending would make this cycle's ready
       // look like a rebind — suppressing installs for the rest of the mount.
@@ -316,7 +343,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:agent-away') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      if (!appLogWatchRef.current) appLogFeed.handle({ kind: 'clear' });
       // Everything on screen describes an agent that is no longer there. Drop the frame so the
       // status card is what the tester sees — a picture that has simply stopped updating is the
       // thing #426 was opened about.
@@ -329,13 +356,15 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     }
     if (msg.type === 'session:terminated') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      appLogFeed.handle({ kind: 'clear' });
       onSessionEnded?.(msg.reason);
       return;
     }
     if (msg.type === 'session:rebound') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      if (!appLogWatchRef.current) appLogFeed.handle({ kind: 'clear' });
+      // Another agent, maybe of another version: whether it watches is its own answer.
+      appLogWatchRef.current = msg.capabilities.includes('app-log-watch');
       // The agent restarted under us. Nothing is streaming, but until the new agent answers, every
       // flag here still describes the old one — and the relay cannot tell a viewer to stop, since
       // its own "agent offline" check sees a live socket (the new agent's). So tear down first,
@@ -466,7 +495,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
 
     if (msg.type === 'device:booting') {
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      // Every boot says this, a reconnect's warm one too: a watched log is marked only when the device came up from off.
+      if (!appLogWatchRef.current) appLogFeed.handle({ kind: 'clear' });
       setBootWaiting(null);
       setServicesOff(false);
       setDeviceReady(false);
@@ -505,6 +535,9 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       setCaptureTap(null);
     }
     if (msg.type === 'device:ready') {
+      if (appLogWatchRef.current && msg.payload?.cold === true) {
+        appLogFeed.handle({ kind: 'mark', text: appLogMarkText('device-restarted'), onlyIfShown: true });
+      }
       // **Before the correlator, deliberately.** The relay replays this message from cache to a
       // re-joining viewer and sends it with the key absent, so it answers no boot of this mount — and
       // clearing the spinner is exactly what it is for (#440). Gating this line on the correlator would
@@ -542,7 +575,8 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
         setInstalling(true);
         const requestId = newRequestId();
         appLogLaunchIdRef.current = null;
-        appLogHandlerRef.current?.({ kind: 'clear' });
+        // A watched log is emptied, or not, by the send below (`emptiesWatchedLog`).
+        if (!appLogWatchRef.current) appLogFeed.handle({ kind: 'clear' });
         appInstallIdsRef.current.add(requestId);
         sendRef.current({ type: 'app:install', sessionId, requestId, buildId, ...(keepInstalledRef.current ? { keepIfInstalled: true } : {}) });
       }
@@ -562,9 +596,9 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
       if (!appLaunchIdsRef.current.delete(msg.requestId)) return;
       setLaunching(false);
       // A launch that failed has no output to wait for.
-      if (msg.type === 'app:launch-error' && msg.requestId === appLogLaunchIdRef.current) {
+      if (msg.type === 'app:launch-error' && msg.requestId === appLogLaunchIdRef.current && !appLogWatchRef.current) {
         appLogLaunchIdRef.current = null;
-        appLogHandlerRef.current?.({ kind: 'clear' });
+        appLogFeed.handle({ kind: 'clear' });
       }
       // Without this the spinner just stopped, and a failed launch looked like a button that did nothing.
       if (msg.type === 'app:launch-error') toast.error('The app did not launch', { description: msg.message });
@@ -629,7 +663,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
           return;
       }
     }
-  }, [sessionId, buildId, onSessionEnded, resetMode, installed, agentAway, sendBoot, captureOpen]);
+  }, [sessionId, buildId, onSessionEnded, resetMode, installed, agentAway, sendBoot, captureOpen, appLogFeed]);
 
   const handleBinaryFrame = useCallback((data: ArrayBuffer) => {
     const envelope = parseEnvelopeHeader(data);
@@ -662,12 +696,13 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const send = useCallback((msg: BrowserToRelay) => {
     const sent = relaySend(msg);
     if (sent) thumbnailsRef.current?.note(msg);
-    if (sent && endsShownLaunch(msg, appLogLaunchIdRef.current)) {
+    if (sent && (appLogWatchRef.current ? emptiesWatchedLog(msg) : endsShownLaunch(msg, appLogLaunchIdRef.current))) {
+      if (appLogWatchRef.current) appLogQuietRef.current = true;
       appLogLaunchIdRef.current = null;
-      appLogHandlerRef.current?.({ kind: 'clear' });
+      appLogFeed.handle({ kind: 'clear' });
     }
     return sent;
-  }, [relaySend]);
+  }, [relaySend, appLogFeed]);
   useLayoutEffect(() => { sendRef.current = send; });
 
   useEffect(() => {
@@ -728,12 +763,15 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
     // the same species as the `msg.requestId!` this layer removed from the relay.
     if (buildId === undefined) return;
     const requestId = newRequestId();
-    appLogLaunchIdRef.current = requestId;
-    appLogHandlerRef.current?.({ kind: 'launch' });
+    // A watched app's log carries on: the launch shows as a run of its own when the app starts.
+    if (!appLogWatchRef.current) {
+      appLogLaunchIdRef.current = requestId;
+      appLogFeed.handle({ kind: 'launch' });
+    }
     appLaunchIdsRef.current.add(requestId);
     setLaunching(true);
     sendRef.current({ type: 'app:launch', sessionId, requestId, buildId });
-  }, [sessionId, buildId]);
+  }, [sessionId, buildId, appLogFeed]);
 
   const restartButtonRef = useRef<HTMLButtonElement | null>(null);
   const hadViewer = useRef(false);
@@ -819,7 +857,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
   const appLogsSupported = agentCapabilities.includes('app-logs');
   const commonProps = {
     sessionId, buildId, send, openUrl, launchApp, connected, joined,
-    appLogHandlerRef,
+    appLogFeed,
     deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
     launching,
     binaryFrameHandlerRef,
@@ -897,7 +935,7 @@ export function DeviceViewer({ sessionId, deviceId, formFactor, platform = 'ios'
           </div>
           <SimulatorInfoCard
             joined={joined} fps={0} connected={connected}
-            appLogHandlerRef={appLogHandlerRef}
+            appLogFeed={appLogFeed}
             appLogsSupported={appLogsSupported}
             deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}
             installing={installing} installError={installError}

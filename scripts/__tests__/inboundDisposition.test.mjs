@@ -68,8 +68,8 @@ describe('inbound disposition', () => {
     // 29 as of #542: `device:shutdown-error` gave the shutdown pair the failure member it lacked.
     // 32 by the next count, 36 with the four `watch:*` replies, 37 with `watch:action` (A2), and 38 with
     // `device:boot-waiting` (L2). 40 with the lease pair (S5), which the dashboard never asks for. 42 with the
-    // keyboard-set pair (#1135), 44 with the run-reset pair (#1139). 45 adds `app:log`.
-    expect(table_entries.size).toBe(45)
+    // keyboard-set pair (#1135), 44 with the run-reset pair (#1139). 45 adds `app:log`, 46 `app:log:run`.
+    expect(table_entries.size).toBe(46)
   })
 
   it('every entry is exactly one of at / ignored', () => {

@@ -14,7 +14,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
 import { SimulatorInfoCard } from '@/components/device/shared/SimulatorInfoCard'
-import type { AppLogHandler } from '@/components/device/shared/AppLogViewer'
+import { AppLogFeed } from '@/lib/appLogs'
 
 // The component's prop type is not part of its public surface — derive it from the component itself
 // rather than widening the production module's exports.
@@ -25,7 +25,7 @@ function healthy(overrides: Partial<SimulatorInfoCardProps> = {}): SimulatorInfo
   return {
     joined: true,
     fps: 0,
-    appLogHandlerRef: { current: null as AppLogHandler | null },
+    appLogFeed: new AppLogFeed(),
     connected: true,
     deviceReady: true,
     bootError: null,

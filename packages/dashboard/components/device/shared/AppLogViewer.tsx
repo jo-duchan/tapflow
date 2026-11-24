@@ -1,18 +1,11 @@
-import { Suspense, useEffect, useId, useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
+import { Suspense, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { CodeBlockCopyButton } from '@/components/ui/code-block'
-import { AppLogBuffer } from '@/lib/appLogs'
+import type { AppLogFeed } from '@/lib/appLogs'
 import { AppLogRows, loadAppLogRows } from './appLogRowsChunk'
 import { cn } from '@/lib/utils'
 
-/**
- * What DeviceViewer tells the viewer. `launch` opens a new stream (a launch this viewer sent), `text` is a chunk of it,
- * and `clear` ends it: the box is shown only between a launch and whatever ends that app, never before a launch or for
- * an install that failed, where "waiting for logs" would promise output that is not coming.
- */
-export type AppLogEvent = { kind: 'launch' } | { kind: 'text'; text: string } | { kind: 'clear' }
-export type AppLogHandler = (event: AppLogEvent) => void
+export type { AppLogEvent } from '@/lib/appLogs'
 
 const COLLAPSED_KEY = 'tapflow.appLogs.collapsed'
 
@@ -52,7 +45,7 @@ function copyToClipboard(text: string): Promise<boolean> {
 }
 
 interface AppLogViewerProps {
-  handlerRef: MutableRefObject<AppLogHandler | null>
+  feed: AppLogFeed
   supported: boolean
 }
 
@@ -62,63 +55,19 @@ interface AppLogViewerProps {
  * from reading as two. Not a live region: announcing every chunk is the screen-reader choreography the dashboard's
  * accessibility level leaves out (`packages/dashboard/AGENTS.md`, "The level is `core`").
  */
-export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
-  const [active, setActive] = useState(false)
-  // The buffer is appended to in place (copying tens of thousands of lines per frame is what #1233 removed), so each
-  // append also sets the counts the render reads, and `version` tells the body to redraw.
-  const [log, setLog] = useState(() => ({ buffer: new AppLogBuffer(), version: 0, rows: 0, dropped: 0 }))
-  // Bumped by each launch, so the scroll box remounts and follows the tail again even if the last app's was scrolled up.
-  const [launches, setLaunches] = useState(0)
+export function AppLogViewer({ feed, supported }: AppLogViewerProps) {
+  const log = useSyncExternalStore(feed.subscribe, feed.getSnapshot)
+  const { active, opens: launches } = log
   const [collapsed, setCollapsed] = useState(readCollapsed)
   // State, not a ref: the rows read it when they mount, and a ref set in the same commit could still be empty there.
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
-  const bufferRef = useRef<AppLogBuffer | null>(null)
-  const pendingTextRef = useRef('')
-  const animationFrameRef = useRef<number | null>(null)
   const bodyId = useId()
   const toggleRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    const reset = () => {
-      pendingTextRef.current = ''
-      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
-      const buffer = new AppLogBuffer()
-      bufferRef.current = buffer
-      setLog({ buffer, version: 0, rows: 0, dropped: 0 })
-    }
-    const handle: AppLogHandler = (event) => {
-      if (event.kind !== 'text') {
-        reset()
-        setActive(event.kind === 'launch')
-        if (event.kind === 'launch') {
-          setLaunches((n) => n + 1)
-          // A failure here is shown by the box when it renders the rows (`appLogRowsChunk.ts`).
-          loadAppLogRows().catch(() => {})
-        }
-        return
-      }
-      pendingTextRef.current += event.text
-      if (animationFrameRef.current !== null) return
-      // One state update per frame, however many chunks arrive in it.
-      animationFrameRef.current = requestAnimationFrame(() => {
-        animationFrameRef.current = null
-        const buffer = bufferRef.current
-        const pending = pendingTextRef.current
-        pendingTextRef.current = ''
-        if (!buffer) return
-        buffer.append(pending)
-        setLog((current) => current.buffer === buffer
-          ? { buffer, version: current.version + 1, rows: buffer.rowCount, dropped: buffer.dropped }
-          : current)
-      })
-    }
-    handlerRef.current = handle
-    return () => {
-      if (handlerRef.current === handle) handlerRef.current = null
-      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
-    }
-  }, [handlerRef])
+    // A failure here is shown by the box when it renders the rows (`appLogRowsChunk.ts`).
+    if (active) loadAppLogRows().catch(() => {})
+  }, [active])
 
   if (!active) return null
 

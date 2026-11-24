@@ -352,6 +352,22 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('processesForUid', () => {
+    it('names each of the uid\'s processes, and reads ps\'s exit 1 with only its header as none', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('  PID NAME                       \n 5344 com.example.app\n 5350 com.example.app:remote\n')
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).resolves.toEqual([
+        { pid: 5344, name: 'com.example.app' }, { pid: 5350, name: 'com.example.app:remote' },
+      ])
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID,NAME', '-u', '10193')
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockRejectedValueOnce(Object.assign(new Error('exit 1'), { stdout: '  PID NAME                       \n' }))
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).resolves.toEqual([])
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockRejectedValueOnce(Object.assign(new Error('device offline'), { stdout: '' }))
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).rejects.toThrow('device offline')
+    })
+  })
+
   describe('hasAppProcessForUid', () => {
     it('detects any process using the app UID and rejects a header-only result', async () => {
       const runner = mockRunner()

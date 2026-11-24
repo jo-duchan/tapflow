@@ -55,6 +55,7 @@ import * as z from 'zod'
 import type {
   AgentDevices, AgentRegister, AgentResourceReport, AgentsList, AppClearState, AppClearStateDone,
   AppLog,
+  AppLogRun,
   AppClearStateError, AppInstallDone, AppInstallError, AppInstallToRelay, AppLaunchDone,
   AppLaunchError, AppLaunchToRelay, RunResetItem, RunResetReport, ServiceTier, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite,
   NetworkError, NetworkSet, NetworkState,
@@ -492,7 +493,17 @@ const AGENT_FORWARDED = {
   'network:state': envCo('network:state'),
   'network:error': envC('network:error'),
   // The active app's text stream is addressed to its holder, never replayed or broadcast to watchers.
-  'app:log': z.object({ type: z.literal('app:log'), sessionId, launchId: z.string().min(1), text: appLogText }),
+  'app:log': z
+    .object({ type: z.literal('app:log'), sessionId, launchId: z.string().min(1).optional(), watchId: z.string().min(1).optional(), text: appLogText })
+    .refine((m) => (m.launchId === undefined) !== (m.watchId === undefined), 'app:log names exactly one of launchId and watchId'),
+  // A run boundary is a few bytes and is never dropped for backpressure: a lost `exited` would join two runs.
+  'app:log:run': z.object({
+    type: z.literal('app:log:run'),
+    sessionId,
+    watchId: z.string().min(1),
+    event: z.enum(['started', 'running', 'exited']),
+    pid: z.number().int().positive(),
+  }),
 } as const
 
 const AGENT_INBOUND = { ...AGENT_CONSUMED, ...AGENT_FORWARDED } as const
@@ -782,6 +793,7 @@ type _ClipboardError = Assert<E<'clipboard:error', ClipboardError>>
 type _NetworkState = Assert<E<'network:state', NetworkState>>
 type _NetworkError = Assert<E<'network:error', NetworkError>>
 type _AppLog = Assert<V<'app:log', AppLog>>
+type _AppLogRun = Assert<V<'app:log:run', AppLogRun>>
 
 const READY_FACTS = z.object({ payload: z.object({ cold: z.boolean().optional().catch(undefined), serviceTier: reportedTier }) })
 
