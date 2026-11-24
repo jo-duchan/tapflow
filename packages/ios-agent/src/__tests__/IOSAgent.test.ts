@@ -4432,6 +4432,32 @@ describe('IOSAgent', () => {
         agent.disconnect(); browser.close()
       })
 
+      // The sweep cannot tell a newer launch's live stream from an orphan, so a superseded launch must not sweep.
+      it('a launch superseded while resolving its app image sweeps nothing', async () => {
+        const order: string[] = []
+        const appLogStreamDeps = {
+          findOrphans: vi.fn(async () => { order.push('find'); return [77] }),
+          killPid: vi.fn((pid: number) => { order.push(`kill ${pid}`) }),
+          spawn: vi.fn(() => { order.push('spawn'); throw new Error('not spawned under test') }) as unknown as typeof import('child_process').spawn,
+        }
+        const { simctl, agent, browser } = await bootedAgent({ appLogStreamDeps })
+        vi.mocked(simctl.launchApp).mockResolvedValue(456)
+        let releaseA: ((path: string) => void) | undefined
+        vi.mocked(simctl.getAppExecutablePath)
+          .mockImplementationOnce(() => new Promise<string>((r) => { releaseA = r }))
+          .mockResolvedValueOnce('/sim/Example.app/Example')
+
+        deliver(agent, { type: 'app:launch', requestId: 'rq-A', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+        await vi.waitFor(() => expect(releaseA).toBeDefined())
+        deliver(agent, { type: 'app:launch', requestId: 'rq-B', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+        await vi.waitFor(() => expect(order).toContain('spawn'))
+        releaseA!('/sim/Example.app/Example')
+        await new Promise((r) => setTimeout(r, 50))
+
+        expect(order).toEqual(['find', 'kill 77', 'spawn'])
+        agent.disconnect(); browser.close()
+      })
+
       it('launch passes arguments and env through and reports their names, never their values', async () => {
         const { simctl, agent, browser } = await bootedAgent()
 

@@ -22,7 +22,7 @@ const HEADER_LINE = /^(?:Filtering the log data using |Timestamp\s+Ty\s+Process\
 const HEADER_STARTS = ['Filtering the log data using ', 'Timestamp ']
 
 /** How `log stream` shows in the simulator when this file spawned it: what tells ours from a person's own. */
-const OUR_LOG_STREAM = /^(?:\S*\/)?log stream --level debug --style compact --predicate processIdentifier == \d+ AND processImagePath == /
+const OUR_LOG_STREAM = /^(?:.*\/)?log stream --level debug --style compact --predicate processIdentifier == \d+ AND processImagePath == /
 
 /**
  * The app log streams left running in simulator `udid`, from `ps -o pid=,ppid=,command=` output (#1235). A SIGKILLed
@@ -137,7 +137,7 @@ export class AppLogStream {
     this.process.once('close', (code) => {
       this.childClosed = true
       this.stopPidCheck()
-      if (this.headerPending && !this.stopped) this.enqueue(this.headerPending)
+      // What is still held can only be the start of the header (an entry starts with its date), so it is dropped.
       this.headerPending = null
       if (code !== null && code !== 0 && !this.stopped && !this.targetExited && !this.errorReported) {
         this.errorReported = true

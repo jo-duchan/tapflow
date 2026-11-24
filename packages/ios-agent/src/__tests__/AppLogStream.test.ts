@@ -266,12 +266,12 @@ describe('iOS app log stream', () => {
       stream.stop()
     })
 
-    it('holds a partial line that may be the header, and lets it through at close if it was not', () => {
+    it('holds a partial line that may be the header, and drops it if the stream closes mid-header', () => {
       const { stdout, child, text } = streamWithChild()
       stdout.emit('data', 'Filtering the')
       expect(text()).toBe('')
       child.emit('close', 0, null)
-      expect(text()).toBe('Filtering the')
+      expect(text()).toBe('')
     })
 
     it('does not hold a long first line waiting for its end', () => {
@@ -302,6 +302,9 @@ describe('iOS app log stream', () => {
       expect(orphanAppLogStreams(ps, U)).toEqual([89243])
       expect(orphanAppLogStreams(ps, OTHER)).toEqual([89244])
       expect(orphanAppLogStreams(ps, 'NOPE')).toEqual([])
+      // A runtime that shows the full path, whose `iOS 26.5.simruntime` folder has a space in it.
+      const fullPath = `89300 89055 /Library/Developer/CoreSimulator/Volumes/iOS_23E254a/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/bin/log stream --level debug --style compact --predicate processIdentifier == 7 AND processImagePath == "/a"`
+      expect(orphanAppLogStreams(`${ps}\n${fullPath}`, U)).toEqual([89243, 89300])
     })
   })
 })

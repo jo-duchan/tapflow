@@ -2574,8 +2574,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
                 .then(() => this.simctl.getAppExecutablePath(launchState.deviceId, bundleId))
                 .then(async (processImagePath) => {
                   // A stream an earlier agent left in this simulator would otherwise run until it shuts down (#1235).
+                  // Not for a launch already superseded: the sweep cannot tell a newer launch's live stream from an orphan.
+                  const current = () =>
+                    launchState.appLogGeneration === appLogGeneration && this.deviceStates.get(sessionId!) === launchState
+                  if (!current()) return processImagePath
                   const orphans = await this.appLogStreamDeps.findOrphans(launchState.deviceId)
                   for (const orphan of orphans) {
+                    if (!current()) break
                     logger.warn(`killing a leftover app log stream (pid ${orphan}) for ${launchState.deviceId}`)
                     this.appLogStreamDeps.killPid(orphan)
                   }
