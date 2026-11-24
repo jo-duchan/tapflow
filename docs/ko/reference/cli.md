@@ -79,7 +79,7 @@ tapflow setup android
 한 번 실행으로 끝까지 진행하면서 설치 단계마다 동의를 구합니다(대화형 터미널만 해당. 비대화형에서는 실행 대신 명령을 안내합니다). 예외는 Windows의 `setup android --yes`입니다. 이 플래그를 붙이면 그것이 동의이므로 터미널 없이도 진행하며, 권한 상승은 하지 않습니다. macOS에서는 두 플랫폼 모두 Homebrew가 없으면 먼저 설치하고, Windows의 `setup android`는 Homebrew를 쓰지 않습니다.
 
 - **iOS**: App Store에서 Xcode 설치를 안내하고 라이선스 동의·초기 설정을 실행하며(sudo 필요) 시뮬레이터 런타임을 내려받습니다.
-- **Android**: JDK를 설치하고 `~/Library/Android/sdk`에 자기완결 SDK(명령행 도구·platform-tools·에뮬레이터·시스템 이미지 — Android Studio GUI 불필요)를 구성한 뒤 폼팩터별 AVD를 생성합니다. Windows에서는 SDK를 `%LOCALAPPDATA%\Android\Sdk`에 두고 이미 있는 SDK는 빠진 패키지만 채우며, 마지막에 에뮬레이터의 하드웨어 가속을 쓸 수 있는지 알려줍니다. `ANDROID_HOME`과 SDK 도구 폴더는 사용자 환경 변수에 추가되며, 사용자 PATH에 있던 `%변수%` 항목은 그대로 둡니다.
+- **Android**: JDK를 설치하고 `~/Library/Android/sdk`에 자기완결 SDK(명령행 도구·platform-tools·에뮬레이터·시스템 이미지 — Android Studio GUI 불필요)를 구성한 뒤 폼팩터별 AVD를 생성합니다. Windows에서는 SDK를 `%LOCALAPPDATA%\Android\Sdk`(`ANDROID_HOME`이나 `ANDROID_SDK_ROOT`가 설정되어 있으면 그 위치)에 두고 이미 있는 SDK는 빠진 패키지만 채우며, 마지막에 에뮬레이터의 하드웨어 가속을 쓸 수 있는지 알려줍니다. SDK 패키지를 설치한 실행에서는 `ANDROID_HOME`과 SDK 도구 폴더를 사용자 환경 변수에 추가하며, 사용자 PATH에 있던 `%변수%` 항목은 그대로 둡니다.
 
 모든 단계가 준비되면 종료 코드 `0`, `SETUP INCOMPLETE`를 출력하면 `1`을 반환합니다. `doctor`는 경고만 있는 항목을 통과시키므로 setup 쪽이 더 엄격합니다. setup은 Mac을 쓸 수 있는지가 아니라 요청받은 작업이 끝났는지를 보고합니다.
 
