@@ -1,9 +1,9 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { Suspense, useEffect, useId, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { CodeBlockCopyButton } from '@/components/ui/code-block'
-import { useFollowBottom } from '@/hooks/useFollowBottom'
-import { appendAppLogText } from '@/lib/appLogs'
+import { AppLogBuffer } from '@/lib/appLogs'
+import { AppLogRows, loadAppLogRows } from './appLogRowsChunk'
 import { cn } from '@/lib/utils'
 
 /**
@@ -24,10 +24,31 @@ function readCollapsed(): boolean {
   }
 }
 
-/** A plain-HTTP page has no clipboard API. That is a copy that did not happen, not a failure. */
+/**
+ * A plain-HTTP page (the usual self-hosted case) has no clipboard API. Only the rows in view are in the DOM, so
+ * selecting the body would take a screenful, not the log: the text goes through a hidden textarea and the older copy
+ * command instead, which still works there inside the click. False when neither copied.
+ */
 function copyToClipboard(text: string): Promise<boolean> {
-  return (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('no clipboard')))
-    .then(() => true, () => false)
+  if (navigator.clipboard) return navigator.clipboard.writeText(text).then(() => true, () => false)
+  const focused = document.activeElement
+  const area = document.createElement('textarea')
+  area.value = text
+  area.readOnly = true
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.append(area)
+  area.focus({ preventScroll: true })
+  area.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } catch {
+    copied = false
+  }
+  area.remove()
+  if (focused instanceof HTMLElement) focused.focus()
+  return Promise.resolve(copied)
 }
 
 interface AppLogViewerProps {
@@ -43,26 +64,38 @@ interface AppLogViewerProps {
  */
 export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
   const [active, setActive] = useState(false)
-  const [text, setText] = useState('')
-  // Bumped by each launch, so the body remounts and follows the tail again even if the last app's was scrolled up.
+  // The buffer is appended to in place (copying tens of thousands of lines per frame is what #1233 removed), so each
+  // append also sets the counts the render reads, and `version` tells the body to redraw.
+  const [log, setLog] = useState(() => ({ buffer: new AppLogBuffer(), version: 0, rows: 0, dropped: 0 }))
+  // Bumped by each launch, so the scroll box remounts and follows the tail again even if the last app's was scrolled up.
   const [launches, setLaunches] = useState(0)
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  // State, not a ref: the rows read it when they mount, and a ref set in the same commit could still be empty there.
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const bufferRef = useRef<AppLogBuffer | null>(null)
   const pendingTextRef = useRef('')
   const animationFrameRef = useRef<number | null>(null)
   const bodyId = useId()
+  const toggleRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const reset = () => {
       pendingTextRef.current = ''
       if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
       animationFrameRef.current = null
-      setText('')
+      const buffer = new AppLogBuffer()
+      bufferRef.current = buffer
+      setLog({ buffer, version: 0, rows: 0, dropped: 0 })
     }
     const handle: AppLogHandler = (event) => {
       if (event.kind !== 'text') {
         reset()
         setActive(event.kind === 'launch')
-        if (event.kind === 'launch') setLaunches((n) => n + 1)
+        if (event.kind === 'launch') {
+          setLaunches((n) => n + 1)
+          // A failure here is shown by the box when it renders the rows (`appLogRowsChunk.ts`).
+          loadAppLogRows().catch(() => {})
+        }
         return
       }
       pendingTextRef.current += event.text
@@ -70,9 +103,14 @@ export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
       // One state update per frame, however many chunks arrive in it.
       animationFrameRef.current = requestAnimationFrame(() => {
         animationFrameRef.current = null
+        const buffer = bufferRef.current
         const pending = pendingTextRef.current
         pendingTextRef.current = ''
-        setText((current) => appendAppLogText(current, pending))
+        if (!buffer) return
+        buffer.append(pending)
+        setLog((current) => current.buffer === buffer
+          ? { buffer, version: current.version + 1, rows: buffer.rowCount, dropped: buffer.dropped }
+          : current)
       })
     }
     handlerRef.current = handle
@@ -84,82 +122,92 @@ export function AppLogViewer({ handlerRef, supported }: AppLogViewerProps) {
 
   if (!active) return null
 
-  const toggle = () => {
-    setCollapsed((was) => {
-      try {
-        localStorage.setItem(COLLAPSED_KEY, was ? '0' : '1')
-      } catch {
-        /* no storage */
-      }
-      return !was
-    })
-  }
-  // A chunk can end mid-line; the last entry is that partial line, or nothing after a newline.
-  const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n')
-  // With no clipboard (plain HTTP, the usual self-hosted case) the copy icon selects the log instead of doing nothing.
-  const copyOrSelect = (value: string) => copyToClipboard(value).then((ok) => {
+  const setOpen = (open: boolean) => {
+    // Collapsing makes the body inert. Focus inside it would fall to <body>: Safari does not focus a button on click,
+    // so a mouse click on the toggle after tabbing into the log leaves focus where it was.
     const body = document.getElementById(bodyId)
-    if (!ok && body) {
-      const range = document.createRange()
-      range.selectNodeContents(body)
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(range)
+    if (!open && body?.contains(document.activeElement)) toggleRef.current?.focus()
+    try {
+      localStorage.setItem(COLLAPSED_KEY, open ? '0' : '1')
+    } catch {
+      /* no storage */
     }
-    return ok
-  })
+    setCollapsed(!open)
+  }
+  const { buffer, rows, dropped } = log
 
   return (
     <section aria-label="App logs" className="overflow-hidden rounded bg-muted">
-      <div className="flex items-center gap-1.5 px-2.5 py-[3px]">
+      {/* 28px, the height of the info card's chips above it, with or without the 24px Copy button. */}
+      <div className="flex h-7 items-center gap-1.5 px-2.5">
         <button
+          ref={toggleRef}
           type="button"
           aria-expanded={!collapsed}
-          onClick={toggle}
+          aria-controls={bodyId}
+          onClick={() => setOpen(collapsed)}
           className="-ms-1 flex min-w-0 items-center gap-1 rounded px-1 text-[11px] leading-[18px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
-          <ChevronRight aria-hidden="true" className={cn('size-3 shrink-0 transition-transform motion-reduce:transition-none', !collapsed && 'rotate-90')} />
+          <ChevronRight aria-hidden="true" className={cn('size-3.5 shrink-0 transition-transform motion-reduce:transition-none', !collapsed && 'rotate-90')} />
           App logs
         </button>
-        {supported && lines.length > 0 && (
+        {supported && rows > 0 && (
           <span className="ms-auto font-mono text-[10px] tabular-nums text-muted-foreground">
-            {lines.length} {lines.length === 1 ? 'line' : 'lines'}
+            {rows.toLocaleString('en-US')} {rows === 1 ? 'line' : 'lines'}
+            {dropped > 0 && ` (${dropped.toLocaleString('en-US')} dropped)`}
           </span>
         )}
-        {/* Only while open: on a page with no clipboard, Copy selects the body, which a collapsed box does not render. */}
-        {supported && lines.length > 0 && !collapsed && (
-          <CodeBlockCopyButton value={text} copy={copyOrSelect} className="size-6" />
+        {/* Open or collapsed alike: it copies from the buffer, not the DOM. Hover as the "App logs" toggle does, since the
+            muted header hides the ghost button's own hover background. Icons at 14px, as the card's Focus icon: `Button`
+            sets its icons to 16px, which this overrides here only. */}
+        {supported && rows > 0 && (
+          <CodeBlockCopyButton
+            value={() => buffer.text()}
+            copy={copyToClipboard}
+            className="size-6 text-muted-foreground hover:bg-transparent hover:text-foreground [&_svg]:size-3.5"
+          />
         )}
       </div>
-      {!collapsed && <LogBody key={launches} id={bodyId} lines={lines} text={text} supported={supported} />}
-    </section>
-  )
-}
-
-function LogBody({ id, lines, text, supported }: { id: string; lines: string[]; text: string; supported: boolean }) {
-  const ref = useFollowBottom<HTMLDivElement>(text)
-  return (
-    <div
-      ref={ref}
-      id={id}
-      role="region"
-      aria-label="App log output"
-      tabIndex={0}
-      className="max-h-[220px] overflow-y-auto overflow-x-hidden border-t focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-    >
-      {!supported || lines.length === 0 ? (
-        <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-          {supported ? 'Waiting for app logs…' : 'Update the device agent to view app logs.'}
-        </p>
-      ) : (
-        <div className="font-mono text-xs leading-normal text-foreground/85">
-          {lines.map((line, i) => (
-            <div key={i} data-log-line className="whitespace-pre-wrap [overflow-wrap:anywhere] border-b border-border px-2.5 py-0.5 last:border-b-0">
-              {line || '\u00a0'}
-            </div>
-          ))}
+      {/*
+        Opens by animating the grid row from 0fr to 1fr, not by Radix's Collapsible: that one measures the height to
+        open to once, at the start, when the rows still have their estimated heights (one line each), so it opened to
+        that and then jumped to the wrapped rows' real height. A grid row follows the content as it is measured.
+        Collapsed, the log stays mounted, at no height and inert: the rows keep their measured heights, and reopening
+        has nothing to measure. It also keeps drawing the rows in view as lines arrive: collapsed costs what open does.
+      */}
+      <div
+        id={bodyId}
+        inert={collapsed}
+        className={cn(
+          'grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none',
+          collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]',
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          {/* Keyed by launch: a new app's log starts at its tail even if the last one was scrolled up. */}
+          <div
+            key={launches}
+            ref={setScrollElement}
+            role="region"
+            aria-label="App log output"
+            tabIndex={0}
+            // Chrome's own scroll anchoring would fight the virtualizer's over the same rows. The bottom margin keeps the
+            // edge where scrolled text is cut off clear of the card's rounded edge, wherever the box is scrolled.
+            style={{ overflowAnchor: 'none' }}
+            className="mb-1.5 max-h-[220px] overflow-y-auto overflow-x-hidden border-t focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            {!supported || rows === 0 ? (
+              <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                {supported ? 'Waiting for app logs…' : 'Update the device agent to view app logs.'}
+              </p>
+            ) : (
+              <Suspense fallback={null}>
+                <AppLogRows scrollElement={scrollElement} buffer={buffer} version={log.version} rows={rows} dropped={dropped} />
+              </Suspense>
+            )}
+          </div>
         </div>
-      )}
-    </div>
+      </div>
+    </section>
   )
 }
