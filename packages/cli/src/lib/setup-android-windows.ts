@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { confirm, isCancel } from '@clack/prompts'
 import { findOnPath } from '@tapflowio/agent-core/utils'
+import { resolveInstallDir } from '@tapflowio/relay'
 import { isInteractive } from './interactive.js'
 import type { SetupStepResult } from './setup.js'
 
@@ -18,8 +19,10 @@ import type { SetupStepResult } from './setup.js'
 //
 // - **JDK**: one already usable (JAVA_HOME, then `java` on PATH) is reused if it is 17+, which is
 //   what cmdline-tools 23 needs (its newest classes are class-file 61). Otherwise winget installs
-//   Temurin 21, and without winget the official Temurin zip from the Adoptium API is unpacked under
-//   the tapflow install dir. 21 rather than 17 because Adoptium publishes no Windows ARM64 build of 17.
+//   Temurin 21 (the current LTS; 17 is only the floor), and without winget the official Temurin zip
+//   from the Adoptium API is unpacked under the tapflow install dir.
+// - **Host**: x64 only. The Android Emulator does not run on Windows on Arm, so an ARM64 PC is told so
+//   before anything is downloaded.
 // - **cmdline-tools**: the archive and SHA-1 come from Google's repository manifest, the same source
 //   sdkmanager reads, so there is no pinned URL to go stale.
 // - **SDK**: an existing SDK is extended, not replaced. Android Studio users and half-finished
@@ -64,6 +67,8 @@ export interface WindowsSetupDeps {
   env: NodeJS.ProcessEnv
   arch: string
   home: string
+  /** The tapflow install directory (`resolveInstallDir().dir`). */
+  installDir: () => string
   exists: (p: string) => boolean
   readdir: (p: string) => string[]
   mkdirp: (p: string) => void
@@ -124,10 +129,13 @@ export function windowsSdkDir(deps: Pick<WindowsSetupDeps, 'env' | 'home'>): str
   return winPath.join(local, 'Android', 'Sdk')
 }
 
-/** Where a JDK tapflow downloads itself lives: inside the tapflow install, like its other state. */
-export function managedJdkRoot(deps: Pick<WindowsSetupDeps, 'env' | 'home'>): string {
-  const install = deps.env['TAPFLOW_HOME'] || winPath.join(deps.home, '.tapflow')
-  return winPath.join(install, 'tools', 'jdk')
+/**
+ * Where a JDK tapflow downloads itself lives: inside the tapflow install, like its other state. The install
+ * is `resolveInstallDir`'s (relay), read at call time like every other command, so an install in the
+ * current directory keeps its JDK there rather than in `~/.tapflow`.
+ */
+export function managedJdkRoot(deps: Pick<WindowsSetupDeps, 'installDir'>): string {
+  return winPath.join(deps.installDir(), 'tools', 'jdk')
 }
 
 export function windowsSystemImage(arch: string): string {
@@ -537,13 +545,24 @@ export function parseDeviceIds(out: string): string[] {
 export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string, sdkOk: boolean, jdk: JdkFound | null): Promise<SetupStepResult> {
   if (!sdkOk) return { label: 'AVD', ok: false, detail: 'Set up the Android SDK first.' }
   const avds = listAvdsWindows(deps, sdk)
-  if (avds.length > 0) return { label: `AVD ready: ${avds.length} device(s)`, ok: true, state: 'found' }
+  // AVDs of the person's own, with no tapflow-* set started, are enough, as they always were. A tapflow-*
+  // set an earlier run only partly created is finished instead: only the names still missing are made,
+  // so the AVDs that exist are never overwritten.
+  const missingOurs = WINDOWS_AVD_SPECS.filter((s) => !avds.includes(s.name))
+  const partialSet = missingOurs.length > 0 && missingOurs.length < WINDOWS_AVD_SPECS.length
+  if (avds.length > 0 && !partialSet) return { label: `AVD ready: ${avds.length} device(s)`, ok: true, state: 'found' }
+  const todo = avds.length === 0 ? WINDOWS_AVD_SPECS : missingOurs
+  const todoNames = todo.map((s) => s.name).join(', ')
+  const situation = avds.length === 0 ? 'No AVD found.' : `Not created yet: ${todoNames}.`
   const manualHint = 'Create an AVD with avdmanager.bat (see Android docs).'
   // avdmanager.bat is a Java tool: without a JDK it fails, and the result would blame the AVDs.
-  if (!jdk) return { label: 'AVD', ok: false, detail: 'No AVD found. Install a JDK 17+ first (avdmanager needs Java), then re-run tapflow setup android.' }
-  if (!deps.interactive()) return { label: 'AVD', ok: false, warn: true, detail: `No AVD found. ${manualHint}` }
-  if (!(await deps.confirm('No Android Virtual Device found. Create a set of AVDs now?'))) {
-    return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${manualHint}` }
+  if (!jdk) return { label: 'AVD', ok: false, detail: `${situation} Install a JDK 17+ first (avdmanager needs Java), then re-run tapflow setup android.` }
+  if (!deps.interactive()) return { label: 'AVD', ok: false, warn: true, detail: `${situation} ${manualHint}` }
+  const question = avds.length === 0
+    ? 'No Android Virtual Device found. Create a set of AVDs now?'
+    : `An earlier run did not create every tapflow AVD. Create ${todoNames} now?`
+  if (!(await deps.confirm(question))) {
+    return { label: 'AVD', ok: false, warn: true, detail: `Skipped. ${situation} ${manualHint}` }
   }
   const avdmanager = avdmanagerOf(sdk)
   if (!deps.exists(avdmanager)) return { label: 'AVD', ok: false, warn: true, detail: 'Android cmdline-tools not found in the SDK.' }
@@ -551,17 +570,25 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
   const available = parseDeviceIds(runTool(deps, avdmanager, ['list', 'device'], { env }).stdout)
   const image = windowsSystemImage(deps.arch)
   const created: string[] = []
-  for (const spec of WINDOWS_AVD_SPECS) {
+  const failed: string[] = []
+  for (const spec of todo) {
     const device = spec.deviceCandidates.find((d) => available.includes(d))
-    if (!device) continue
+    if (!device) { failed.push(spec.name); continue }
+    // `--force` only replaces a half-made AVD of a name -list-avds does not show: `todo` holds no listed name.
     const r = runTool(deps, avdmanager, ['create', 'avd', '-n', spec.name, '-k', image, '-d', device, '--force'], { env, input: 'no\n', inherit: true })
     if (r.status === 0) created.push(spec.name)
+    else failed.push(spec.name)
   }
-  if (created.length === 0) return { label: 'AVD', ok: false, warn: true, detail: 'Could not create any AVD.' }
   const listed = listAvdsWindows(deps, sdk)
-  const missing = created.filter((n) => !listed.includes(n))
-  if (missing.length > 0) {
-    return { label: 'AVD', ok: false, warn: true, detail: `Created but not listed by emulator -list-avds: ${missing.join(', ')}` }
+  const notReady = [...failed, ...created.filter((n) => !listed.includes(n))]
+  if (notReady.length > 0) {
+    const made = created.filter((n) => listed.includes(n))
+    return {
+      label: 'AVD',
+      ok: false,
+      warn: true,
+      detail: `Could not create: ${notReady.join(', ')}.${made.length > 0 ? ` Created: ${made.join(', ')}.` : ''} Re-run tapflow setup android to try the rest again.`,
+    }
   }
   return { label: `AVDs created: ${created.join(', ')}`, ok: true, state: 'created' }
 }
@@ -587,7 +614,13 @@ export function checkAccelWindows(deps: WindowsSetupDeps, sdk: string): SetupSte
 
 // ── entry point ────────────────────────────────────────────────────────────
 
+/** Said instead of setting anything up on an ARM64 PC, before any download. */
+export const WINDOWS_ARM64_UNSUPPORTED =
+  'The Android Emulator does not run on Windows on Arm (Google requires an x86_64 CPU on Windows), so tapflow ' +
+  'cannot set up Android on this PC. Use an x64 Windows PC, a Mac, or Linux.'
+
 export async function runSetupAndroidWindows(deps: WindowsSetupDeps = realWindowsDeps()): Promise<SetupStepResult[]> {
+  if (deps.arch === 'arm64') return [{ label: 'Android emulator', ok: false, detail: WINDOWS_ARM64_UNSUPPORTED }]
   const results: SetupStepResult[] = []
   const { result: jdkResult, jdk } = await checkAndFixJdkWindows(deps)
   results.push(jdkResult)
@@ -609,6 +642,7 @@ export function realWindowsDeps(opts: WindowsSetupOptions = {}): WindowsSetupDep
     env: process.env,
     arch: process.arch,
     home: homedir(),
+    installDir: () => resolveInstallDir().dir,
     exists: existsSync,
     readdir: (p) => readdirSync(p),
     mkdirp: (p) => { mkdirSync(p, { recursive: true }) },

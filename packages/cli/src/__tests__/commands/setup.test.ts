@@ -16,6 +16,7 @@ import { runSetupAndroid, runSetupIos } from '../../lib/setup.js'
 import { resolveAdb } from '../../lib/doctor.js'
 import { confirm } from '@clack/prompts'
 import { cmdSetup } from '../../commands/setup.js'
+import { WINDOWS_ENV_WRITE_FAILED } from '../../lib/setup-android-windows.js'
 
 const mockRunSetupAndroid = vi.mocked(runSetupAndroid)
 const mockRunSetupIos = vi.mocked(runSetupIos)
@@ -90,6 +91,15 @@ describe('cmdSetup', () => {
     const out = logLines.join('\n')
     expect(out).toContain('Open a new terminal, then `tapflow doctor`')
     expect(out).not.toContain('exec $SHELL')
+  })
+
+  it('on Windows, does not say the environment was written when writing it failed', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: `SDK at C:\\sdk. ${WINDOWS_ENV_WRITE_FAILED}` }])
+    await cmdSetup('android', {})
+    const out = logLines.join('\n')
+    expect(out).toContain('Open a new terminal, then `tapflow doctor`')
+    expect(out).not.toMatch(/were added|was added|has added/)
   })
 
   it('--yes off Windows is ignored, with a warning', async () => {

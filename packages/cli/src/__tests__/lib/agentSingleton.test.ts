@@ -55,13 +55,16 @@ describe('the agent slot', () => {
     expect((await claimAgentSlot('probe', dir)).held, 'refused while alive').toBe(false)
     child.kill('SIGKILL')
     await new Promise((r) => child.once('exit', r))
-    expect(existsSync(claimPath('probe', dir)), 'the corpse is still on disk').toBe(true)
+    // A Unix socket file outlives its owner; a Windows named pipe goes with it, so there is no corpse to see
+    // there — only the reacquisition below, which holds on both.
+    if (process.platform !== 'win32') expect(existsSync(claimPath('probe', dir)), 'the corpse is still on disk').toBe(true)
     const claim = await claimAgentSlot('probe', dir)
     expect(claim.held, 'a dead owner still held the slot').toBe(true)
     if (claim.held) released.push(claim.release)
   })
 
-  it('takes over a path left by something that is not a socket at all', async () => {
+  // Unix only: on Windows the claim is a named pipe (`\\.\pipe\…`), where no plain file can be written.
+  it.skipIf(process.platform === 'win32')('takes over a path left by something that is not a socket at all', async () => {
     // A plain file at the path answers `connect` with an error the same way a corpse does. Treating
     // that as "held" would wedge the platform until someone found the file.
     writeFileSync(claimPath('junk', dir), 'not a socket')

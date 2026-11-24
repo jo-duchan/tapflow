@@ -81,10 +81,11 @@ export async function cmdSetup(platform?: string, opts: SetupOptions = {}): Prom
 
   // env가 rc에 있지만 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
   if (needsNewShell) {
-    // Windows has no rc file or `exec $SHELL`: setup writes the user environment, which only a
-    // terminal opened afterwards reads.
+    // Windows has no rc file or `exec $SHELL`: the user environment is read only by a terminal opened
+    // afterwards. Worded so it is true whether setup wrote it or a failed write left it to the person
+    // (WINDOWS_ENV_WRITE_FAILED also mentions a new terminal, which is what sets needsNewShell).
     step(process.platform === 'win32'
-      ? 'Open a new terminal, then `tapflow doctor` to verify — ANDROID_HOME and PATH were added to your user environment, but this terminal has not loaded them yet.'
+      ? 'Open a new terminal, then `tapflow doctor` to verify — a terminal that was already open does not see changes to your user environment.'
       : "Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
   }
 

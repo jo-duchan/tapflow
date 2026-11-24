@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { win32 as p } from 'node:path'
 import {
-  ACCEL_GUIDANCE, REGISTER_ENV_SCRIPT, SDKMANAGER_INSTALL_ATTEMPTS, WINDOWS_ENV_WRITE_FAILED, WINGET_JDK_ID, adoptiumApiUrl,
+  ACCEL_GUIDANCE, REGISTER_ENV_SCRIPT, SDKMANAGER_INSTALL_ATTEMPTS, WINDOWS_ARM64_UNSUPPORTED, WINDOWS_ENV_WRITE_FAILED, WINGET_JDK_ID, adoptiumApiUrl,
   checkAccelWindows, checkAndFixAvdWindows, checkAndFixJdkWindows, cmdLine, missingSdkPackages,
   parseAdoptiumAssets, parseCmdlineToolsArchive, parseDeviceIds, parseJavaMajor, runSetupAndroidWindows,
   runTool, sdkToolEnv, windowsSdkDir, windowsSystemImage,
@@ -60,6 +60,7 @@ function fakePc(opts: {
     env,
     arch: 'x64',
     home: HOME,
+    installDir: () => env['TAPFLOW_HOME'] || p.join(HOME, '.tapflow'),
     exists: (f) => files.has(f) || [...files].some((x) => x.startsWith(`${f}\\`)),
     readdir: (dir) => [...new Set([...files].filter((x) => x.startsWith(`${dir}\\`)).map((x) => x.slice(dir.length + 1).split('\\')[0]!))],
     mkdirp: () => {},
@@ -200,11 +201,56 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(install.args[3]).toContain('"platform-tools" "emulator" "build-tools;35.0.0" "platforms;android-35" "system-images;android-35;google_apis;x86_64"')
   })
 
-  it('picks the arm64 image on ARM64 Windows', () => {
-    expect(windowsSystemImage('arm64')).toBe('system-images;android-35;google_apis;arm64-v8a')
-    const pc = fakePc({ files: PARTIAL_SDK })
+  it('stops on ARM64 Windows before asking, downloading or running anything', async () => {
+    const pc = fakePc({ files: [] })
     pc.deps.arch = 'arm64'
-    expect(missingSdkPackages(pc.deps, SDK)).toEqual(['system-images;android-35;google_apis;arm64-v8a'])
+    const results = await runSetupAndroidWindows(pc.deps)
+    expect(results).toEqual([{ label: 'Android emulator', ok: false, detail: WINDOWS_ARM64_UNSUPPORTED }])
+    expect(pc.prompts).toEqual([])
+    expect(pc.downloads).toEqual([])
+    expect(pc.calls).toEqual([])
+  })
+
+  it('finishes a tapflow AVD set an earlier run left half made, leaving the existing ones alone', async () => {
+    const pc = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, AVDMANAGER, p.join(IMAGE_DIR, 'system.img')] })
+    pc.avds.push('tapflow-compact', 'tapflow-phone')
+    const results = await runSetupAndroidWindows(pc.deps)
+
+    expect(pc.prompts).toEqual(['An earlier run did not create every tapflow AVD. Create tapflow-large, tapflow-tablet now?'])
+    const made = pc.calls.map((c) => c.args.join(' ').match(/"-n" "([^"]+)"/)?.[1]).filter(Boolean)
+    expect(made).toEqual(['tapflow-large', 'tapflow-tablet'])
+    expect(results[2]).toMatchObject({ label: 'AVDs created: tapflow-large, tapflow-tablet', ok: true })
+  })
+
+  it('reports the AVDs it could not create, and does not call the set done', async () => {
+    const pc = fakePc({
+      files: PARTIAL_SDK,
+      respond: (c) => (c.args.join(' ').includes('"-n" "tapflow-tablet"') ? { status: 1, stdout: '', stderr: 'boom' } : undefined),
+    })
+    const results = await runSetupAndroidWindows(pc.deps)
+
+    expect(results[2]).toMatchObject({ label: 'AVD', ok: false, warn: true })
+    expect(results[2]!.detail).toContain('Could not create: tapflow-tablet.')
+    expect(results[2]!.detail).toContain('Created: tapflow-compact, tapflow-phone, tapflow-large.')
+  })
+
+  it('keeps the managed JDK in the resolved tapflow install, not always ~/.tapflow', async () => {
+    const install = 'D:\\work\\my-tapflow'
+    const pc = fakePc({
+      files: [TAR],
+      respond: (c, state) => {
+        if (c.file === TAR && c.args.includes(`${install}\\tools\\jdk`)) {
+          state.files.add(`${install}\\tools\\jdk\\jdk-21.0.13.1+2\\bin\\java.exe`)
+          return { status: 0, stdout: '', stderr: '' }
+        }
+        if (c.file.endsWith('java.exe')) return { status: 0, stdout: '', stderr: 'openjdk version "21.0.13"\n' }
+        return undefined
+      },
+    })
+    pc.deps.installDir = () => install
+    const { result } = await checkAndFixJdkWindows(pc.deps)
+    expect(result).toMatchObject({ ok: true, state: 'created' })
+    expect(result.detail).toContain(`${install}\\tools\\jdk`)
   })
 
   it('retries sdkmanager when a package download drops, then finishes the install', async () => {
