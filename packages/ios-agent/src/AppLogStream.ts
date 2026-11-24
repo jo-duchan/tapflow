@@ -1,5 +1,8 @@
-import { spawn } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import type { ChildProcess } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export const APP_LOG_CHUNK_LIMIT = 8192
 export const APP_LOG_SOCKET_BUFFER_LIMIT = 512 * 1024
@@ -8,6 +11,62 @@ const APP_LOG_ERROR_TEXT_LIMIT = 2048
 
 function predicateString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/**
+ * `log stream`'s own header, which is not the app's output. Measured on iOS 26.5: "Filtering the log data using …" comes
+ * at once, and the column title only just before the first entry. Looked for until the first other line, never after.
+ */
+const HEADER_LINE = /^(?:Filtering the log data using |Timestamp\s+Ty\s+Process\[PID:TID\]\s*$)/
+
+const HEADER_STARTS = ['Filtering the log data using ', 'Timestamp ']
+
+/** How `log stream` shows in the simulator when this file spawned it: what tells ours from a person's own. */
+const OUR_LOG_STREAM = /^(?:.*\/)?log stream --level debug --style compact --predicate processIdentifier == \d+ AND processImagePath == /
+
+/**
+ * The app log streams left running in simulator `udid`, from `ps -o pid=,ppid=,command=` output (#1235). A SIGKILLed
+ * `simctl spawn`, or an agent killed while its stream is quiet, leaves `log stream` running in the simulator until it
+ * shuts down (measured on iOS 18.5 and 26.5); it is a child of that device's `launchd_sim`, whose argument names the
+ * device's directory. A SIGTERM to it ends a surviving `simctl spawn` too (measured).
+ */
+export function orphanAppLogStreams(ps: string, udid: string): number[] {
+  const rows: Array<{ pid: number; ppid: number; command: string }> = []
+  for (const line of ps.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), command: m[3]! })
+  }
+  const device = `/Devices/${udid}/`
+  const launchd = new Set(rows.filter((r) => /^(?:\S*\/)?launchd_sim /.test(r.command) && r.command.includes(device)).map((r) => r.pid))
+  return rows.filter((r) => launchd.has(r.ppid) && OUR_LOG_STREAM.test(r.command)).map((r) => r.pid)
+}
+
+export interface AppLogStreamDeps {
+  spawn: typeof spawn
+  findOrphans(udid: string): Promise<number[]>
+  killPid(pid: number): void
+}
+
+export const defaultAppLogStreamDeps: AppLogStreamDeps = {
+  spawn,
+  async findOrphans(udid) {
+    try {
+      const { stdout } = await execFileAsync('/bin/ps', ['-axww', '-o', 'pid=,ppid=,command='], { timeout: 5_000, maxBuffer: 16 * 1024 * 1024 })
+      return orphanAppLogStreams(stdout, udid)
+    } catch {
+      return []
+    }
+  },
+  killPid(pid) {
+    try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+  },
+}
+
+/** Under vitest an agent streams nothing: a suite must never spawn into a real simulator. */
+export const inertAppLogStreamDeps: AppLogStreamDeps = {
+  spawn: (() => { throw new Error('no app log stream under test') }) as unknown as typeof spawn,
+  findOrphans: async () => [],
+  killPid: () => {},
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -29,6 +88,8 @@ export class AppLogStream {
   private targetExited = false
   private errorReported = false
   private stderrText = ''
+  /** Text held while `log stream`'s header may still be coming; null once the first other line has passed. */
+  private headerPending: string | null = ''
 
   constructor(
     udid: string,
@@ -65,19 +126,7 @@ export class AppLogStream {
     })
     this.process.stdout?.on('data', (text: string) => {
       if (this.stopped) return
-      let chunk = ''
-      let bytes = 0
-      for (const character of text) {
-        const characterBytes = Buffer.byteLength(character, 'utf8')
-        if (bytes + characterBytes > APP_LOG_CHUNK_LIMIT) {
-          this.queue.push(chunk)
-          chunk = ''
-          bytes = 0
-        }
-        chunk += character
-        bytes += characterBytes
-      }
-      if (chunk) this.queue.push(chunk)
+      this.enqueue(this.skipHeader(text))
       this.flush()
     })
     this.process.once('error', (error) => {
@@ -88,6 +137,8 @@ export class AppLogStream {
     this.process.once('close', (code) => {
       this.childClosed = true
       this.stopPidCheck()
+      // What is still held can only be the start of the header (an entry starts with its date), so it is dropped.
+      this.headerPending = null
       if (code !== null && code !== 0 && !this.stopped && !this.targetExited && !this.errorReported) {
         this.errorReported = true
         const detail = this.stderrText.trim()
@@ -121,6 +172,39 @@ export class AppLogStream {
       this.process.kill('SIGTERM')
     }
     this.flush()
+  }
+
+  private skipHeader(text: string): string {
+    if (this.headerPending === null) return text
+    let pending = this.headerPending + text
+    for (;;) {
+      const end = pending.indexOf('\n')
+      if (end === -1) {
+        if (pending.length > APP_LOG_CHUNK_LIMIT || !HEADER_STARTS.some((h) => h.startsWith(pending) || pending.startsWith(h))) break
+        this.headerPending = pending
+        return ''
+      }
+      if (!HEADER_LINE.test(pending.slice(0, end))) break
+      pending = pending.slice(end + 1)
+    }
+    this.headerPending = null
+    return pending
+  }
+
+  private enqueue(text: string): void {
+    let chunk = ''
+    let bytes = 0
+    for (const character of text) {
+      const characterBytes = Buffer.byteLength(character, 'utf8')
+      if (bytes + characterBytes > APP_LOG_CHUNK_LIMIT) {
+        this.queue.push(chunk)
+        chunk = ''
+        bytes = 0
+      }
+      chunk += character
+      bytes += characterBytes
+    }
+    if (chunk) this.queue.push(chunk)
   }
 
   private stopPidCheck(): void {

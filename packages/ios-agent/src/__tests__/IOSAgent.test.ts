@@ -4198,9 +4198,9 @@ describe('IOSAgent', () => {
       const deliver = (agent: IOSAgent, msg: Record<string, unknown>) =>
         (agent as unknown as WithHandler).handleRelayMessage(msg)
 
-      async function bootedAgent() {
+      async function bootedAgent(options: Partial<ConstructorParameters<typeof IOSAgent>[0]> = {}) {
         const simctl = mockSimctl(false)
-        const agent = new IOSAgent({ intervalMs: 50 }, simctl)
+        const agent = new IOSAgent({ intervalMs: 50, ...options }, simctl)
         // Session admission reads the agent's latest resource sample. Keep this device-boot fixture
         // independent of the machine running Vitest; the resource gate has its own relay tests.
         const resources = (agent as unknown as {
@@ -4409,6 +4409,54 @@ describe('IOSAgent', () => {
 
         expect((await done).requestId).toBe('rq-log-setup')
         await vi.waitFor(() => expect(simctl.getAppExecutablePath).toHaveBeenCalledWith('dev-1', 'com.example.app'))
+        agent.disconnect(); browser.close()
+      })
+
+      // #1235: a stream an earlier agent left in the simulator is ended before this launch's own starts.
+      it("launch sweeps the device's orphaned app log streams before spawning its own", async () => {
+        const order: string[] = []
+        const appLogStreamDeps = {
+          findOrphans: vi.fn(async (udid: string) => { order.push(`find ${udid}`); return [41, 42] }),
+          killPid: vi.fn((pid: number) => { order.push(`kill ${pid}`) }),
+          spawn: vi.fn(() => { order.push('spawn'); throw new Error('not spawned under test') }) as unknown as typeof import('child_process').spawn,
+        }
+        const { simctl, agent, browser } = await bootedAgent({ appLogStreamDeps })
+        vi.mocked(simctl.launchApp).mockResolvedValueOnce(456)
+
+        const done = waitForType(browser, 'app:launch-done')
+        deliver(agent, { type: 'app:launch', requestId: 'rq-sweep', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+        expect((await done).requestId).toBe('rq-sweep')
+        await vi.waitFor(() => expect(order).toContain('spawn'))
+
+        expect(order).toEqual(['find dev-1', 'kill 41', 'kill 42', 'spawn'])
+        agent.disconnect(); browser.close()
+      })
+
+      // The sweep cannot tell a newer launch's live stream from an orphan, so a superseded launch must not sweep.
+      it('a launch superseded while resolving its app image sweeps nothing', async () => {
+        const order: string[] = []
+        const appLogStreamDeps = {
+          findOrphans: vi.fn(async () => { order.push('find'); return [77] }),
+          killPid: vi.fn((pid: number) => { order.push(`kill ${pid}`) }),
+          spawn: vi.fn(() => { order.push('spawn'); throw new Error('not spawned under test') }) as unknown as typeof import('child_process').spawn,
+        }
+        const { simctl, agent, browser } = await bootedAgent({ appLogStreamDeps })
+        vi.mocked(simctl.launchApp).mockResolvedValue(456)
+        let releaseA: ((path: string) => void) | undefined
+        vi.mocked(simctl.getAppExecutablePath)
+          .mockImplementationOnce(() => new Promise<string>((r) => { releaseA = r }))
+          .mockResolvedValueOnce('/sim/Example.app/Example')
+
+        deliver(agent, { type: 'app:launch', requestId: 'rq-A', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+        await vi.waitFor(() => expect(releaseA).toBeDefined())
+        deliver(agent, { type: 'app:launch', requestId: 'rq-B', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+        await vi.waitFor(() => expect(order).toContain('spawn'))
+        releaseA!('/sim/Example.app/Example')
+        // Launch A's continuation touches nothing but these mocks, so it settles within microtasks, all of which run
+        // before a macrotask: this is its completion, not a deadline.
+        await new Promise((r) => setImmediate(r))
+
+        expect(order).toEqual(['find', 'kill 77', 'spawn'])
         agent.disconnect(); browser.close()
       })
 

@@ -133,7 +133,7 @@ import {
   type AgentCapability,
 } from '@tapflowio/agent-core'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
-import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
+import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT, defaultAppLogStreamDeps, inertAppLogStreamDeps, type AppLogStreamDeps } from './AppLogStream.js'
 import { AudioCaptureStreamer, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
 import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { enumerateSimPids } from './SimProcessTree.js'
@@ -200,6 +200,8 @@ export interface IOSAgentOptions {
   /** UIKit's dispatch log for a recorded device (#1214). Under vitest the default reads nothing, so a suite never spawns
    *  into a real simulator; a test passes its own. */
   dispatchLog?: (udid: string) => DispatchLog | null
+  /** How a launched app's log stream is spawned, and its orphans found (#1235). Under vitest the default spawns nothing. */
+  appLogStreamDeps?: AppLogStreamDeps
   /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
    *  default keeps its markers in a directory under the OS temp folder. */
   appAccessibility?: AppAccessibility
@@ -449,6 +451,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly touchWatch = new Map<string, TouchWatch>()
   /** Where each recorded touch landed is read from UIKit's dispatch log, one stream per device; null reads nothing. */
   private readonly dispatchLog: (udid: string) => DispatchLog | null
+  private readonly appLogStreamDeps: AppLogStreamDeps
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -524,6 +527,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
     )
     this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
+    this.appLogStreamDeps = options.appLogStreamDeps ?? (process.env.VITEST ? inertAppLogStreamDeps : defaultAppLogStreamDeps)
     this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
       this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
     )
@@ -2568,6 +2572,20 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
               // with Promise.resolve also captures a synchronous throw from an older/test SimctlWrapper.
               void Promise.resolve()
                 .then(() => this.simctl.getAppExecutablePath(launchState.deviceId, bundleId))
+                .then(async (processImagePath) => {
+                  // A stream an earlier agent left in this simulator would otherwise run until it shuts down (#1235).
+                  // Not for a launch already superseded: the sweep cannot tell a newer launch's live stream from an orphan.
+                  const current = () =>
+                    launchState.appLogGeneration === appLogGeneration && this.deviceStates.get(sessionId!) === launchState
+                  if (!current()) return processImagePath
+                  const orphans = await this.appLogStreamDeps.findOrphans(launchState.deviceId)
+                  for (const orphan of orphans) {
+                    if (!current()) break
+                    logger.warn(`killing a leftover app log stream (pid ${orphan}) for ${launchState.deviceId}`)
+                    this.appLogStreamDeps.killPid(orphan)
+                  }
+                  return processImagePath
+                })
                 .then((processImagePath) => {
                   if (
                     launchState.appLogGeneration !== appLogGeneration ||
@@ -2593,7 +2611,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
                       this.sendMsg({ type: 'app:log', sessionId: sessionId!, launchId: requestId, text })
                       return true
                     },
-                    (error) => logger.warn('app log stream failed:', error.message)
+                    (error) => logger.warn('app log stream failed:', error.message),
+                    this.appLogStreamDeps.spawn
                   )
                 })
                 .catch((error: unknown) => logger.warn('could not resolve app log process image:', (error as Error).message))
