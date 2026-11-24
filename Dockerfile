@@ -46,6 +46,10 @@ COPY docs/package.json ./docs/
 # Install dependencies across the entire monorepo
 RUN pnpm install --frozen-lockfile
 
+# The package build scripts copy and chmod through this, so they run under cmd.exe too (#1100). After the install, so
+# it does not invalidate that layer.
+COPY scripts/fs-copy.mjs ./scripts/
+
 # Build required dependencies and the relay package itself.
 # Dashboard is built so its static assets are placed in relay/public.
 # protocol comes first: dashboard and relay both resolve its types from dist/, which does not
