@@ -4546,6 +4546,21 @@ describe('IOSAgent', () => {
           agent.disconnect(); browser.close()
         })
 
+        it('asks for the moved path again when the read after an install fails', async () => {
+          const { deps, children } = watchDeps()
+          const { simctl, agent, browser } = await bootedAgent({ appLogWatchDeps: deps, appLogWatchRefreshRetryMs: 1 })
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await vi.waitFor(() => expect(children).toHaveLength(1))
+          vi.mocked(simctl.getAppExecutablePath)
+            .mockRejectedValueOnce(new Error('simctl get_app_container failed'))
+            .mockResolvedValue('/sim/Moved/Example.app/Example')
+          const done = waitForType(browser, 'app:install-done')
+          deliver(agent, { type: 'app:install', requestId: 'rq-flaky', sessionId: agent.sessionId, payload: { filePath: '/tmp/x.app', bundleId: 'com.example.app' } })
+          await done
+          await vi.waitFor(() => expect(children).toHaveLength(2))
+          agent.disconnect(); browser.close()
+        })
+
         it('keeps the watch across a boot: the stream goes down with it and comes back at ready', async () => {
           const { deps, children } = watchDeps()
           const { agent, browser } = await bootedAgent({ appLogWatchDeps: deps })

@@ -287,6 +287,22 @@ describe('app log routing', () => {
       agent.close(); browser.close()
     })
 
+    it('does not take a reused build id for the app on the device', async () => {
+      const { agent, sessionId } = await register()
+      const browser = await join(sessionId)
+      const first = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      const buildId = await install(agent, browser, sessionId)
+      await first
+      // The build was deleted and its id handed to another upload.
+      getDb().prepare(`UPDATE builds SET bundle_id = 'com.example.other', file_path = '/elsewhere.zip' WHERE id = ?`).run(buildId)
+      browser.send(JSON.stringify({ type: 'session:leave', sessionId }))
+      await barrier(browser)
+      const back = await join(sessionId)
+      await barrier(agent)
+      expect(await waitForTypeOrNull(agent, 'app:logs:watch', 0)).toBeNull()
+      agent.close(); browser.close(); back.close()
+    })
+
     it('ends the watch when the session ends', async () => {
       const { agent, sessionId } = await register()
       const browser = await join(sessionId)

@@ -19,6 +19,9 @@ import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflo
 import { IOS_BUTTON_ALIASES } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('ios-agent')
+/** A refresh of the watched app's path after an install, asked again this many times this far apart when it fails. */
+export const APP_LOG_WATCH_REFRESH_RETRIES = 3
+export const APP_LOG_WATCH_REFRESH_RETRY_MS = 1_000
 
 /**
  * How long after the paste chord the pasteboard is put back (#1129). The chord is sent, not read: the app reads the
@@ -206,6 +209,8 @@ export interface IOSAgentOptions {
   /** How a watched app's log stream is spawned and its runs read (`app:logs:watch`). Under vitest the default spawns
    *  nothing. */
   appLogWatchDeps?: AppLogWatchDeps
+  /** How long a failed refresh of the watched app's path waits before asking again. Injectable for tests. */
+  appLogWatchRefreshRetryMs?: number
   /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
    *  default keeps its markers in a directory under the OS temp folder. */
   appAccessibility?: AppAccessibility
@@ -466,6 +471,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly dispatchLog: (udid: string) => DispatchLog | null
   private readonly appLogStreamDeps: AppLogStreamDeps
   private readonly appLogWatchDeps: AppLogWatchDeps
+  private readonly appLogWatchRefreshRetryMs: number
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -543,6 +549,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
     this.appLogStreamDeps = options.appLogStreamDeps ?? (process.env.VITEST ? inertAppLogStreamDeps : defaultAppLogStreamDeps)
     this.appLogWatchDeps = options.appLogWatchDeps ?? (process.env.VITEST ? inertAppLogWatchDeps : defaultAppLogWatchDeps)
+    this.appLogWatchRefreshRetryMs = options.appLogWatchRefreshRetryMs ?? APP_LOG_WATCH_REFRESH_RETRY_MS
     this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
       this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
     )
@@ -977,7 +984,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * name (every Flutter app is `Runner.app/Runner`), so after an install the path is read again and a stream on the old
    * one is replaced. A stream already on the right path is left as it is, across every run of the app.
    */
-  private raiseAppLogWatch(state: DeviceState, refresh = false): void {
+  private raiseAppLogWatch(state: DeviceState, refresh = false, attempt = 0): void {
     const wanted = state.appLogWatch
     if (!wanted || !state.booted || (state.appLogWatcher && !refresh)) return
     const raise = ++state.appLogWatchRaise
@@ -1012,8 +1019,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         state.appLogWatcher = watcher
         return watcher.start()
       })
-      // Not installed yet, most often: the install's own call raises it once the app is there.
-      .catch((error: unknown) => logger.debug('app log watch not started:', (error as Error).message))
+      .catch((error: unknown) => {
+        // Not installed yet, most often: the install's own call raises it once the app is there. A refresh after an
+        // install found the app there, so a failed read is asked again, or the stream would stay on the old container.
+        logger.debug('app log watch not started:', (error as Error).message)
+        if (!refresh || attempt >= APP_LOG_WATCH_REFRESH_RETRIES || !current()) return
+        setTimeout(() => { if (current()) this.raiseAppLogWatch(state, true, attempt + 1) }, this.appLogWatchRefreshRetryMs).unref()
+      })
   }
 
   private stopAppLogStream(state: DeviceState): number {

@@ -3913,7 +3913,7 @@ export class RelayServer {
     if (hasCapability(session.agentCapabilities, 'app-log-watch') && session.holderKind !== null && !isAiClientKind(session.holderKind)) {
       // The app an install or a launch names, else the one already watched, else the one installed. Only those two choose
       // the app: a re-join or a ready keeps it, and a cold boot clearing the install record is no reason to end it.
-      bundleId = options.bundleId ?? current?.bundleId ?? this.bundleOfBuild(session.installed?.buildId) ?? null
+      bundleId = options.bundleId ?? current?.bundleId ?? this.bundleOfBuild(session.installed) ?? null
     }
     if (bundleId === null) {
       this.endAppLogWatch(session.id)
@@ -3928,10 +3928,12 @@ export class RelayServer {
     this.sendTo(session.agentSocket, { type: 'app:logs:watch', sessionId: session.id, watchId: watch.watchId, bundleId })
   }
 
-  private bundleOfBuild(buildId: number | undefined): string | null {
-    if (buildId === undefined) return null
-    const build = getDb().prepare('SELECT bundle_id FROM builds WHERE id = ?').get(buildId) as { bundle_id: string | null } | undefined
-    return build?.bundle_id ?? null
+  /** By id **and** stored path, as `InstalledBuild` keeps both: a deleted build's id is handed to the next upload, which
+   *  is not the app on the device. */
+  private bundleOfBuild(build: InstalledBuild | undefined): string | null {
+    if (!build) return null
+    const row = getDb().prepare('SELECT bundle_id FROM builds WHERE id = ? AND file_path = ?').get(build.buildId, build.filePath) as { bundle_id: string | null } | undefined
+    return row?.bundle_id ?? null
   }
 
   private endAppLogWatch(sessionId: string): void {
@@ -3954,7 +3956,7 @@ export class RelayServer {
     if (!pending || pending.requestId !== requestId) return
     session.pendingInstall = undefined
     session.installed = done ? { buildId: pending.buildId, filePath: pending.filePath } : undefined
-    const installedBundle = done ? this.bundleOfBuild(pending.buildId) : null
+    const installedBundle = done ? this.bundleOfBuild(pending) : null
     this.syncAppLogWatch(session, installedBundle ? { bundleId: installedBundle } : {})
     for (const waiter of pending.waiters) {
       // The agent's own reason. Its reply goes out under the original id, which a reconnected viewer has let go of.
