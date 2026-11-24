@@ -503,9 +503,17 @@ export class AdbWrapper {
    *  package, and its others (`:remote`, workers) after it. */
   async processesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<Array<{ pid: number; name: string }>> {
     const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID,NAME', '-u', String(uid)]
-    const output = this.runner.execBounded
-      ? await this.runner.execBounded(timeoutMs, ...args)
-      : await this.runner.exec(...args)
+    let output: string
+    try {
+      output = this.runner.execBounded
+        ? await this.runner.execBounded(timeoutMs, ...args)
+        : await this.runner.exec(...args)
+    } catch (e) {
+      // `ps` exits 1 when the uid has no process (measured, API 34), with its header on stdout: none, not a failure.
+      const stdout = (e as { stdout?: unknown }).stdout
+      if (typeof stdout !== 'string' || !/^\s*PID\b/.test(stdout)) throw e
+      output = stdout
+    }
     const processes: Array<{ pid: number; name: string }> = []
     for (const line of output.split(/\r?\n/)) {
       const m = /^\s*(\d+)\s+(\S+)\s*$/.exec(line)

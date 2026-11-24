@@ -20,6 +20,14 @@ export interface AppLogWatchDeps {
   deviceTime(): Promise<string | undefined>
 }
 
+/**
+ * A starting app process is not yet called by its own name. Measured on API 34, the uid's process was first listed as
+ * `zygote64`, and once as another app's package (`com.google.android.configupdater`), before taking the app's. Every
+ * process of the uid is the app's, named as its package or `<package>:<name>`, so any other name is asked again.
+ */
+export const APP_LOG_WATCH_NAME_RETRY_MS = 50
+export const APP_LOG_WATCH_NAME_RETRIES = 20
+
 /** A `-v process` line: `I( 5344) the message  (Tag)`. The text sent is the message alone, as `-v raw` gave it
  *  (measured: 80 of 80 lines identical, M3 in the plan). A logcat banner (`--------- beginning of main`) has no pid. */
 const PROCESS_LINE = /^[VDIWEFAS]\( *(\d+)\) (.*?)(?: {2}\([^()]*\))?$/
@@ -148,8 +156,28 @@ export class AppLogWatch {
     this.restartTimer.unref()
   }
 
+  private named(name: string): boolean {
+    return name === this.packageName || name.startsWith(`${this.packageName}:`)
+  }
+
   private note(processes: Array<{ pid: number; name: string }>): void {
-    for (const p of processes) this.main.set(p.pid, p.name === this.packageName)
+    for (const p of processes) if (this.named(p.name)) this.main.set(p.pid, p.name === this.packageName)
+  }
+
+  /** Asks which process `pid` is, again while it has no name of its own yet. One the device no longer lists, or one
+   *  still otherwise named after the retries (a manifest `android:process` naming it outside the package), joins the
+   *  current run. */
+  private async classify(uid: number, pid: number): Promise<void> {
+    for (let attempt = 0; attempt < APP_LOG_WATCH_NAME_RETRIES; attempt++) {
+      const processes = await this.deps.processes(uid).catch(() => [])
+      if (this.stopped) return
+      this.note(processes)
+      const listed = processes.find((p) => p.pid === pid)
+      if (!listed || this.named(listed.name)) break
+      await new Promise((resolve) => setTimeout(resolve, APP_LOG_WATCH_NAME_RETRY_MS))
+      if (this.stopped) return
+    }
+    if (!this.main.has(pid)) this.main.set(pid, false)
   }
 
   /** One line at a time, in order. A line of a pid not seen before waits for the device to say which process it is. */
@@ -164,10 +192,8 @@ export class AppLogWatch {
           const pid = Number(m[1])
           if (!this.main.has(pid) && pid !== this.current && !this.exited.has(pid) && this.uid !== null) {
             this.child?.stdout?.pause()
-            this.note(await this.deps.processes(this.uid).catch(() => []))
+            await this.classify(this.uid, pid)
             if (this.stopped) return
-            // Gone before it could be asked: too short-lived to tell, so it joins the current run.
-            if (!this.main.has(pid)) this.main.set(pid, false)
           }
           if (this.main.get(pid) && pid !== this.current && !this.exited.has(pid)) {
             this.endCurrent()

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import type { ChildProcess } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { APP_LOG_WATCH_EXIT_POLL_MS, APP_LOG_WATCH_RESTART_MIN_MS, AppLogWatch, type AppLogWatchDeps, type AppLogWatchItem } from '../AppLogWatch.js'
+import { APP_LOG_WATCH_EXIT_POLL_MS, APP_LOG_WATCH_NAME_RETRY_MS, APP_LOG_WATCH_RESTART_MIN_MS, AppLogWatch, type AppLogWatchDeps, type AppLogWatchItem } from '../AppLogWatch.js'
 
 const PKG = 'com.example.app'
 const line = (pid: number, text: string, tag = 'Tag') => `I(${String(pid).padStart(5)}) ${text}  (${tag})\n`
@@ -54,6 +54,20 @@ describe('Android app log watch', () => {
     expect(shown()).toBe(
       '--------- beginning of main\n[started 5344]hello\nfrom remote\nFATAL EXCEPTION: main\n[exited 5344][started 5407]again\n',
     )
+    watch.stop()
+  })
+
+  it('asks again while a starting process is not yet called by its own name, then marks its run', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    await watch.start()
+    vi.mocked(deps.processes)
+      .mockResolvedValueOnce([{ pid: 77, name: 'zygote64' }])
+      .mockResolvedValueOnce([{ pid: 77, name: 'com.google.android.configupdater' }])
+      .mockResolvedValue([{ pid: 77, name: PKG }])
+    children[0]!.stdout.emit('data', line(77, 'Late-enabling -Xcheck:jni'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_NAME_RETRY_MS * 2)
+    expect(shown()).toBe('[started 77]Late-enabling -Xcheck:jni\n')
     watch.stop()
   })
 
