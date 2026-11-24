@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **App logs are visible in the QA session.** After the app launches, the agent streams native process output into the viewer below the FPS and status indicators. Logs start at the current Android app launch, stay with the session holder who launched them, and yield to browser backpressure; the viewer batches updates per animation frame.
+- **App logs are visible in the QA session.** After the app launches, the agent streams native process output into the viewer below the FPS and status indicators. Logs start at the current Android app launch, stay with the session holder who launched them, and yield to browser backpressure; the viewer batches updates per animation frame. The viewer keeps about the newest 50,000 lines (fewer when lines are very long) and draws only the ones in view, so a chatty app does not slow the device's video. While you are scrolled up, the line you are reading stays put as new lines arrive and the oldest are dropped, and **Copy** takes every line the viewer holds.
 
 ### Changed
 

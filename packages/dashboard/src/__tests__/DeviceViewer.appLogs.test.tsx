@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import type { BrowserInbound } from '@/lib/types'
+import { fakeAppLogLayout } from './appLogLayout'
+import { loadAppLogRows } from '@/components/device/shared/appLogRowsChunk'
 
 const send = vi.fn()
 let deliver: ((message: BrowserInbound) => void) | null = null
@@ -22,6 +24,7 @@ vi.mock('@/lib/decoders/pickDecoder', async (importOriginal) => ({
 
 const { DeviceViewer } = await import('@/components/DeviceViewer')
 let frames: FrameRequestCallback[] = []
+let layout: ReturnType<typeof fakeAppLogLayout>
 
 const CHROME = {
   framePng: 'iVBORw0KGgo=',
@@ -38,17 +41,23 @@ const CHROME = {
 }
 
 describe('DeviceViewer app log feed', () => {
+  // The log's rows are a lazy chunk; loaded up front so a test can read them in the same frame.
+  beforeAll(() => loadAppLogRows())
   beforeEach(() => {
     send.mockClear()
     deliver = null
     frames = []
+    layout = fakeAppLogLayout()
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback)
       return frames.length
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    layout.restore()
+  })
   const flushFrames = () => act(() => frames.splice(0).forEach((callback) => callback(0)))
   const sent = (type: string) => send.mock.calls.map(([message]) => message).findLast((message) => message.type === type)!
   const output = () => screen.queryByRole('region', { name: 'App log output' })
