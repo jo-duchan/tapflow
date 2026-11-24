@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process'
+import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import { basename, dirname } from 'path'
 import { promisify } from 'util'

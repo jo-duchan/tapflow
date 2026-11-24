@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { AppLogViewer, type AppLogHandler } from '@/components/device/shared/AppLogViewer'
+import { AppLogViewer } from '@/components/device/shared/AppLogViewer'
 import { loadAppLogRows } from '@/components/device/shared/appLogRowsChunk'
-import { APP_LOG_MAX_LINES, APP_LOG_TRIM_STEP } from '@/lib/appLogs'
+import { APP_LOG_MAX_LINES, APP_LOG_TRIM_STEP, AppLogFeed } from '@/lib/appLogs'
 import { FAKE_ROW_HEIGHT, fakeAppLogLayout } from './appLogLayout'
 
 // The real virtualizer, passed straight through; the tests only keep a handle on what it was given and what it holds.
@@ -20,8 +20,8 @@ vi.mock('@tanstack/react-virtual', async (importOriginal) => {
   }
 })
 
-function makeHandlerRef() {
-  return { current: null as AppLogHandler | null }
+function makeFeed() {
+  return new AppLogFeed()
 }
 
 // The rows are a lazy chunk the viewer starts loading on launch; loaded here so a test can read them in the same frame.
@@ -49,11 +49,11 @@ function flushFrames() {
 }
 
 function launched(supported = true) {
-  const handlerRef = makeHandlerRef()
-  render(<AppLogViewer handlerRef={handlerRef} supported={supported} />)
-  act(() => handlerRef.current?.({ kind: 'launch' }))
-  const send = (text: string) => act(() => handlerRef.current?.({ kind: 'text', text }))
-  return { handlerRef, send }
+  const feed = makeFeed()
+  render(<AppLogViewer feed={feed} supported={supported} />)
+  act(() => feed.handle({ kind: 'launch' }))
+  const send = (text: string) => act(() => feed.handle({ kind: 'text', text }))
+  return { feed, send }
 }
 const output = () => screen.getByRole('region', { name: 'App log output' })
 const lines = () => Array.from(output().querySelectorAll('[data-log-line]'), (line) => line.textContent)
@@ -64,12 +64,12 @@ const rowTop = (text: string) => {
 
 describe('AppLogViewer', () => {
   it('renders nothing until a launch', () => {
-    const handlerRef = makeHandlerRef()
-    render(<AppLogViewer handlerRef={handlerRef} supported />)
+    const feed = makeFeed()
+    render(<AppLogViewer feed={feed} supported />)
     expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
-    act(() => handlerRef.current?.({ kind: 'launch' }))
+    act(() => feed.handle({ kind: 'launch' }))
     expect(output().textContent).toMatch(/Waiting for app logs/)
-    act(() => handlerRef.current?.({ kind: 'clear' }))
+    act(() => feed.handle({ kind: 'clear' }))
     expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
   })
 
@@ -100,13 +100,13 @@ describe('AppLogViewer', () => {
   })
 
   it('follows the tail of a new launch even if the last one was scrolled up', () => {
-    const { handlerRef, send } = launched()
+    const { feed, send } = launched()
     send('line\n'.repeat(100))
     flushFrames()
     const first = output()
     layout.scrollBox(first, 0)
 
-    act(() => handlerRef.current?.({ kind: 'launch' }))
+    act(() => feed.handle({ kind: 'launch' }))
     const next = output()
     expect(next).not.toBe(first)
     send('new launch output\n'.repeat(100))

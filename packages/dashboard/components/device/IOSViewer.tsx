@@ -10,7 +10,7 @@ import { SimulatorToolbar } from './shared/SimulatorToolbar';
 import { useNetworkControl } from '@/hooks/useNetworkControl';
 import type { NetworkMessageHandler } from '@/hooks/useNetworkControl';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
-import type { AppLogHandler } from './shared/AppLogViewer';
+import type { AppLogFeed } from '@/lib/appLogs';
 import { DeepLinkDialog } from './DeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -50,7 +50,7 @@ interface IOSViewerProps {
   launchApp: () => void;
   connected: boolean;
   joined: boolean;
-  appLogHandlerRef?: MutableRefObject<AppLogHandler | null>;
+  appLogFeed?: AppLogFeed;
   appLogsSupported?: boolean;
   deviceReady: boolean;
   installing: boolean;
@@ -101,7 +101,7 @@ interface IOSViewerProps {
 
 export function IOSViewer({
   sessionId, buildId, send, openUrl, launchApp, connected, joined,
-  appLogHandlerRef, appLogsSupported,
+  appLogFeed, appLogsSupported,
   deviceReady, installing, installed, installError, bootError, bootWaiting, servicesOff,
   launching, chrome, formFactor,
   binaryFrameHandlerRef, clipboardHandlerRef, clipboardSupported, networkHandlerRef, networkSupported, onRecordingUploaded,
@@ -687,7 +687,7 @@ export function IOSViewer({
 
         <SimulatorInfoCard
           joined={joined} fps={fps}
-          appLogHandlerRef={appLogHandlerRef}
+          appLogFeed={appLogFeed}
           appLogsSupported={appLogsSupported}
           connected={connected}
           deviceReady={deviceReady} bootError={bootError} bootWaiting={bootWaiting} servicesOff={servicesOff}

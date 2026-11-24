@@ -165,4 +165,71 @@ describe('DeviceViewer app log feed', () => {
     flushFrames()
     expect(screen.queryByRole('region', { name: 'App logs' })).toBeNull()
   })
+
+  describe('a watched app', () => {
+    const marks = () => Array.from(output()!.querySelectorAll('[data-log-mark]'), (line) => line.textContent)
+    const rows = () => Array.from(output()!.querySelectorAll('[data-log-line], [data-log-mark]'), (line) => line.textContent)
+    function watchedInstalled() {
+      render(<DeviceViewer sessionId="mine" deviceId="dev-1" buildId={7} />)
+      act(() => { deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs', 'app-log-watch'] }) })
+      act(() => { deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1' } }) })
+      act(() => {
+        deliver!({ type: 'app:install-done', sessionId: 'mine', requestId: sent('app:install').requestId })
+        deliver!({ type: 'session:chrome', sessionId: 'mine', payload: CHROME })
+      })
+    }
+    const run = (event: 'started' | 'running' | 'exited', pid: number) =>
+      act(() => { deliver!({ type: 'app:log:run', sessionId: 'mine', watchId: 'w', event, pid }) })
+    const log = (text: string) => act(() => { deliver!({ type: 'app:log', sessionId: 'mine', watchId: 'w', text }) })
+
+    it('opens on the app opened from the home screen, with no Launch, and marks a crash and a relaunch', () => {
+      watchedInstalled()
+      expect(output()).toBeNull()
+      run('started', 100)
+      log('hello\n')
+      log('crash')
+      run('exited', 100)
+      run('started', 200)
+      log('again\n')
+      flushFrames()
+      expect(rows()).toEqual(['── App started (pid 100) ──', 'hello', 'crash', '── App exited (pid 100) ──', '── App started (pid 200) ──', 'again'])
+      expect(marks()).toHaveLength(3)
+    })
+
+    it('keeps the log through a Launch, which neither empties it nor waits on a launch id', () => {
+      watchedInstalled()
+      run('started', 100)
+      log('first run\n')
+      flushFrames()
+      launch()
+      run('exited', 100)
+      run('started', 200)
+      flushFrames()
+      expect(rows()).toEqual(['── App started (pid 100) ──', 'first run', '── App exited (pid 100) ──', '── App started (pid 200) ──'])
+    })
+
+    it('is not opened by an exit alone, which is all a cleared app would show', () => {
+      watchedInstalled()
+      run('exited', 100)
+      flushFrames()
+      expect(output()).toBeNull()
+      run('started', 101)
+      flushFrames()
+      expect(rows()).toEqual(['── App started (pid 101) ──'])
+    })
+
+    it('keeps the log over a reconnect, and marks a device that came up from off', () => {
+      watchedInstalled()
+      run('started', 100)
+      log('before\n')
+      flushFrames()
+      act(() => { deliver!({ type: 'session:joined', sessionId: 'mine', capabilities: ['app-logs', 'app-log-watch'] }) })
+      act(() => { deliver!({ type: 'device:booting', sessionId: 'mine' }) })
+      act(() => { deliver!({ type: 'device:ready', sessionId: 'mine', payload: { deviceId: 'dev-1', cold: true } }) })
+      run('running', 300)
+      flushFrames()
+      expect(rows()).toEqual(['── App started (pid 100) ──', 'before', '── Device restarted ──', '── App running (pid 300) ──'])
+    })
+  })
 })
+

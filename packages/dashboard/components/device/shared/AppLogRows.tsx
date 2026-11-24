@@ -74,21 +74,26 @@ export default function AppLogRows({ scrollElement, buffer, version, rows, dropp
           {dropped.toLocaleString('en-US')} earlier {dropped === 1 ? 'line' : 'lines'} dropped
         </p>
       )}
-      {virtualizer.getVirtualItems().map((item) => (
-        <div
-          key={item.key}
-          ref={virtualizer.measureElement}
-          data-index={item.index}
-          data-log-line
-          className={cn(
-            'absolute inset-x-0 top-0 whitespace-pre-wrap [overflow-wrap:anywhere] border-b border-border px-2.5 py-1',
-            item.index === rows - 1 && 'border-b-0',
-          )}
-          style={{ transform: `translateY(${item.start}px)` }}
-        >
-          {buffer.row(item.index) || '\u00a0'}
-        </div>
-      ))}
+      {virtualizer.getVirtualItems().map((item) => {
+        // A run separator is the box's own line, not the app's: muted, in the interface font, and not a log line.
+        const mark = buffer.isMark(item.index)
+        return (
+          <div
+            key={item.key}
+            ref={virtualizer.measureElement}
+            data-index={item.index}
+            {...(mark ? { 'data-log-mark': '' } : { 'data-log-line': '' })}
+            className={cn(
+              'absolute inset-x-0 top-0 whitespace-pre-wrap [overflow-wrap:anywhere] border-b border-border px-2.5 py-1',
+              mark && 'font-sans text-muted-foreground',
+              item.index === rows - 1 && 'border-b-0',
+            )}
+            style={{ transform: `translateY(${item.start}px)` }}
+          >
+            {buffer.row(item.index) || '\u00a0'}
+          </div>
+        )
+      })}
     </div>
   )
 }
