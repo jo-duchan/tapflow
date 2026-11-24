@@ -23,7 +23,7 @@ const HEADER_STARTS = ['Filtering the log data using ', 'Timestamp ']
 
 /** How `log stream` shows in the simulator when tapflow spawned it, for one launch (this file) or for a watch
  *  (`AppLogWatch.ts`): what tells ours from a person's own. */
-const OUR_LOG_STREAM = /^(?:.*\/)?log stream --level debug --style compact --predicate (?:processIdentifier == \d+ AND processImagePath == |processImagePath ENDSWITH "[^"]*\.app\/[^"/]+"$)/
+const OUR_LOG_STREAM = /^(?:.*\/)?log stream --level debug --style compact --predicate (?:processIdentifier == \d+ AND processImagePath == |processImagePath == "[^"]*\.app\/[^"/]+"$)/
 
 /**
  * The app log streams left running in simulator `udid`, from `ps -o pid=,ppid=,command=` output (#1235). A SIGKILLed

@@ -4526,6 +4526,26 @@ describe('IOSAgent', () => {
           agent.disconnect(); browser.close()
         })
 
+        it('after an install keeps a stream on the same path, and replaces one whose container moved', async () => {
+          const { deps, children } = watchDeps()
+          const { simctl, agent, browser } = await bootedAgent({ appLogWatchDeps: deps })
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await vi.waitFor(() => expect(children).toHaveLength(1))
+          const install = async (requestId: string) => {
+            const done = waitForType(browser, 'app:install-done')
+            deliver(agent, { type: 'app:install', requestId, sessionId: agent.sessionId, payload: { filePath: '/tmp/x.app', bundleId: 'com.example.app' } })
+            await done
+            await new Promise((r) => setImmediate(r))
+          }
+          await install('rq-same')
+          expect(children).toHaveLength(1)
+          vi.mocked(simctl.getAppExecutablePath).mockResolvedValue('/sim/Moved/Example.app/Example')
+          await install('rq-moved')
+          await vi.waitFor(() => expect(children).toHaveLength(2))
+          expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+          agent.disconnect(); browser.close()
+        })
+
         it('keeps the watch across a boot: the stream goes down with it and comes back at ready', async () => {
           const { deps, children } = watchDeps()
           const { agent, browser } = await bootedAgent({ appLogWatchDeps: deps })

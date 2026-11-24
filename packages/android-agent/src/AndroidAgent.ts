@@ -3255,6 +3255,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
+            // Stopped for the install: an install that failed leaves the app it found, and the relay sends no new watch.
+            this.raiseAppLogWatch(state)
           })
         break
       }

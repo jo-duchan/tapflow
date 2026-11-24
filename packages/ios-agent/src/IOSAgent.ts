@@ -302,6 +302,8 @@ interface DeviceState {
   appLogWatchGeneration: number
   /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
   appLogWatchRun: { watchId: string; pid: number } | null
+  /** Bumped by each raise, so only the latest one in flight starts a stream. */
+  appLogWatchRaise: number
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
   // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
@@ -809,6 +811,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         appLogWatcher: null,
         appLogWatchGeneration: 0,
         appLogWatchRun: null,
+        appLogWatchRaise: 0,
         streamReader: null,
         captureStreamer: null,
         bootSeq: 0,
@@ -969,29 +972,33 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
 
   /**
    * (Re)starts the stream for the session's watch, when there is one and the device is up. Called on the watch itself,
-   * when the device is ready, and after an install (the app may not have been there to resolve). A stream already up
-   * for the same watch is left as it is: the stream is filtered by the executable's path, so it outlives each run of
-   * the app and a reinstall.
+   * when the device is ready, and after an install or a run reset (`refresh`). The stream is filtered by the app's
+   * executable path, which names its container: a reinstall moves it (measured), and two apps can share an executable
+   * name (every Flutter app is `Runner.app/Runner`), so after an install the path is read again and a stream on the old
+   * one is replaced. A stream already on the right path is left as it is, across every run of the app.
    */
-  private raiseAppLogWatch(state: DeviceState): void {
+  private raiseAppLogWatch(state: DeviceState, refresh = false): void {
     const wanted = state.appLogWatch
-    if (!wanted || !state.booted || state.appLogWatcher) return
-    const generation = this.stopAppLogWatcher(state)
-    const current = () => state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(state.sessionId) === state
+    if (!wanted || !state.booted || (state.appLogWatcher && !refresh)) return
+    const raise = ++state.appLogWatchRaise
+    const generation = state.appLogWatchGeneration
+    const current = () =>
+      state.appLogWatchRaise === raise && state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(state.sessionId) === state
     void Promise.resolve()
       .then(() => this.simctl.getAppExecutablePath(state.deviceId, wanted.bundleId))
       .then((processImagePath) => {
-        if (!current() || state.appLogWatcher) return
+        if (!current() || state.appLogWatcher?.processImagePath === processImagePath) return
+        this.stopAppLogWatcher(state)
         const sessionId = state.sessionId
         // A per-launch stream on this device would be taken for an orphan by the watch's sweep: ended here instead.
         this.stopAppLogStream(state)
         const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
         state.appLogWatchRun = null
-        const watcher = new AppLogWatch(
+        const watcher: AppLogWatch = new AppLogWatch(
           state.deviceId,
           processImagePath,
           (item) => {
-            if (!current()) return true
+            if (state.appLogWatcher !== watcher || this.deviceStates.get(sessionId) !== state) return true
             if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT) return false
             if (item.kind === 'text') this.sendMsg({ type: 'app:log', sessionId, watchId: wanted.watchId, text: item.text })
             else this.sendMsg({ type: 'app:log:run', sessionId, watchId: wanted.watchId, event: item.event, pid: item.pid })
@@ -2586,7 +2593,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
               await this.observeApp(installState.deviceId, bundleId)
             }
             respond({ type: 'app:install-done' })
-            this.raiseAppLogWatch(installState)
+            this.raiseAppLogWatch(installState, true)
           })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -3338,7 +3345,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         const sessionId = msg.sessionId
         const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
         void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
-          .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
+          .then((body) => {
+            this.sendMsg({ ...body, sessionId, requestId })
+            // A run reset reinstalls in place, which moves the app's container.
+            const state = this.deviceStates.get(sessionId)
+            if (state && body.type === 'device:run-reset-done') this.raiseAppLogWatch(state, true)
+          })
         break
       }
       case 'ui:reach:request': {

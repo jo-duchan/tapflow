@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
-import { basename, dirname } from 'path'
+import { basename } from 'path'
 import { promisify } from 'util'
 import { APP_LOG_CHUNK_LIMIT, defaultAppLogStreamDeps, inertAppLogStreamDeps, type AppLogStreamDeps } from './AppLogStream.js'
 
@@ -15,8 +15,9 @@ export type AppLogRunEvent = 'started' | 'running' | 'exited'
 export type AppLogWatchItem = { kind: 'text'; text: string } | { kind: 'run'; event: AppLogRunEvent; pid: number }
 
 export interface AppLogWatchDeps extends AppLogStreamDeps {
-  /** The pid of the app's process running on device `udid` now (its executable ends in `imageSuffix`), or null. */
-  findRunning(udid: string, imageSuffix: string): Promise<number | null>
+  /** The pid of the app's process running on device `udid` now (its executable at `processImagePath`), or null.
+   *  Rejects when it could not look: that is not the app having exited. */
+  findRunning(udid: string, processImagePath: string): Promise<number | null>
   isAlive(pid: number): boolean
 }
 
@@ -30,29 +31,25 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * The app process on simulator `udid` whose executable ends in `imageSuffix`, from `ps -o pid=,command=` output. A
- * simulator's apps are host processes; their executable lives under that device's directory.
+ * The app process on simulator `udid` whose executable is `processImagePath`, from `ps -o pid=,command=` output. A
+ * simulator's apps are host processes; their executable lives under that device's directory, in the app's container.
  */
-export function runningAppPid(ps: string, udid: string, imageSuffix: string): number | null {
-  const device = `/Devices/${udid}/`
+export function runningAppPid(ps: string, udid: string, processImagePath: string): number | null {
+  if (!processImagePath.includes(`/Devices/${udid}/`)) return null
   for (const line of ps.split('\n')) {
     const m = /^\s*(\d+)\s+(.*)$/.exec(line)
     if (!m) continue
     const command = m[2]!
-    if (command.includes(device) && (command.endsWith(imageSuffix) || command.includes(`${imageSuffix} `))) return Number(m[1])
+    if (command === processImagePath || command.startsWith(`${processImagePath} `)) return Number(m[1])
   }
   return null
 }
 
 export const defaultAppLogWatchDeps: AppLogWatchDeps = {
   ...defaultAppLogStreamDeps,
-  async findRunning(udid, imageSuffix) {
-    try {
-      const { stdout } = await execFileAsync('/bin/ps', ['-axww', '-o', 'pid=,command='], { timeout: 5_000, maxBuffer: 16 * 1024 * 1024 })
-      return runningAppPid(stdout, udid, imageSuffix)
-    } catch {
-      return null
-    }
+  async findRunning(udid, processImagePath) {
+    const { stdout } = await execFileAsync('/bin/ps', ['-axww', '-o', 'pid=,command='], { timeout: 5_000, maxBuffer: 16 * 1024 * 1024 })
+    return runningAppPid(stdout, udid, processImagePath)
   },
   isAlive: isProcessAlive,
 }
@@ -73,13 +70,13 @@ function escapeRegExp(text: string): string {
 
 /**
  * The app's output for a session, however the app is opened: a Launch, its home-screen icon, a relaunch after a crash.
- * One `log stream` filtered by the executable's path, not by a pid, so it outlives each run of the app and a reinstall
- * (whose container path changes; measured on iOS 26.5, M1 in the plan). Runs are told apart by the pid on each entry's
- * first line (`<Exec>[pid:tid]`, at a fixed position); a continuation line of a multi-line entry has none and belongs
- * to the entry before it.
+ * One `log stream` filtered by the executable's full path, not by a pid, so it outlives each run of the app (measured on
+ * iOS 26.5, M1 in the plan). The full path and not its last two parts: two apps can share those (every Flutter app is
+ * `Runner.app/Runner`), and the path names the app's own container. A reinstall moves the container, so the agent
+ * replaces the stream after one. Runs are told apart by the pid on each entry's first line (`<Exec>[pid:tid]`, at a
+ * fixed position); a continuation line of a multi-line entry has none and belongs to the entry before it.
  */
 export class AppLogWatch {
-  private readonly imageSuffix: string
   private readonly entry: RegExp
   private child: ChildProcess | null = null
   private stopped = false
@@ -98,7 +95,7 @@ export class AppLogWatch {
 
   constructor(
     private readonly udid: string,
-    processImagePath: string,
+    readonly processImagePath: string,
     private readonly send: (item: AppLogWatchItem) => boolean,
     private readonly onError: (error: Error) => void,
     private readonly deps: AppLogWatchDeps = defaultAppLogWatchDeps,
@@ -109,7 +106,6 @@ export class AppLogWatch {
   ) {
     this.current = previousRun
     const exec = basename(processImagePath)
-    this.imageSuffix = `/${basename(dirname(processImagePath))}/${exec}`
     this.entry = new RegExp(`^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+ \\S+ +${escapeRegExp(exec)}\\[(\\d+):`)
   }
 
@@ -118,9 +114,10 @@ export class AppLogWatch {
     const orphans = await this.deps.findOrphans(this.udid).catch(() => [] as number[])
     if (this.stopped) return
     for (const pid of orphans) this.deps.killPid(pid)
-    const running = await this.deps.findRunning(this.udid, this.imageSuffix).catch(() => null)
+    // Undefined: it could not look, which says nothing about the run (a failed `ps` is not the app exiting).
+    const running = await this.deps.findRunning(this.udid, this.processImagePath).catch(() => undefined)
     if (this.stopped) return
-    if (running !== null && running !== this.current) {
+    if (running !== undefined && running !== null && running !== this.current) {
       this.endCurrent()
       this.current = running
       this.push({ kind: 'run', event: 'running', pid: running })
@@ -157,7 +154,7 @@ export class AppLogWatch {
     try {
       child = this.deps.spawn('xcrun', [
         'simctl', 'spawn', this.udid, 'log', 'stream', '--level', 'debug', '--style', 'compact',
-        '--predicate', `processImagePath ENDSWITH "${this.imageSuffix.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
+        '--predicate', `processImagePath == "${this.processImagePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
       ], { stdio: ['ignore', 'pipe', 'ignore'] })
     } catch (error) {
       this.onError(error instanceof Error ? error : new Error(String(error)))

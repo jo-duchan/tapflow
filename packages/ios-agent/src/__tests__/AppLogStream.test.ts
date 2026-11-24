@@ -295,18 +295,19 @@ describe('iOS app log stream', () => {
       `89244 90000 log stream --level debug --style compact --predicate processIdentifier == 1 AND processImagePath == "/x/TheApp.app/TheApp"`,
       `89245 89055 log stream --style ndjson --predicate subsystem == "com.apple.UIKit" AND category == "EventDispatch"`,
       `89246 89055 log stream --level debug --style compact --predicate processImagePath ENDSWITH "/Nope.app/Nope"`,
-      `89248 89055 log stream --level debug --style compact --predicate processImagePath ENDSWITH "/x"`,
+      `89248 89055 log stream --level debug --style compact --predicate processImagePath == "/x/Data/Bundle/A/TheApp.app/TheApp"`,
+      `89249 89055 log stream --level debug --style compact --predicate processImagePath == "/x"`,
       `89247  4242 log stream --level debug --style compact --predicate processIdentifier == 5 AND processImagePath == "/y"`,
       `89237     1 /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl spawn ${U} log stream --level debug --style compact --predicate processIdentifier == 69668 AND processImagePath == "/x/TheApp.app/TheApp"`,
     ].join('\n')
 
     it("finds only this device's app log streams, a launch's or a watch's, by their parent and their arguments", () => {
-      expect(orphanAppLogStreams(ps, U)).toEqual([89243, 89246])
+      expect(orphanAppLogStreams(ps, U)).toEqual([89243, 89248])
       expect(orphanAppLogStreams(ps, OTHER)).toEqual([89244])
       expect(orphanAppLogStreams(ps, 'NOPE')).toEqual([])
       // A runtime that shows the full path, whose `iOS 26.5.simruntime` folder has a space in it.
       const fullPath = `89300 89055 /Library/Developer/CoreSimulator/Volumes/iOS_23E254a/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/usr/bin/log stream --level debug --style compact --predicate processIdentifier == 7 AND processImagePath == "/a"`
-      expect(orphanAppLogStreams(`${ps}\n${fullPath}`, U)).toEqual([89243, 89246, 89300])
+      expect(orphanAppLogStreams(`${ps}\n${fullPath}`, U)).toEqual([89243, 89248, 89300])
     })
   })
 })

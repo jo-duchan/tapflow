@@ -4319,13 +4319,22 @@ describe('AndroidAgent', () => {
           { type: 'app:log', sessionId: agent.sessionId, watchId: 'w-1', text: 'hello\n' },
         ]))
 
+        // An install stops the watch's stream (the uid may change); one that fails raises it again all the same.
+        vi.spyOn(adb, 'installApp').mockRejectedValueOnce(new Error('INSTALL_FAILED_INVALID_APK'))
+        vi.spyOn(adb, 'clearAppData').mockResolvedValue(undefined)
+        const failed = waitForType(browser, 'app:install-error')
+        inject({ type: 'app:install', requestId: 'rqi-bad', payload: { filePath: '/tmp/app.apk', bundleId: 'com.example.app' } })
+        await failed
+        await vi.waitFor(() => expect(spawnSpy).toHaveBeenCalledTimes(2))
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+
         const perLaunch = vi.spyOn(internals(agent), 'startAppLogStreamAfterLaunch')
         vi.spyOn(adb, 'launchApp').mockResolvedValue(undefined)
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-watched', payload: { bundleId: 'com.example.app' } })
         await done
         expect(perLaunch).not.toHaveBeenCalled()
-        expect(spawnSpy).toHaveBeenCalledTimes(1)
+        expect(spawnSpy).toHaveBeenCalledTimes(2)
       })
 
       it('answers app:launch before process discovery completes', async () => {

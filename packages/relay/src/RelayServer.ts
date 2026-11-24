@@ -3904,19 +3904,16 @@ export class RelayServer {
    * only for a person: an MCP or flow-runner holder gets no watch, so a CI session streams nothing and an AI client
    * borrowing someone's device is not sent their app's output. The agent keeps the watch itself across boots,
    * installs and run resets; `resend` sends it again unchanged for an agent that may have restarted.
-   * `bundleId` names the app when nothing installed through this relay did (a Launch of an app installed before it
-   * last started).
+   * `bundleId` names the app an install or a Launch chose; nothing else changes which app is watched.
    */
   private syncAppLogWatch(session: Session, options: { resend?: boolean; bundleId?: string } = {}): void {
     const current = this.appLogWatches.get(session.id)
     let bundleId: string | null = null
-    if (hasCapability(session.agentCapabilities, 'app-log-watch') && !isAiClientKind(session.holderKind)) {
-      // The app launched, else the one installed, else the one already watched: a cold boot clears the install record
-      // and the agent keeps the watch across it, so the record going is no reason to end the watch.
-      const installed = session.installed
-        ? (getDb().prepare('SELECT bundle_id FROM builds WHERE id = ?').get(session.installed.buildId) as { bundle_id: string | null } | undefined)?.bundle_id
-        : undefined
-      bundleId = options.bundleId ?? installed ?? current?.bundleId ?? null
+    // A person holds it: no holder (one who left, before an install they started finished) is nobody to watch for.
+    if (hasCapability(session.agentCapabilities, 'app-log-watch') && session.holderKind !== null && !isAiClientKind(session.holderKind)) {
+      // The app an install or a launch names, else the one already watched, else the one installed. Only those two choose
+      // the app: a re-join or a ready keeps it, and a cold boot clearing the install record is no reason to end it.
+      bundleId = options.bundleId ?? current?.bundleId ?? this.bundleOfBuild(session.installed?.buildId) ?? null
     }
     if (bundleId === null) {
       this.endAppLogWatch(session.id)
@@ -3929,6 +3926,12 @@ export class RelayServer {
     const watch = { watchId: randomUUID(), bundleId, onDrop: createAppLogDropWarn(session.id) }
     this.appLogWatches.set(session.id, watch)
     this.sendTo(session.agentSocket, { type: 'app:logs:watch', sessionId: session.id, watchId: watch.watchId, bundleId })
+  }
+
+  private bundleOfBuild(buildId: number | undefined): string | null {
+    if (buildId === undefined) return null
+    const build = getDb().prepare('SELECT bundle_id FROM builds WHERE id = ?').get(buildId) as { bundle_id: string | null } | undefined
+    return build?.bundle_id ?? null
   }
 
   private endAppLogWatch(sessionId: string): void {
@@ -3951,7 +3954,8 @@ export class RelayServer {
     if (!pending || pending.requestId !== requestId) return
     session.pendingInstall = undefined
     session.installed = done ? { buildId: pending.buildId, filePath: pending.filePath } : undefined
-    this.syncAppLogWatch(session)
+    const installedBundle = done ? this.bundleOfBuild(pending.buildId) : null
+    this.syncAppLogWatch(session, installedBundle ? { bundleId: installedBundle } : {})
     for (const waiter of pending.waiters) {
       // The agent's own reason. Its reply goes out under the original id, which a reconnected viewer has let go of.
       this.answerInstallWaiter(session, waiter, done ? null : (reason ?? 'The install this was waiting on failed'))

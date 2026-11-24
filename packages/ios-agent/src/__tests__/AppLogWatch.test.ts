@@ -41,12 +41,12 @@ describe('iOS app log watch', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('streams the app by its executable path, not a pid, so one stream outlives each run', async () => {
+  it('streams the app by its executable\'s full path, not a pid, so one stream outlives each run', async () => {
     const { deps, watch } = setup()
     await watch.start()
     expect(deps.spawn).toHaveBeenCalledWith('xcrun', [
       'simctl', 'spawn', 'U1', 'log', 'stream', '--level', 'debug', '--style', 'compact',
-      '--predicate', 'processImagePath ENDSWITH "/TheApp.app/TheApp"',
+      '--predicate', `processImagePath == "${IMAGE}"`,
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
     watch.stop()
   })
@@ -156,13 +156,23 @@ describe('iOS app log watch', () => {
     watch.stop()
   })
 
-  it('finds a running app by its executable under this device only', () => {
+  it('finds a running app by its own executable: not another app of the same name, nor another device\'s', () => {
+    const root = '/Users/me/Library/Developer/CoreSimulator/Devices'
     const ps = [
-      '  501 /Users/me/Library/Developer/CoreSimulator/Devices/U2/data/Containers/Bundle/Application/B/TheApp.app/TheApp',
-      '  502 /Users/me/Library/Developer/CoreSimulator/Devices/U1/data/Containers/Bundle/Application/A/Other.app/Other',
-      '  503 /Users/me/Library/Developer/CoreSimulator/Devices/U1/data/Containers/Bundle/Application/A/TheApp.app/TheApp -AppleLanguages (en)',
+      `  501 ${root}/U2/data/Containers/Bundle/Application/AAA/TheApp.app/TheApp`,
+      // Another app with the same executable name, as every Flutter app is Runner.app/Runner.
+      `  502 ${root}/U1/data/Containers/Bundle/Application/BBB/TheApp.app/TheApp`,
+      `  503 ${root}/U1/data/Containers/Bundle/Application/AAA/TheApp.app/TheApp -AppleLanguages (en)`,
     ].join('\n')
-    expect(runningAppPid(ps, 'U1', '/TheApp.app/TheApp')).toBe(503)
-    expect(runningAppPid(ps, 'U3', '/TheApp.app/TheApp')).toBeNull()
+    const image = `${root}/U1/data/Containers/Bundle/Application/AAA/TheApp.app/TheApp`
+    expect(runningAppPid(ps, 'U1', image)).toBe(503)
+    expect(runningAppPid(ps, 'U3', image)).toBeNull()
+  })
+
+  it('keeps the run when it could not look for the app, which is not the app exiting', async () => {
+    const { shown, watch } = setup({ findRunning: vi.fn(async () => { throw new Error('ps timed out') }) }, 100)
+    await watch.start()
+    expect(shown()).toBe('')
+    expect(watch.stop()).toBe(100)
   })
 })

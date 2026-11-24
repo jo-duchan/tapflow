@@ -36,14 +36,14 @@ describe('app log routing', () => {
     await server.stop()
   })
 
-  function insertBuild(): number {
+  function insertBuild(bundleId = 'com.example.logs'): number {
     const db = getDb()
     db.prepare(`INSERT INTO apps (name, platform) VALUES ('Demo', 'ios')`).run()
     const app = db.prepare('SELECT id FROM apps ORDER BY id DESC LIMIT 1').get() as { id: number }
     const result = db.prepare(`
       INSERT INTO builds (app_id, version_name, build_number, bundle_id, file_path)
-      VALUES (?, '1.0.0', '1', 'com.example.logs', ?)
-    `).run(app.id, buildFile)
+      VALUES (?, '1.0.0', '1', ?, ?)
+    `).run(app.id, bundleId, buildFile)
     return Number(result.lastInsertRowid)
   }
 
@@ -251,6 +251,39 @@ describe('app log routing', () => {
       agent.send(JSON.stringify({ type: 'app:log:run', sessionId, watchId, event: 'exited', pid: 7 }))
       expect(await waitForType(browser, 'app:log:run')).toMatchObject({ event: 'exited', pid: 7 })
       expect(await waitForTypeOrNull(browser, 'app:log', 0)).toBeNull()
+      agent.close(); browser.close()
+    })
+
+    it('starts no watch for an install that finishes after its person left', async () => {
+      const { agent, sessionId } = await register()
+      const browser = await join(sessionId)
+      const buildId = insertBuild()
+      const forwarded = waitForType(agent, 'app:install')
+      browser.send(JSON.stringify({ type: 'app:install', requestId: 'install-1', sessionId, buildId }))
+      await forwarded
+      browser.send(JSON.stringify({ type: 'session:leave', sessionId }))
+      await barrier(browser)
+      agent.send(JSON.stringify({ type: 'app:install-done', requestId: 'install-1', sessionId }))
+      await barrier(agent)
+      expect(await waitForTypeOrNull(agent, 'app:logs:watch', 0)).toBeNull()
+      agent.close(); browser.close()
+    })
+
+    it('keeps watching the app a Launch chose when the person joins again', async () => {
+      const { agent, sessionId } = await register()
+      const browser = await join(sessionId)
+      const first = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      await install(agent, browser, sessionId)
+      expect((await first).bundleId).toBe('com.example.logs')
+      const other = insertBuild('com.example.other')
+      const moved = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      browser.send(JSON.stringify({ type: 'app:launch', requestId: 'launch-b', sessionId, buildId: other }))
+      expect((await moved).bundleId).toBe('com.example.other')
+      browser.send(JSON.stringify({ type: 'session:start', sessionId, clientKind: 'dashboard' }))
+      await waitForType(browser, 'session:joined')
+      const again = waitForType<AppLogsWatch>(agent, 'app:logs:watch')
+      agent.send(JSON.stringify({ type: 'device:ready', sessionId, payload: { cold: false } }))
+      expect((await again).bundleId).toBe('com.example.other')
       agent.close(); browser.close()
     })
 

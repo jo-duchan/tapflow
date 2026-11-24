@@ -125,7 +125,7 @@ describe('run separators', () => {
 
   it('is emptied only by an install or a clear state when the app is watched', () => {
     expect(emptiesWatchedLog({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 1 })).toBe(true)
-    expect(emptiesWatchedLog({ type: 'app:clear-state', sessionId: 's', requestId: 'r', payload: { bundleId: 'b' } } as never)).toBe(true)
+    expect(emptiesWatchedLog({ type: 'app:clear-state', sessionId: 's', requestId: 'r', payload: { bundleId: 'b' } })).toBe(true)
     expect(emptiesWatchedLog({ type: 'app:launch', sessionId: 's', requestId: 'r', buildId: 1 })).toBe(false)
     expect(emptiesWatchedLog({ type: 'app:install', sessionId: 's', requestId: 'r', buildId: 1, keepIfInstalled: true })).toBe(false)
   })

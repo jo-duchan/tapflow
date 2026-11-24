@@ -84,16 +84,19 @@ export class AppLogWatch {
       return
     }
     this.uid = uid
-    const processes = await this.deps.processes(uid).catch(() => [])
+    // Null: it could not look, which says nothing about the run (a failed `ps` is not the app exiting).
+    const processes = await this.deps.processes(uid).catch(() => null)
     if (this.stopped) return
-    this.note(processes)
-    const running = processes.find((p) => p.name === this.packageName)?.pid
-    if (running !== undefined && running !== this.current) {
-      this.endCurrent()
-      this.current = running
-      this.push({ kind: 'run', event: 'running', pid: running })
-    } else if (running === undefined) {
-      this.endCurrent()
+    if (processes) {
+      this.note(processes)
+      const running = processes.find((p) => p.name === this.packageName)?.pid
+      if (running !== undefined && running !== this.current) {
+        this.endCurrent()
+        this.current = running
+        this.push({ kind: 'run', event: 'running', pid: running })
+      } else if (running === undefined) {
+        this.endCurrent()
+      }
     }
     this.flush()
     const time = await this.deps.deviceTime().catch(() => undefined)
@@ -180,11 +183,13 @@ export class AppLogWatch {
 
   /** Asks which process `pid` is, again while it has no name of its own yet. One the device no longer lists, or one
    *  still otherwise named after the retries (a manifest `android:process` naming it outside the package), joins the
-   *  current run. */
+   *  current run. One it could not ask about stays unknown, and its line joins the current run for now. */
   private async classify(uid: number, pid: number): Promise<void> {
     for (let attempt = 0; attempt < APP_LOG_WATCH_NAME_RETRIES; attempt++) {
-      const processes = await this.deps.processes(uid).catch(() => [])
+      const processes = await this.deps.processes(uid).catch(() => null)
       if (this.stopped) return
+      // Could not look: left unknown, so the pid's next line asks again rather than taking it for a side process.
+      if (!processes) return
       this.note(processes)
       const listed = processes.find((p) => p.pid === pid)
       if (!listed || this.named(listed.name)) break

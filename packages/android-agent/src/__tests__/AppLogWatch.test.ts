@@ -126,6 +126,25 @@ describe('Android app log watch', () => {
     watch.stop()
   })
 
+  it('keeps the run when it could not ask the device, which is not the app exiting', async () => {
+    const { deps, watch } = setup({}, 55)
+    vi.mocked(deps.processes).mockRejectedValueOnce(new Error('adb timed out'))
+    await watch.start()
+    expect(watch.stop()).toBe(55)
+  })
+
+  it('asks again about a pid it could not ask about, rather than taking it for a side process', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    await watch.start()
+    vi.mocked(deps.processes).mockRejectedValueOnce(new Error('adb timed out')).mockResolvedValue([{ pid: 77, name: PKG }])
+    children[0]!.stdout.emit('data', line(77, 'first'))
+    await settle()
+    children[0]!.stdout.emit('data', line(77, 'second'))
+    await settle()
+    expect(shown()).toBe('first\n[started 77]second\n')
+    watch.stop()
+  })
+
   it('raised again after a boot or an install, ends the run the last stream left', async () => {
     const { shown, watch } = setup({}, 55)
     await watch.start()
