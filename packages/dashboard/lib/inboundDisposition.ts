@@ -150,6 +150,7 @@ export const INBOUND_DISPOSITION = {
       + 'feature nobody has asked for, not a handler someone forgot.',
   },
   'app:log': { at: 'DeviceViewer' },
+  'app:log:run': { at: 'DeviceViewer' },
   'watch:started': { at: 'useWatchSession' },
   'watch:refused': { at: 'useWatchSession' },
   'watch:holder-left': { at: 'useWatchSession' },

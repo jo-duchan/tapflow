@@ -85,6 +85,21 @@ describe('app log frames', () => {
     expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'unscoped' }).reason).toBe('bad-shape')
     expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: '', text: 'unscoped' }).reason).toBe('bad-shape')
   })
+
+  it('takes a watch-owned chunk, and refuses one naming both owners or an empty watch', () => {
+    expect(ok({ type: 'app:log', sessionId: 's', watchId: 'w-1', text: 'x' }).msg).toEqual({ type: 'app:log', sessionId: 's', watchId: 'w-1', text: 'x' })
+    expect(fail({ type: 'app:log', sessionId: 's', launchId: 'l', watchId: 'w', text: 'x' }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 's', watchId: '', text: 'x' }).reason).toBe('bad-shape')
+  })
+
+  it('takes a run boundary from the agent, and refuses an unknown event or a bad pid', () => {
+    const parsed = ok({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'started', pid: 4521 })
+    expect(directionOf(parsed.msg.type)).toBe('agent')
+    for (const event of ['started', 'running', 'exited']) ok({ type: 'app:log:run', sessionId: 's', watchId: 'w', event, pid: 1 })
+    expect(fail({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'crashed', pid: 1 }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'started', pid: 0 }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log:run', sessionId: 's', event: 'started', pid: 1 }).reason).toBe('bad-shape')
+  })
 })
 
 describe('an empty correlator is not a correlator', () => {

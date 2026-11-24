@@ -112,6 +112,7 @@ vi.mock('../SimProcessTree', () => ({
 import crypto from 'crypto'
 import { WebSocket, WebSocketServer } from 'ws'
 import { RelayServer, initDb, closeDb, getDb } from '@tapflowio/relay'
+import type { AppLogWatchDeps } from '../AppLogWatch.js'
 import { IOSAgent, leanSupported, streamRestartPlan } from '../IOSAgent'
 import type { DeviceChromeLoader, ChromeData } from '../DeviceChromeLoader'
 import { ScreenCaptureStreamer } from '../ScreenCaptureStreamer'
@@ -4458,6 +4459,85 @@ describe('IOSAgent', () => {
 
         expect(order).toEqual(['find', 'kill 77', 'spawn'])
         agent.disconnect(); browser.close()
+      })
+
+      describe('app log watch', () => {
+        function watchDeps() {
+          const children: Array<EventEmitter & { stdout: EventEmitter & { setEncoding(): void; pause(): void; resume(): void }; kill: ReturnType<typeof vi.fn>; exitCode: null; killed: boolean }> = []
+          const deps: AppLogWatchDeps = {
+            spawn: vi.fn(() => {
+              const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+              const child = Object.assign(new EventEmitter(), { stdout, kill: vi.fn(), exitCode: null, killed: false })
+              children.push(child)
+              return child
+            }) as unknown as AppLogWatchDeps['spawn'],
+            findOrphans: vi.fn(async () => []),
+            killPid: vi.fn(),
+            findRunning: vi.fn(async () => null),
+            isAlive: () => true,
+          }
+          return { deps, children }
+        }
+        const outbound = (agent: IOSAgent) => {
+          const sent: Array<Record<string, unknown>> = []
+          const internals = agent as unknown as { sendMsg(msg: Record<string, unknown>): void }
+          const real = internals.sendMsg.bind(agent)
+          internals.sendMsg = (msg) => { sent.push(msg); real(msg) }
+          return sent
+        }
+        const ENTRY = '2026-11-24 20:37:04.080 Df Example[4521:6b70cf] hello\n'
+
+        it('streams a watched app and marks its runs, under the watch, with no Launch', async () => {
+          const { deps, children } = watchDeps()
+          const { simctl, agent, browser } = await bootedAgent({ appLogWatchDeps: deps })
+          const sent = outbound(agent)
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await vi.waitFor(() => expect(children).toHaveLength(1))
+          expect(simctl.getAppExecutablePath).toHaveBeenCalledWith('dev-1', 'com.example.app')
+          children[0]!.stdout.emit('data', ENTRY)
+          expect(sent.filter((m) => m['type'] === 'app:log:run' || m['type'] === 'app:log')).toEqual([
+            { type: 'app:log:run', sessionId: agent.sessionId, watchId: 'w-1', event: 'started', pid: 4521 },
+            { type: 'app:log', sessionId: agent.sessionId, watchId: 'w-1', text: ENTRY },
+          ])
+          // The same watch again (a warm ready's resend) changes nothing.
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await new Promise((r) => setImmediate(r))
+          expect(children).toHaveLength(1)
+          deliver(agent, { type: 'app:logs:unwatch', sessionId: agent.sessionId, watchId: 'w-1' })
+          expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+          agent.disconnect(); browser.close()
+        })
+
+        it('starts no per-launch stream for a watched app', async () => {
+          const { deps } = watchDeps()
+          const streamSpawn = vi.fn(() => { throw new Error('no per-launch stream') })
+          const { simctl, agent, browser } = await bootedAgent({
+            appLogWatchDeps: deps,
+            appLogStreamDeps: { spawn: streamSpawn as unknown as AppLogWatchDeps['spawn'], findOrphans: vi.fn(async () => []), killPid: vi.fn() },
+          })
+          vi.mocked(simctl.launchApp).mockResolvedValueOnce(456)
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          const done = waitForType(browser, 'app:launch-done')
+          deliver(agent, { type: 'app:launch', requestId: 'rq-w', sessionId: agent.sessionId, payload: { bundleId: 'com.example.app' } })
+          await done
+          await new Promise((r) => setImmediate(r))
+          expect(streamSpawn).not.toHaveBeenCalled()
+          expect(deps.spawn).toHaveBeenCalledTimes(1)
+          agent.disconnect(); browser.close()
+        })
+
+        it('keeps the watch across a boot: the stream goes down with it and comes back at ready', async () => {
+          const { deps, children } = watchDeps()
+          const { agent, browser } = await bootedAgent({ appLogWatchDeps: deps })
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await vi.waitFor(() => expect(children).toHaveLength(1))
+          const ready = waitForType(browser, 'device:ready')
+          browser.send(JSON.stringify({ type: 'device:boot', requestId: 'rq-again', sessionId: agent.sessionId, payload: { deviceId: 'dev-1' } }))
+          await ready
+          expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM')
+          await vi.waitFor(() => expect(children).toHaveLength(2))
+          agent.disconnect(); browser.close()
+        })
       })
 
       it('launch passes arguments and env through and reports their names, never their values', async () => {

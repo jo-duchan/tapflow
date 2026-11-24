@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events'
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -4294,6 +4295,37 @@ describe('AndroidAgent', () => {
         inject({ type: 'app:launch', requestId: 'rqi-1', payload: { bundleId: 'com.example.app' } })
         await done
         expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false, expect.any(Function))
+      })
+
+      it('streams a watched app with its runs, and starts no per-launch stream for it', async () => {
+        const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+        const child = Object.assign(new EventEmitter(), { stdout, kill: vi.fn(), exitCode: null, killed: false })
+        const spawnSpy = vi.fn(() => child)
+        ;(agent as unknown as { appLogWatchDeps: unknown }).appLogWatchDeps = { spawn: spawnSpy, adbPath: () => 'adb' }
+        vi.spyOn(adb, 'getAppUid').mockResolvedValue(10193)
+        vi.spyOn(adb, 'getPackagesForUid').mockResolvedValue(['com.example.app'])
+        vi.spyOn(adb, 'processesForUid').mockResolvedValueOnce([]).mockResolvedValue([{ pid: 5344, name: 'com.example.app' }])
+        vi.spyOn(adb, 'deviceTime').mockResolvedValue('11-24 20:00:00.000')
+        const sent: Array<Record<string, unknown>> = []
+        const internal = agent as unknown as { sendMsg(msg: Record<string, unknown>): void }
+        const real = internal.sendMsg.bind(agent)
+        internal.sendMsg = (msg) => { sent.push(msg); real(msg) }
+
+        inject({ type: 'app:logs:watch', watchId: 'w-1', bundleId: 'com.example.app' })
+        await vi.waitFor(() => expect(spawnSpy).toHaveBeenCalledWith('adb', ['-s', 'emulator-5554', 'logcat', '--uid=10193', '-T', '11-24 20:00:00.000', '-v', 'process'], expect.anything()))
+        stdout.emit('data', 'I( 5344) hello  (Tag)\n')
+        await vi.waitFor(() => expect(sent.filter((m) => m['type'] === 'app:log' || m['type'] === 'app:log:run')).toEqual([
+          { type: 'app:log:run', sessionId: agent.sessionId, watchId: 'w-1', event: 'started', pid: 5344 },
+          { type: 'app:log', sessionId: agent.sessionId, watchId: 'w-1', text: 'hello\n' },
+        ]))
+
+        const perLaunch = vi.spyOn(internals(agent), 'startAppLogStreamAfterLaunch')
+        vi.spyOn(adb, 'launchApp').mockResolvedValue(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rqi-watched', payload: { bundleId: 'com.example.app' } })
+        await done
+        expect(perLaunch).not.toHaveBeenCalled()
+        expect(spawnSpy).toHaveBeenCalledTimes(1)
       })
 
       it('answers app:launch before process discovery completes', async () => {

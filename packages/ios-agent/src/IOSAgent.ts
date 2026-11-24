@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature, TouchLanding,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, AppLogsUnwatch, AppLogsWatch, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature, TouchLanding,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -73,7 +73,7 @@ interface TouchWatch {
   /** Gestures in a row the log placed nothing for, once it had spoken. */
   misses: number
 }
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs']
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -134,6 +134,7 @@ import {
 } from '@tapflowio/agent-core'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
 import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT, defaultAppLogStreamDeps, inertAppLogStreamDeps, type AppLogStreamDeps } from './AppLogStream.js'
+import { AppLogWatch, defaultAppLogWatchDeps, inertAppLogWatchDeps, type AppLogWatchDeps } from './AppLogWatch.js'
 import { AudioCaptureStreamer, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
 import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { enumerateSimPids } from './SimProcessTree.js'
@@ -202,6 +203,9 @@ export interface IOSAgentOptions {
   dispatchLog?: (udid: string) => DispatchLog | null
   /** How a launched app's log stream is spawned, and its orphans found (#1235). Under vitest the default spawns nothing. */
   appLogStreamDeps?: AppLogStreamDeps
+  /** How a watched app's log stream is spawned and its runs read (`app:logs:watch`). Under vitest the default spawns
+   *  nothing. */
+  appLogWatchDeps?: AppLogWatchDeps
   /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
    *  default keeps its markers in a directory under the OS temp folder. */
   appAccessibility?: AppAccessibility
@@ -291,6 +295,11 @@ interface DeviceState {
   streamWs: WebSocket | null
   appLogStream: AppLogStream | null
   appLogGeneration: number
+  /** The app the relay asked to watch (`app:logs:watch`): wanted state, kept while the stream is down (a boot, a
+   *  shutdown) and raised again when the device is ready. */
+  appLogWatch: { watchId: string; bundleId: string } | null
+  appLogWatcher: AppLogWatch | null
+  appLogWatchGeneration: number
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
   // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
@@ -452,6 +461,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   /** Where each recorded touch landed is read from UIKit's dispatch log, one stream per device; null reads nothing. */
   private readonly dispatchLog: (udid: string) => DispatchLog | null
   private readonly appLogStreamDeps: AppLogStreamDeps
+  private readonly appLogWatchDeps: AppLogWatchDeps
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -528,6 +538,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     )
     this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
     this.appLogStreamDeps = options.appLogStreamDeps ?? (process.env.VITEST ? inertAppLogStreamDeps : defaultAppLogStreamDeps)
+    this.appLogWatchDeps = options.appLogWatchDeps ?? (process.env.VITEST ? inertAppLogWatchDeps : defaultAppLogWatchDeps)
     this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
       this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
     )
@@ -621,7 +632,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           this.relayFeatures = Array.isArray(msg.features)
             ? msg.features.filter(
                 (feature: unknown): feature is RelayAgentFeature =>
-                  feature === 'device-updates' || feature === 'app-logs' || feature === 'touch-landings'
+                  feature === 'device-updates' || feature === 'app-logs' || feature === 'touch-landings' || feature === 'app-log-watch'
               )
             : []
           clearTimeout(timer)
@@ -792,6 +803,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         streamWs: null,
         appLogStream: null,
         appLogGeneration: 0,
+        appLogWatch: null,
+        appLogWatcher: null,
+        appLogWatchGeneration: 0,
         streamReader: null,
         captureStreamer: null,
         bootSeq: 0,
@@ -919,6 +933,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
 
   private cleanupDeviceState(state: DeviceState): void {
     this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
     if (this.endTouchWatch(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
@@ -937,6 +952,50 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.booted = false
     state.streamWs?.close()
     state.streamWs = null
+  }
+
+  /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
+  private stopAppLogWatcher(state: DeviceState): number {
+    const generation = ++state.appLogWatchGeneration
+    state.appLogWatcher?.stop()
+    state.appLogWatcher = null
+    return generation
+  }
+
+  /**
+   * (Re)starts the stream for the session's watch, when there is one and the device is up. Called on the watch itself,
+   * when the device is ready, and after an install (the app may not have been there to resolve). A stream already up
+   * for the same watch is left as it is: the stream is filtered by the executable's path, so it outlives each run of
+   * the app and a reinstall.
+   */
+  private raiseAppLogWatch(state: DeviceState): void {
+    const wanted = state.appLogWatch
+    if (!wanted || !state.booted || state.appLogWatcher) return
+    const generation = this.stopAppLogWatcher(state)
+    const current = () => state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(state.sessionId) === state
+    void Promise.resolve()
+      .then(() => this.simctl.getAppExecutablePath(state.deviceId, wanted.bundleId))
+      .then((processImagePath) => {
+        if (!current() || state.appLogWatcher) return
+        const sessionId = state.sessionId
+        const watcher = new AppLogWatch(
+          state.deviceId,
+          processImagePath,
+          (item) => {
+            if (!current()) return true
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT) return false
+            if (item.kind === 'text') this.sendMsg({ type: 'app:log', sessionId, watchId: wanted.watchId, text: item.text })
+            else this.sendMsg({ type: 'app:log:run', sessionId, watchId: wanted.watchId, event: item.event, pid: item.pid })
+            return true
+          },
+          (error) => logger.warn('app log watch:', error.message),
+          this.appLogWatchDeps,
+        )
+        state.appLogWatcher = watcher
+        return watcher.start()
+      })
+      // Not installed yet, most often: the install's own call raises it once the app is there.
+      .catch((error: unknown) => logger.debug('app log watch not started:', (error as Error).message))
   }
 
   private stopAppLogStream(state: DeviceState): number {
@@ -1197,6 +1256,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = this.bumpBootSeq(state, 'superseded')
     this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     state.bootsInFlight.add(seq)
 
     // **The teardown runs inside the try, and that is a fix rather than tidying.** It ran before it, so a
@@ -1449,6 +1509,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // that device unowned and put the resolvers back to refusing between two live simulators.
       this.ownedDevices.add(deviceId)
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId, cold, serviceTier: this.reportedTier(target), ...(runResetReport ? { runReset: runResetReport } : {}) } })
+      this.raiseAppLogWatch(state)
       // The unsolicited report the protocol names on `device:ready`. It follows the ready rather than
       // riding inside it: a tester whose device just came up can arm the toggle in the same breath, and
       // a boot that armed nothing still has to say so rather than leaving the control blank.
@@ -1766,6 +1827,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
 
     this.bumpBootSeq(state, 'shut-down')
     this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     // **Said here as well as in `cleanupDeviceState`, because this path does not go through it.**
     // The teardown below is a copy of that method's, and the copy is older than the network rule —
     // so a device shut down from the dashboard while offline kept its udid in the host filter for
@@ -2513,6 +2575,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
               await this.observeApp(installState.deviceId, bundleId)
             }
             respond({ type: 'app:install-done' })
+            this.raiseAppLogWatch(installState)
           })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -2562,6 +2625,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
             this.lastBundleIds.set(launchState.deviceId, bundleId)
             if (
               this.relayFeatures.includes('app-logs') &&
+              // A watched app's output comes from the watch, whichever way the app was opened.
+              !launchState.appLogWatch &&
               typeof pid === 'number' &&
               Number.isSafeInteger(pid) &&
               pid > 0 &&
@@ -3277,6 +3342,27 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // The app the tree is read for: the last launched or installed (`lastBundleIds`), as `/tree` and `/field` are.
         void this.uiTreeReader.reach(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '', targets)
           .then(answer, (e: unknown) => answer(targets.map(() => ({ state: 'unknown', reason: firstLine(e) }))))
+        break
+      }
+      case 'app:logs:watch': {
+        const { watchId, bundleId } = msg as unknown as Partial<AppLogsWatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || typeof watchId !== 'string' || !watchId || typeof bundleId !== 'string' || !bundleId) break
+        const same = state.appLogWatch?.watchId === watchId && state.appLogWatch?.bundleId === bundleId
+        if (same && state.appLogWatcher) break
+        if (!same) {
+          this.stopAppLogWatcher(state)
+          state.appLogWatch = { watchId, bundleId }
+        }
+        this.raiseAppLogWatch(state)
+        break
+      }
+      case 'app:logs:unwatch': {
+        const { watchId } = msg as unknown as Partial<AppLogsUnwatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || state.appLogWatch?.watchId !== watchId) break
+        state.appLogWatch = null
+        this.stopAppLogWatcher(state)
         break
       }
       case 'device:keyboard-reset': {
