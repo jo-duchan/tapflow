@@ -19,7 +19,7 @@ import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflo
 import { IOS_BUTTON_ALIASES } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('ios-agent')
-/** A refresh of the watched app's path after an install, asked again this many times this far apart when it fails. */
+/** A failed read of the watched app's path, asked again this many times this far apart. */
 export const APP_LOG_WATCH_REFRESH_RETRIES = 3
 export const APP_LOG_WATCH_REFRESH_RETRY_MS = 1_000
 
@@ -1020,11 +1020,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         return watcher.start()
       })
       .catch((error: unknown) => {
-        // Not installed yet, most often: the install's own call raises it once the app is there. A refresh after an
-        // install found the app there, so a failed read is asked again, or the stream would stay on the old container.
+        // Not installed yet, most often, and the install's own call raises it once the app is there. But a read can fail
+        // with the app there (the watch of a first install arrives after its install-done), and then nothing else would
+        // ask again: a few more tries, whichever call this was.
         logger.debug('app log watch not started:', (error as Error).message)
-        if (!refresh || attempt >= APP_LOG_WATCH_REFRESH_RETRIES || !current()) return
-        setTimeout(() => { if (current()) this.raiseAppLogWatch(state, true, attempt + 1) }, this.appLogWatchRefreshRetryMs).unref()
+        if (attempt >= APP_LOG_WATCH_REFRESH_RETRIES || !current()) return
+        setTimeout(() => { if (current()) this.raiseAppLogWatch(state, refresh, attempt + 1) }, this.appLogWatchRefreshRetryMs).unref()
       })
   }
 

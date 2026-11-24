@@ -4546,6 +4546,15 @@ describe('IOSAgent', () => {
           agent.disconnect(); browser.close()
         })
 
+        it('asks for the path again when the read for a new watch fails, as a first install\'s watch can', async () => {
+          const { deps, children } = watchDeps()
+          const { simctl, agent, browser } = await bootedAgent({ appLogWatchDeps: deps, appLogWatchRefreshRetryMs: 1 })
+          vi.mocked(simctl.getAppExecutablePath).mockRejectedValueOnce(new Error('simctl get_app_container failed'))
+          deliver(agent, { type: 'app:logs:watch', sessionId: agent.sessionId, watchId: 'w-1', bundleId: 'com.example.app' })
+          await vi.waitFor(() => expect(children).toHaveLength(1))
+          agent.disconnect(); browser.close()
+        })
+
         it('asks for the moved path again when the read after an install fails', async () => {
           const { deps, children } = watchDeps()
           const { simctl, agent, browser } = await bootedAgent({ appLogWatchDeps: deps, appLogWatchRefreshRetryMs: 1 })
