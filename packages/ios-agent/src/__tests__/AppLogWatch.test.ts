@@ -61,8 +61,10 @@ describe('iOS app log watch', () => {
     out.emit('data', `\n${entry(100, 'about to crash')}`)
     // The relaunch's first line arrives before the poll saw the crash: exited still comes first.
     out.emit('data', entry(200, 'again'))
+    // A line the ended run wrote last, delivered late: it joins the new run, with no boundary of its own.
+    out.emit('data', entry(100, 'late'))
     expect(shown()).toBe(
-      `[started 100]${entry(100, 'hello')}\tcontinued\n${entry(100, 'about to crash')}[exited 100][started 200]${entry(200, 'again')}`,
+      `[started 100]${entry(100, 'hello')}\tcontinued\n${entry(100, 'about to crash')}[exited 100][started 200]${entry(200, 'again')}${entry(100, 'late')}`,
     )
     watch.stop()
   })
