@@ -83,6 +83,15 @@ describe('cmdSetup', () => {
     expect(mockRunSetupIos).toHaveBeenCalledWith()
   })
 
+  it('tells Windows to open a new terminal, without the POSIX `exec $SHELL`', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: 'open a new terminal to use them.' }])
+    await cmdSetup('android', {})
+    const out = logLines.join('\n')
+    expect(out).toContain('Open a new terminal, then `tapflow doctor`')
+    expect(out).not.toContain('exec $SHELL')
+  })
+
   it('--yes off Windows is ignored, with a warning', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     await cmdSetup('android', { assumeYes: true })

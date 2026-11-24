@@ -81,7 +81,11 @@ export async function cmdSetup(platform?: string, opts: SetupOptions = {}): Prom
 
   // env가 rc에 있지만 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
   if (needsNewShell) {
-    step("Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
+    // Windows has no rc file or `exec $SHELL`: setup writes the user environment, which only a
+    // terminal opened afterwards reads.
+    step(process.platform === 'win32'
+      ? 'Open a new terminal, then `tapflow doctor` to verify — ANDROID_HOME and PATH were added to your user environment, but this terminal has not loaded them yet.'
+      : "Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
   }
 
   // **The exit code says what the banner says.** This command returned 0 whatever it printed, so

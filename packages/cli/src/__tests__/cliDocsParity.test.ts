@@ -143,7 +143,9 @@ function parity(cli: CAC, markdown: string): { undocumented: string[]; nonexiste
 }
 
 describe.each(Object.entries(DOCS))('docs/%s cli.md matches the registered CLI', (_locale, file) => {
-  const markdown = readFileSync(file, 'utf8')
+  // A Windows checkout with core.autocrlf=true has CRLF here, and the `^…$` line patterns below
+  // would miss every line that ends in `\r`. Normalized so the test reads the same text on any host.
+  const markdown = readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
 
   it('documents every command and flag, and nothing the CLI lacks', () => {
     const cli = createCli()
