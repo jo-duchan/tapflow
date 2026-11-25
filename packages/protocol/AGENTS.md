@@ -44,11 +44,10 @@ The cost of a broad name is ambiguity about what belongs — answered by the two
   - **`SchemaExact` ties each schema to its interface**, and refuses `z.custom<T>()` and a
     `const s: z.ZodType<T>` annotation by kind, because both produce `T` with no `any` for `IsAny` to
     catch and would compare `T` with itself.
-  - **The envelope is judged before the payload**, so a payload failure on one of the thirteen answerable
-    browser requests comes back as `bad-payload` carrying the address and the correlator — which is what
-    lets the relay answer it instead of dropping it. `ANSWERABLE` is that set; keeping it equal to the
-    correlated request set is `scripts/__tests__/correlatedRequestsGated.test.mjs`'s job, because
-    nothing else compares the two.
+  - **The envelope is judged before the payload**, so an answerable payload failure carries the session
+    address and its requestId. Shutdown alone permits an absent requestId, matching its lifecycle contract;
+    every other `bad-payload` variant requires one. `scripts/__tests__/correlatedRequestsGated.test.mjs`
+    holds `ANSWERABLE` and the relay's replies to the required request set plus this optional shutdown policy.
 
 - **Which hardware buttons a platform can press** lives in `src/buttons/`, reached as
   `@tapflowio/protocol/buttons`: Android's closed map, iOS's aliases onto chrome button names, and
@@ -270,9 +269,9 @@ because there is no annotation for a compiler to check against. The consequence 
 `DeviceBoot.requestId` to required produced no error in those files and instead **hung two agent suites**, and
 several of those fixtures send `device:ready` with no `payload` at all — a shape the wire cannot produce.
 
-**Because the correlator is optional, `correlatedRequestsGated` cannot see it.** That check derives its set
-from *required* declarations (`/^ {2}requestId: string$/`), so every door gate and echo obligation on this pair
-is outside its reach. The one that matters most is the relay's own: the relay answers a `device:boot` itself
+**Optional lifecycle echo needs runtime tests.** `correlatedRequestsGated` derives required declarations
+and explicitly includes shutdown's optional envelope and malformed reply. It cannot check which request's
+ID a runtime reply echoes. The relay answers a `device:boot` itself
 when the agent is offline or the session is unknown, and that `device:boot-error` must echo the id or an MCP
 caller reads a diagnosis as unsolicited and waits out its deadline instead. That is the defect this file already
 records as having shipped twice, in a position no check reaches. A test is the only thing holding it.

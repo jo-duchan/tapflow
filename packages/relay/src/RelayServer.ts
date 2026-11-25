@@ -3750,10 +3750,12 @@ export class RelayServer {
    */
   private refuseMalformed(ws: WebSocket, f: Extract<ParseFailure, { reason: 'bad-payload' }>): void {
     if (ws.readyState !== WebSocket.OPEN) return
-    const { sessionId, requestId } = f
-    const message = `malformed ${f.type} payload`
-    switch (f.type) {
+    const { type, sessionId, requestId } = f
+    const message = `malformed ${type} payload`
+    switch (type) {
       case 'device:boot':     this.sendTo(ws, { type: 'device:boot-error', sessionId, requestId, message }); break
+      case 'device:shutdown':
+        this.sendTo(ws, { type: 'device:shutdown-error', sessionId, ...(requestId === undefined ? {} : { requestId }), message }); break
       case 'app:install':     this.sendTo(ws, { type: 'app:install-error', sessionId, requestId, message }); break
       case 'app:launch':      this.sendTo(ws, { type: 'app:launch-error', sessionId, requestId, message }); break
       case 'app:clear-state': this.sendTo(ws, { type: 'app:clear-state-error', sessionId, requestId, message }); break

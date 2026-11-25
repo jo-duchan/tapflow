@@ -419,6 +419,49 @@ describe('a payload failure the caller can be told about', () => {
   })
 })
 
+describe('shutdown payload failures preserve optional lifecycle correlation', () => {
+  const payloads = [{}, { deviceId: 7 }, null, undefined]
+
+  it.each(payloads.flatMap((payload) => [undefined, 'rq-shutdown'].map((requestId) => ({ payload, requestId }))))(
+    'answers malformed payload $payload with requestId $requestId',
+    ({ payload, requestId }) => {
+      const r = fail({
+        type: 'device:shutdown', sessionId: 'sess-1',
+        ...(requestId === undefined ? {} : { requestId }),
+        ...(payload === undefined ? {} : { payload }),
+      })
+      expect(r).toMatchObject({ reason: 'bad-payload', type: 'device:shutdown', sessionId: 'sess-1' })
+      if (r.reason !== 'bad-payload') throw new Error(`Expected bad-payload, got ${r.reason}`)
+      expect(Object.hasOwn(r, 'requestId')).toBe(requestId !== undefined)
+      expect(r.requestId).toBe(requestId)
+      expect(r.detail).toContain('payload')
+    },
+  )
+
+  it.each(['', null, 7])('drops a supplied invalid shutdown requestId %p', (requestId) => {
+    expect(fail({ type: 'device:shutdown', sessionId: 's', requestId, payload: {} }).reason).toBe('bad-shape')
+  })
+
+  it.each(['', null, 7, undefined])('drops an invalid shutdown sessionId %p', (sessionId) => {
+    expect(fail({ type: 'device:shutdown', sessionId, requestId: 'r', payload: {} }).reason).toBe('bad-shape')
+  })
+
+  it.each([undefined, 'rq-valid'])('accepts a valid shutdown with requestId %p', (requestId) => {
+    const raw = {
+      type: 'device:shutdown', sessionId: 's', payload: { deviceId: 'd' },
+      ...(requestId === undefined ? {} : { requestId }),
+    }
+    expect(ok(raw).msg).toEqual(raw)
+  })
+
+  it('keeps a required requestId typed as string on other payload failures', () => {
+    const r = fail({ type: 'open-url', sessionId: 's', requestId: 'required', payload: {} })
+    if (r.reason !== 'bad-payload' || r.type === 'device:shutdown') throw new Error('Expected a required-correlator failure')
+    const requestId: string = r.requestId
+    expect(requestId).toBe('required')
+  })
+})
+
 describe('a client newer than this relay still joins', () => {
   // `session:start` has no answerable reply, so a refused one is silence and the client waits out its join
   // deadline. A `clientKind` this relay does not know therefore goes — the session is simply not
