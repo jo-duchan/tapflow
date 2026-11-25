@@ -726,7 +726,8 @@ export class AdbWrapper {
     if (!outcome.sent || outcome.out === null) return undefined
     const answer = parseJsonLine(outcome.out) as { xml?: unknown; error?: unknown } | null
     if (typeof answer?.xml !== 'string') {
-      logger.debug(`${serial}: field server dump fell back: ${typeof answer?.error === 'string' ? answer.error.slice(0, 200) : 'no XML'}`)
+      // Warn, not debug: a dump that falls back is a tree read that may then fail, and the reason is gone otherwise.
+      logger.warn(`${serial}: field server dump fell back: ${typeof answer?.error === 'string' ? answer.error.slice(0, 200) : 'no XML'}`)
       return undefined
     }
     return hierarchyXml(Buffer.from(answer.xml, 'base64').toString('utf8'))

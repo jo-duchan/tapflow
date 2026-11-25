@@ -3354,6 +3354,23 @@ describe('AndroidAgent', () => {
       })
     })
 
+    // A failed tree read reaches the relay as a 502 that keeps no reason: the agent's log is where it is explained.
+    it('logs why a tree read failed, and still answers the error', async () => {
+      vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new Error('uidump: another UiAutomation is connected'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        inject({ type: 'ui:tree:request', requestId: 'rq-t1' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-t1')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-t1')).toMatchObject({ type: 'ui:tree:error', message: 'uidump: another UiAutomation is connected' })
+        expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toMatch(/ui:tree on emulator-5554 failed: uidump: another UiAutomation is connected/)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
     // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.
     describe('ui:reach:request', () => {
       const target = { role: 'button', label: 'Row 10', identifier: 'list.row.10', frame: { x: 0, y: 0.78, width: 1, height: 0.06 } }

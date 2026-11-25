@@ -111,7 +111,9 @@ export class FocusedServers {
     // No answer: the server may be stuck inside a connection, which would refuse the next dump's. It goes before the
     // queue moves on, and the next request starts another.
     if (out === null) {
-      logger.warn(`${serial}: no answer from the field server in ${timeoutMs} ms; restarting it`)
+      // The op, never the text: which request hung is what tells a stuck hold from a slow dump (one Match stalled for
+      // 3 min on restarts ~31 s apart, the keep-alive's period, with nothing in the log to say which).
+      logger.warn(`${serial}: no answer from the field server to '${op}' in ${timeoutMs} ms; restarting it`)
       await this.stop(serial)
     } else if (this.servers.get(serial) === server) {
       server.idle = setTimeout(() => { void this.stop(serial) }, this.idleStopMs)
