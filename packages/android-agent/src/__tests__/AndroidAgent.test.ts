@@ -3354,7 +3354,7 @@ describe('AndroidAgent', () => {
       })
     })
 
-    // A failed tree read reaches the relay as a 502 that keeps no reason: the agent's log is where it is explained.
+    // The relay hands a failed tree read's reason to its HTTP caller and logs none: the agent's log is where it is kept.
     it('logs why a tree read failed, and still answers the error', async () => {
       vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new Error('uidump: another UiAutomation is connected'))
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

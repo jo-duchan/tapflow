@@ -4025,7 +4025,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
-            // The relay answers it as a 502 and keeps no reason: this line is the only place a failed read is explained.
+            // The relay passes the reason to its HTTP caller (a 502's body) but logs none: this is the only log line for it.
             logger.warn(`ui:tree on ${serial} failed: ${message.slice(0, 300)}`)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
           })
