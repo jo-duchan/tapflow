@@ -49,7 +49,7 @@
     "globals": "^17.14.0",
     "lefthook": "^2.2.2",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.72.2",
+    "typescript-eslint": "^8.73.0",
     "vitest": "^4.1.12"
   },
   "pnpm": {
