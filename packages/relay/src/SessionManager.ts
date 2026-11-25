@@ -82,6 +82,15 @@ export interface Session {
   lastPersonUser?: string
   /** A different person took the device and its keyboard has not been reset yet: sent with their next boot. */
   keyboardResetOwed?: boolean
+  /**
+   * MCP Flow Capture (L6a): the MCP holder that armed record-time observation with `capture:observe`, keyed by its
+   * owner key, and the touches it has sent since (`input:touch:end`/`input:pinch:end` requestIds, newest last), whose
+   * observations go back to it and to nobody else. Kept by the relay, never stored elsewhere; cleared when that holder
+   * goes (`RelayServer.disarmObserve`).
+   */
+  observe?: { owner: string; sent: string[] }
+  /** Whether the boot in flight was sent armed by an MCP holder (`observe`), read and cleared at its `device:ready`. */
+  bootArmed?: boolean
   /** Who cold-booted the device this session drives, and when — kept after the holder leaves, since that is when
    *  it matters: it is what the per-Mac automation cap counts and shuts down (`admission/capacity.ts`). Set when
    *  the relay forwards a cold boot, undone if that boot fails or turns out warm, cleared on `shutdown-done`.

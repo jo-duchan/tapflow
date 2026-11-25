@@ -10,7 +10,7 @@ import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
-import type { ReachResult, ReachTarget } from '@tapflowio/protocol'
+import type { ReachResult, ReachTarget, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
 import { gestureAction, keyForWatchers, pinchAction } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
@@ -57,6 +57,9 @@ import type { KeyframeAwareSender } from '@tapflowio/agent-core/utils'
 const logger = createLogger('relay')
 export const APP_LOG_BACKPRESSURE_BYTES = 512 * 1024
 const APP_LOG_DROP_WARN_INTERVAL_MS = 1_000
+/** How many of an armed MCP holder's latest touches may still get an observation (L6a): far more than arrive while one is
+ *  on its way (iOS's `acted` within a second of the lift). */
+const OBSERVE_SENT_KEEP = 64
 
 function createAppLogDropWarn(sessionId: string): () => void {
   let lastWarnAt = Number.NEGATIVE_INFINITY
@@ -1180,6 +1183,8 @@ export class RelayServer {
    */
   /** A session is gone for good: from the manager, from the per-session state, and from the boot gate. */
   private removeSession(sessionId: string): void {
+    const removing = this.sessions.get(sessionId)
+    if (removing) this.disarmObserve(removing)
     // Here and not in `forgetSessionState`, which `session:leave` also runs: an MCP client that borrowed the device and
     // leaves must not take the person's capture with it (a borrow has sealed it already, at the join).
     this.captures.seal(sessionId)
@@ -1565,6 +1570,7 @@ export class RelayServer {
       // stray timer per relay before this loop and is one per held session after it.
       if (this.stopping) return
       for (const held of this.sessions.getByBrowserSocket(ws)) {
+        this.disarmObserve(held)
         this.sessions.clearBrowser(held.id, () => this.idleShutdown(held.id))
         // Spent, as on a leave: the countdown just started is the one it would have handed back.
         held.idleResumeOnLeave = false
@@ -1738,7 +1744,7 @@ export class RelayServer {
             this.sessions.list(this.ownerOf(ws), (holder) => this.isAlive(holder), (group) => this.macAdmission(group), this.userOf(ws)),
             this.userOf(ws),
           ),
-          features: ['device-lease', 'launch-options'],
+          features: ['device-lease', 'launch-options', 'capture-observe'],
         })
         break
       }
@@ -1794,6 +1800,7 @@ export class RelayServer {
           // An automation client that stopped a person's idle countdown by joining starts it again by leaving;
           // otherwise a leave keeps the device up, as it always has (a CI job reuses the device it left).
           const resume = leaving?.idleResumeOnLeave === true
+          if (leaving) this.disarmObserve(leaving)
           // Cleared after, not before: `clearBrowser` reads it to record whose countdown this is.
           this.sessions.clearBrowser(msg.sessionId, resume ? () => this.idleShutdown(msg.sessionId) : undefined)
           if (leaving) leaving.idleResumeOnLeave = false
@@ -1960,6 +1967,12 @@ export class RelayServer {
         this.sessions.setReadySent(session.id, true)
         // Again on every ready: an agent that restarted has lost the watch, and one that did not changes nothing.
         this.syncAppLogWatch(session, { resend: true })
+        // A boot sets observation by the arming when it was sent, after any `capture:observe` that reached the agent while
+        // it ran: an `off` from a holder that left mid-boot, or an `on` sent after the boot. Put right once (pre-PR review).
+        if (session.bootArmed !== undefined && session.bootArmed !== this.mcpArmed(session) && hasCapability(session.agentCapabilities, 'capture-observe')) {
+          this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: this.mcpArmed(session) } })
+        }
+        session.bootArmed = undefined
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
@@ -2243,6 +2256,38 @@ export class RelayServer {
             ...(target.ok ? { reason: 'unsupported' as const } : {}),
           })
         }
+        break
+      }
+      case 'capture:observe': {
+        // MCP Flow Capture (L6a): an MCP holder arms record-time observation for its own touches, with no boot (a
+        // device it picks up may be running already). Only the holder, and only an MCP one: a person's dashboard is
+        // armed by the boot's `observed`, and a flow run is never observed. The relay keeps no observation: it passes
+        // each one for a touch this holder sent back to it (`handleCaptureTouched`).
+        const target = this.dispatchTarget(ws, msg.sessionId)
+        // An `off` from the holder is kept even while its agent is away: the agent coming back must not be armed again
+        // for a capture its client ended (pre-PR review).
+        const held = this.sessions.get(msg.sessionId)
+        if (!target.ok && !msg.payload.on && held?.observe && this.ownsSession(ws, held)) held.observe = undefined
+        if (!target.ok || target.session.holderKind !== 'mcp' || target.session.owner === null) {
+          this.sendTo(ws, {
+            type: 'capture:observe-error', sessionId: msg.sessionId, requestId: msg.requestId,
+            message: target.ok ? 'Only an MCP client can observe its own touches' : target.message,
+          })
+          break
+        }
+        const session = target.session
+        const owner = target.session.owner
+        const observing = hasCapability(session.agentCapabilities, 'capture-observe')
+        if (msg.payload.on && observing) {
+          // Armed again by the same holder keeps the touches it sent: their observations may still be on the way. Not
+          // armed for an agent that cannot take it: its boots would then observe after `observing: false` said they
+          // would not, and nothing would turn it off (pre-PR review).
+          if (session.observe?.owner !== owner) session.observe = { owner, sent: [] }
+        } else {
+          session.observe = undefined
+        }
+        if (observing) session.agentSocket.send(JSON.stringify(msg))
+        this.sendTo(ws, { type: 'capture:observe-done', sessionId: msg.sessionId, requestId: msg.requestId, observing })
         break
       }
       // ── input, split by whether an ack answers it ──────────────────────────────────────────────
@@ -2817,6 +2862,10 @@ export class RelayServer {
     // After the state is final: the browser answers this with `device:boot` on the same session id.
     for (const sessionId of rebound.values()) {
       const s = this.sessions.get(sessionId)
+      // An agent that came back forgot what was armed on its device; the holder that armed it is still here.
+      if (s && this.mcpArmed(s) && hasCapability(s.agentCapabilities, 'capture-observe')) {
+        this.sendTo(ws, { type: 'capture:observe', sessionId, requestId: randomUUID(), payload: { on: true } })
+      }
       if (s?.browserSocket) {
         this.sendTo(s.browserSocket, { type: 'session:rebound', sessionId, capabilities: msg.capabilities ?? [] })
       }
@@ -2939,6 +2988,11 @@ export class RelayServer {
     // it. Ungated by memory: neither starts anything on the Mac (app accessibility measured at 13–21 MB an app), and a
     // gate here turned every touch observation off for a boot on a busy Mac.
     ;(msg.payload as Record<string, unknown>)['observed'] = this.captures.isRecording(boot.session.id, captureHolder(boot.session))
+      // An MCP holder that armed observation keeps it across its own boots: without this, the `boot_device` an MCP
+      // client sends after arming would turn it off on both agents (design review 2 of L6a).
+      || this.mcpArmed(boot.session)
+    // What this boot will set, so its ready can put right an arming that changed while it ran (`device:ready`).
+    boot.session.bootArmed = this.mcpArmed(boot.session)
     if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
       // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
       this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })
@@ -3169,6 +3223,9 @@ export class RelayServer {
         return
       }
       this.captures.noteJoin(msg.sessionId, captureHolder(session))
+      // A holder whose socket stopped answering can be replaced by a join before its close is seen, and the close then
+      // finds no session to disarm: the newcomer's device must not stay observed for it (pre-PR review).
+      if (session.observe && session.observe.owner !== session.owner) this.disarmObserve(session)
       // Another person's keyboard language would type this person's keys (#1134). Owed until their boot reaches the
       // agent: sent here, an agent away for the moment would never hear it, and the next join is the same person.
       if (joined.personChanged) session.keyboardResetOwed = true
@@ -3714,6 +3771,11 @@ export class RelayServer {
       session.agentSocket.send(JSON.stringify(msg))
       this.captures.recordInput(session.id, captureHolder(session), msg)
       this.tellWatchersInput(session, msg)
+      if ((msg.type === 'input:touch:end' || msg.type === 'input:pinch:end') && session.observe && session.observe.owner === session.owner) {
+        session.observe.sent.push(msg.requestId)
+        // An observation comes within seconds of its touch (iOS's late `acted` included): older ones are not waited for.
+        if (session.observe.sent.length > OBSERVE_SENT_KEEP) session.observe.sent.shift()
+      }
       return
     }
 
@@ -3761,6 +3823,7 @@ export class RelayServer {
       case 'app:clear-state': this.sendTo(ws, { type: 'app:clear-state-error', sessionId, requestId, message }); break
       case 'device:keyboard-set': this.sendTo(ws, { type: 'device:keyboard-set-error', sessionId, requestId, message }); break
       case 'device:run-reset': this.sendTo(ws, { type: 'device:run-reset-error', sessionId, requestId, message }); break
+      case 'capture:observe': this.sendTo(ws, { type: 'capture:observe-error', sessionId, requestId, message }); break
       case 'open-url':        this.sendTo(ws, { type: 'open-url:error', sessionId, requestId, message }); break
       // Its waiters key on the `input:type-*` pair and ignore an `input:error` entirely — the same
       // reason `refuseInput` below splits these two.
@@ -4255,6 +4318,7 @@ export class RelayServer {
     const session = this.sessions.get(msg.sessionId)
     if (!session || session.agentSocket !== ws) return
     this.captures.recordTouched(session.id, captureHolder(session), msg.requestId, msg.observation)
+    this.passObservation(session, msg.requestId, { touched: msg.observation })
   }
 
   /** Where a recorded touch went down (#1214). Only the session's own agent says so, as with `capture:touched`. */
@@ -4262,6 +4326,30 @@ export class RelayServer {
     const session = this.sessions.get(msg.sessionId)
     if (!session || session.agentSocket !== ws) return
     this.captures.recordLanded(session.id, captureHolder(session), msg.requestId, msg.landed)
+    this.passObservation(session, msg.requestId, { landed: msg.landed })
+  }
+
+  /** Whether the session's holder is the MCP client that armed observation (L6a). */
+  private mcpArmed(session: Session): boolean {
+    return session.observe !== undefined && session.observe.owner === session.owner && session.holderKind === 'mcp'
+  }
+
+  /** An observation of a touch the armed MCP holder sent, to that holder only (L6a). Kept nowhere: a touch another
+   *  holder sent, or one this holder sent before it armed or while it was away, is not passed on. */
+  private passObservation(session: Session, requestId: string, what: { touched: TouchObservation } | { landed: TouchLanding }): void {
+    const armed = session.observe
+    if (!armed || armed.owner !== session.owner || !session.browserSocket || !armed.sent.includes(requestId)) return
+    this.sendTo(session.browserSocket, { type: 'capture:observation', sessionId: session.id, requestId, ...what })
+  }
+
+  /** The armed MCP holder is gone (it left, its socket closed, someone else joined, the session went): observation is
+   *  turned off on the device, since app accessibility stays on otherwise, and nothing more is passed on (L6a). */
+  private disarmObserve(session: Session): void {
+    if (!session.observe) return
+    session.observe = undefined
+    if (hasCapability(session.agentCapabilities, 'capture-observe') && session.agentSocket.readyState === WebSocket.OPEN) {
+      this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: false } })
+    }
   }
 
   private handleUIKeyboardResponse(ws: WebSocket, msg: Inbound<'ui:keyboard:response'>): void {

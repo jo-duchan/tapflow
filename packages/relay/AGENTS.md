@@ -321,7 +321,21 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   anything on the Mac to answer: iOS reads from inside the app (ios-agent AGENTS.md, "App observer"), Android through a
   server on the device. A gate was drawn for an iOS read through the XCUITest runner (110–360 MB), which never shipped,
   and it left every typed step unread and every touch unobserved on a busy Mac. The boot carries `observed` (the person
-  is recorded, no other check), which the iOS agent turns touch observation and app accessibility on by.
+  is recorded, or an MCP holder armed it — below; no other check), which the iOS agent turns touch observation and app
+  accessibility on by.
+- **An MCP client observes its own touches without a capture here** (L6a, `capture:observe`). MCP Flow Capture keeps its
+  record in the MCP server, so `CaptureStore`'s rules are untouched: an `mcp` holder arms observation, the relay forwards
+  that to an agent naming `capture-observe` (a device picked up running gets no boot), counts it in `observed` on that
+  holder's own boots, sends it again when the agent re-registers, and sends `off` when the holder leaves or its socket
+  closes, since app accessibility stays on the device. It remembers the `requestId`s of the touches that holder sent
+  (`Session.observe`, the newest 64) and passes each one's `capture:touched`/`capture:landed` back to it as
+  `capture:observation`, and nothing else: a touch another holder sent, or one sent before arming, is passed to nobody.
+  An arming ends with its holder's socket: a client that reconnects and joins again must arm again, and until it does
+  nothing is passed back. A boot sets observation by the arming when it was sent, so a change while it runs (an `off`
+  from a holder that left, an `on` sent after it) is put right once at its `device:ready`. A client checks the relay's
+  `capture-observe` feature as well as the agent's capability: an older relay drops the request unanswered while still
+  passing the capability through. None of it is kept. An observation carries no typed value (an input is named by its identifier only), so this does
+  not reopen what the cookie-only capture routes keep from a PAT.
 - **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
   switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
   person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone

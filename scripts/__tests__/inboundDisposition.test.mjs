@@ -68,8 +68,9 @@ describe('inbound disposition', () => {
     // 29 as of #542: `device:shutdown-error` gave the shutdown pair the failure member it lacked.
     // 32 by the next count, 36 with the four `watch:*` replies, 37 with `watch:action` (A2), and 38 with
     // `device:boot-waiting` (L2). 40 with the lease pair (S5), which the dashboard never asks for. 42 with the
-    // keyboard-set pair (#1135), 44 with the run-reset pair (#1139). 45 adds `app:log`, 46 `app:log:run`.
-    expect(table_entries.size).toBe(46)
+    // keyboard-set pair (#1135), 44 with the run-reset pair (#1139). 45 adds `app:log`, 46 `app:log:run`. 49 with
+    // MCP Flow Capture's observation (L6a), which only an MCP holder is ever sent.
+    expect(table_entries.size).toBe(49)
   })
 
   it('every entry is exactly one of at / ignored', () => {
@@ -153,6 +154,10 @@ describe('inbound disposition', () => {
     expect(ignored).toEqual([
       'app:clear-state-done',
       'app:clear-state-error',
+      // Only an MCP holder may arm observation, and only it is answered and passed observations (L6a).
+      'capture:observation',
+      'capture:observe-done',
+      'capture:observe-error',
       // A lease is the flow runner's; a person picks the device.
       // Flow Capture's dialog asks, and flow-runner's channel inside it reads the answer (#1135).
       'device:keyboard-set-done',
