@@ -1,4 +1,4 @@
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { rmSync } from 'node:fs'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -18,20 +18,27 @@ type Lifecycle = SessionAgentAway | SessionRebound | SessionTerminated
 
 async function fixture(mode: 'image' | '503' | 'pending' = 'image') {
   let requestArrived: () => void = () => {}
+  let pendingResponse: ServerResponse | undefined
   const requested = new Promise<void>((resolve) => { requestArrived = resolve })
   const http = createServer((_req, res) => {
     requestArrived()
-    if (mode === 'pending') return
+    if (mode === 'pending') {
+      pendingResponse = res
+      return
+    }
     res.writeHead(mode === '503' ? 503 : 200, { 'Content-Type': mode === '503' ? 'application/json' : 'image/png' })
     res.end(mode === '503' ? JSON.stringify({ error: 'Screenshot temporarily unavailable' }) : png)
   })
   const sockets = new WebSocketServer({ server: http })
   let peer: WebSocket | undefined
+  let leftSession: string | undefined
   sockets.on('connection', (ws) => {
     peer = ws
     ws.on('message', (data) => {
-      const message = JSON.parse(String(data)) as { type: string }
+      const message = JSON.parse(String(data)) as { type: string; sessionId?: string }
       if (message.type === 'agents:list') ws.send(JSON.stringify({ type: 'agents:listed', sessions: [] }))
+      if (message.type === 'session:start') ws.send(JSON.stringify({ type: 'session:joined', sessionId: message.sessionId, capabilities: [] }))
+      if (message.type === 'session:leave') leftSession = message.sessionId
     })
   })
   await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve))
@@ -50,6 +57,10 @@ async function fixture(mode: 'image' | '503' | 'pending' = 'image') {
   }
   return {
     client, requested, stopHttp,
+    dropRequest() {
+      if (!pendingResponse) throw new Error('Missing pending screenshot request')
+      pendingResponse.destroy()
+    },
     stopSocket() { peer?.terminate() },
     async lifecycle(message: Lifecycle) {
       if (!peer) throw new Error('Missing fixture WebSocket')
@@ -58,6 +69,19 @@ async function fixture(mode: 'image' | '503' | 'pending' = 'image') {
     },
     async screenshotTool() {
       return await caller.callTool({ name: 'screenshot', arguments: { sessionId } }) as CallToolResult
+    },
+    async joinDevice() {
+      const result = await caller.callTool({ name: 'connect_device', arguments: { sessionId } }) as CallToolResult
+      expect(JSON.parse(textOf(result))).toMatchObject({ connected: true, sessionId })
+    },
+    async leaveDevice() {
+      const result = await caller.callTool({ name: 'disconnect_device', arguments: { sessionId } }) as CallToolResult
+      expect(JSON.parse(textOf(result))).toMatchObject({ disconnected: true, sessionId })
+      expect(await client.listDevices()).toEqual([])
+      expect(leftSession).toBe(sessionId)
+    },
+    async listDevicesTool() {
+      return await caller.callTool({ name: 'list_devices' }) as CallToolResult
     },
     async close() {
       await Promise.allSettled([caller.close(), server.close()])
@@ -70,10 +94,14 @@ async function fixture(mode: 'image' | '503' | 'pending' = 'image') {
   }
 }
 
+const heldScenarios = [
+  { label: 'away', event: { type: 'session:agent-away', sessionId } satisfies Lifecycle, errorType: TransientQueryError, advice: 'nothing is reaching the device' },
+  { label: 'rebound', event: { type: 'session:rebound', sessionId, capabilities: [] } satisfies Lifecycle, errorType: EnvironmentStepError, advice: 'needs boot_device again' },
+]
+
 const scenarios: Array<{ label: string; event?: Lifecycle; errorType: typeof TransientQueryError | typeof EnvironmentStepError; advice?: string }> = [
   { label: 'ordinary', errorType: TransientQueryError },
-  { label: 'away', event: { type: 'session:agent-away', sessionId }, errorType: TransientQueryError, advice: 'nothing is reaching the device' },
-  { label: 'rebound', event: { type: 'session:rebound', sessionId, capabilities: [] }, errorType: EnvironmentStepError, advice: 'needs boot_device again' },
+  ...heldScenarios,
   { label: 'terminated', event: { type: 'session:terminated', sessionId, reason: 'agent-disconnected' }, errorType: EnvironmentStepError, advice: 'call list_devices and connect_device' },
 ]
 
@@ -84,7 +112,10 @@ describe('screenshot transport failures', () => {
     'preserves the native cause and $label session advice, run $iteration', async ({ event, errorType, advice }) => {
       const relay = await fixture()
       try {
-        if (event) await relay.lifecycle(event)
+        if (event) {
+          await relay.joinDevice()
+          await relay.lifecycle(event)
+        }
         relay.stopHttp()
         const error: unknown = await relay.client.screenshot(sessionId).catch((cause: unknown) => cause)
         expect(error).toBeInstanceOf(errorType)
@@ -122,6 +153,94 @@ describe('screenshot transport failures', () => {
     }
   })
 
+  it('advises rejoining a held rebound session when the relay reconnect fails', async () => {
+    const relay = await fixture()
+    try {
+      await relay.joinDevice()
+      await relay.lifecycle({ type: 'session:rebound', sessionId, capabilities: [] })
+      relay.stopHttp()
+      relay.stopSocket()
+      await expect.poll(() => relay.client.lastCloseCode).toBe(1006)
+      const result = await relay.screenshotTool()
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toContain('ECONNREFUSED')
+      expect(textOf(result)).toContain('reconnecting failed')
+      expect(textOf(result)).toContain('call connect_device again')
+      expect(textOf(result)).not.toContain('boot_device')
+      await expect(relay.client.screenshot(sessionId)).rejects.toBeInstanceOf(EnvironmentStepError)
+    } finally {
+      await relay.close()
+    }
+  })
+
+  it('advises rejoining when another tool reconnects during a failed screenshot fetch', async () => {
+    const relay = await fixture('pending')
+    try {
+      await relay.joinDevice()
+      await relay.lifecycle({ type: 'session:rebound', sessionId, capabilities: [] })
+      const pending = relay.screenshotTool()
+      await relay.requested
+      relay.stopSocket()
+      await expect.poll(() => relay.client.lastCloseCode).toBe(1006)
+      const list = await relay.listDevicesTool()
+      expect(list.isError).not.toBe(true)
+      expect(relay.client.lastCloseCode).toBeNull()
+      relay.dropRequest()
+      const result = await pending
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toContain('reconnected to the relay')
+      expect(textOf(result)).toContain('call connect_device again')
+      expect(textOf(result)).not.toContain('boot_device')
+    } finally {
+      await relay.close()
+    }
+  })
+
+  it('preserves the terminated session advice when the relay reconnect fails', async () => {
+    const relay = await fixture()
+    try {
+      await relay.joinDevice()
+      await relay.lifecycle({ type: 'session:terminated', sessionId, reason: 'agent-disconnected' })
+      relay.stopHttp()
+      relay.stopSocket()
+      await expect.poll(() => relay.client.lastCloseCode).toBe(1006)
+      const result = await relay.screenshotTool()
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toContain('reconnecting failed')
+      expect(textOf(result)).toContain('the relay ended this session (agent-disconnected)')
+      expect(textOf(result)).toContain('call list_devices and connect_device')
+    } finally {
+      await relay.close()
+    }
+  })
+
+  it.each(heldScenarios)(
+    'drops stale $label advice if the caller leaves while a screenshot is pending', async ({ event, advice }) => {
+      const relay = await fixture('pending')
+      try {
+        await relay.joinDevice()
+        await relay.lifecycle(event)
+        const pending = relay.screenshotTool()
+        await relay.requested
+        await relay.leaveDevice()
+        relay.dropRequest()
+        const result = await pending
+        expect(result.isError).toBe(true)
+        expect(textOf(result)).toMatch(/^screenshot failed: Screenshot request failed: \S/)
+        expect(textOf(result)).not.toContain(advice)
+        relay.stopHttp()
+        const error: unknown = await relay.client.screenshot(sessionId).catch((cause: unknown) => cause)
+        expect(error).toBeInstanceOf(TransientQueryError)
+        expect(error).toMatchObject({
+          message: expect.stringContaining('ECONNREFUSED'),
+          cause: { name: 'TypeError', cause: { code: 'ECONNREFUSED' } },
+        })
+      } finally {
+        await relay.close()
+      }
+    },
+  )
+
   it('reports the native code when fetch carries an AggregateError with an empty message', async () => {
     const relay = await fixture()
     const cause = Object.assign(new AggregateError([new Error('connect ECONNREFUSED ::1')], ''), { code: 'ECONNREFUSED' })
@@ -156,6 +275,7 @@ describe('screenshot transport failures', () => {
   it('retains session advice on an HTTP 503 response after rebound', async () => {
     const relay = await fixture('503')
     try {
+      await relay.joinDevice()
       await relay.lifecycle({ type: 'session:rebound', sessionId, capabilities: [] })
       await expect(relay.client.screenshot(sessionId)).rejects.toThrow('needs boot_device again')
       const result = await relay.screenshotTool()

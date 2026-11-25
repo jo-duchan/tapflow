@@ -691,8 +691,7 @@ export class TapflowClient {
    * try to fix by booting a device it believes is off. The note is what turns it into a cause — the binding
    * is gone because the agent reconnected — and names the tool that repairs it.
    */
-  private failed(sessionId: string, message: string): Error {
-    const note = this.sessionNote(sessionId)
+  private failed(sessionId: string, message: string, note = this.sessionNote(sessionId)): Error {
     return new Error(note ? `${message} — ${note}` : message)
   }
 
@@ -1513,10 +1512,21 @@ export class TapflowClient {
       const detail = cause instanceof Error ? cause.message || code || String(e) : String(cause)
       const closeDetail = this.closeDetail()
       const session = this.lifecycle.get(sessionId)
-      if (session?.terminated || session?.needsReboot) {
-        throw new EnvironmentStepError(this.failed(sessionId, `Screenshot request failed: ${detail}${closeDetail}`).message, { cause: e })
+      const held = this.held.has(sessionId)
+      // The relay releases the session on close, even if the client cannot reconnect yet.
+      let rejoin: string | undefined
+      if (!session?.terminated) {
+        rejoin = this.releasedByReconnect(sessionId)
+        if (rejoin === undefined && this.lastClose && held) {
+          rejoin = 'the relay released this session when its connection closed; call connect_device again'
+        }
       }
-      throw new TransientQueryError(this.failed(sessionId, `Screenshot request failed: ${detail}${closeDetail}`).message, { cause: e })
+      // Leaving a session keeps its lifecycle entry, including any old boot or away advice.
+      if (rejoin || session?.terminated || (held && session?.needsReboot)) {
+        throw new EnvironmentStepError(this.failed(sessionId, `Screenshot request failed: ${detail}${closeDetail}`, rejoin).message, { cause: e })
+      }
+      const message = `Screenshot request failed: ${detail}${closeDetail}`
+      throw new TransientQueryError(held ? this.failed(sessionId, message).message : message, { cause: e })
     }
     if (!res.ok) {
       // Read text first — res.json() consumes the body, so a later res.text()
