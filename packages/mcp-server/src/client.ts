@@ -1511,11 +1511,12 @@ export class TapflowClient {
       // Node can aggregate failed addresses into an error with no message but a useful code.
       const code = cause instanceof Error && 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined
       const detail = cause instanceof Error ? cause.message || code || String(e) : String(cause)
+      const closeDetail = this.closeDetail()
       const session = this.lifecycle.get(sessionId)
       if (session?.terminated || session?.needsReboot) {
-        throw new EnvironmentStepError(this.failed(sessionId, `Screenshot request failed: ${detail}`).message, { cause: e })
+        throw new EnvironmentStepError(this.failed(sessionId, `Screenshot request failed: ${detail}${closeDetail}`).message, { cause: e })
       }
-      throw new TransientQueryError(this.failed(sessionId, `Screenshot request failed: ${detail}`).message, { cause: e })
+      throw new TransientQueryError(this.failed(sessionId, `Screenshot request failed: ${detail}${closeDetail}`).message, { cause: e })
     }
     if (!res.ok) {
       // Read text first — res.json() consumes the body, so a later res.text()

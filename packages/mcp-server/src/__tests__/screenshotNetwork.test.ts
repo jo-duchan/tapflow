@@ -50,6 +50,7 @@ async function fixture(mode: 'image' | '503' | 'pending' = 'image') {
   }
   return {
     client, requested, stopHttp,
+    stopSocket() { peer?.terminate() },
     async lifecycle(message: Lifecycle) {
       if (!peer) throw new Error('Missing fixture WebSocket')
       peer.send(JSON.stringify(message))
@@ -103,6 +104,23 @@ describe('screenshot transport failures', () => {
       }
     },
   )
+
+  it('reports the relay close detail when the screenshot fetch fails after the relay socket closed', async () => {
+    const relay = await fixture()
+    try {
+      relay.stopHttp()
+      relay.stopSocket()
+      await expect.poll(() => relay.client.lastCloseCode).toBe(1006)
+      const result = await relay.screenshotTool()
+      expect(result.isError).toBe(true)
+      const text = textOf(result)
+      expect(text).toContain('ECONNREFUSED')
+      expect(text).toContain('relay closed 1006')
+      expect(text).toContain('reconnecting failed')
+    } finally {
+      await relay.close()
+    }
+  })
 
   it('reports the native code when fetch carries an AggregateError with an empty message', async () => {
     const relay = await fixture()
