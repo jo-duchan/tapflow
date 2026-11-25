@@ -284,6 +284,7 @@ describe('device:shutdown answers reach whoever asked', () => {
           type: 'device:shutdown-error', sessionId, message: 'malformed device:shutdown payload',
           ...(requestId === undefined ? {} : { requestId }),
         })
+        expect(await waitForTypeOrNull<DeviceShutdownError>(caller, 'device:shutdown-error', 0)).toBeNull()
         await barrier(holder)
         expect(await waitForTypeOrNull<DeviceShutdownError>(holder, 'device:shutdown-error', 0)).toBeNull()
         await barrier(agent)
