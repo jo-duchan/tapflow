@@ -271,6 +271,25 @@ describe('MCP Flow Capture', () => {
     expect(h.client.runReset).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps its Verify alone and typed text unechoed while that Verify runs', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    let answer!: () => void
+    h.client.lookupBuild.mockImplementationOnce(() => new Promise((r) => { answer = () => r({ kind: 'found', bundleId: 'com.app', platform: 'ios' }) }) as never)
+    const verifying = h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    // A new capture on this device would let a second Verify start beside it.
+    expect((await h.call('connect_device', { sessionId: 's1', capture: true })).isError).toBe(true)
+    const { body: typed } = await h.json('type_text', { sessionId: 's1', text: 'hunter2' })
+    expect(typed).toEqual({ typed: true, length: 7 })
+    const { body: flow } = await h.json('run_flow', { sessionId: 's1', flow: 'name: t\nsteps:\n  - inputText: hi\n' })
+    expect(String(flow['failureMessage'])).toContain('type_text')
+    answer()
+    expect(JSON.parse((await verifying).content[0]!.text!)['verified']).toBe(true)
+  })
+
   it('takes a run_flow\'s build as the capture\'s only when the block launched it', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })

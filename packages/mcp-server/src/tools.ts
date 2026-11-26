@@ -260,6 +260,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     if (capture?.expired) capture = null
     return capture
   }
+  /** Whether a capture is open on this session, recording or in its own Verify: what keeps typed text out of results. */
+  const captured = (sessionId: string): boolean => currentCapture()?.sessionId === sessionId
   /** The capture recording this session's actions now: open, on this session, and not in its own Verify. */
   const recording = (sessionId: string): AgentCaptureRecorder | null => {
     const c = currentCapture()
@@ -421,6 +423,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       try {
         const { watchUrl } = await client.connectDevice(sessionId)
         if (open) {
+          // A recorder replacing one mid-Verify would let a second capture_flow reset and replay beside it (CodeRabbit,
+          // #1248).
+          if (capture?.verifying && capture.sessionId === sessionId) {
+            return err('connect_device: a Verify of this capture is running on this device — wait for capture_flow to answer')
+          }
           // A new capture drops the one before, whatever device it was on: it holds what was typed.
           capture = null
           listen()
@@ -613,7 +620,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // A capture cannot tell whether text a flow types is a secret (it reads the field before type_text does), and a
         // flow it saves would write it as it is.
         const rec = recording(sessionId)
-        const typing = rec ? parsed.steps.findIndex((s) => s.type === 'inputText') : -1
+        // Refused while the capture verifies too: it is still open (CodeRabbit, #1248).
+        const typing = captured(sessionId) ? parsed.steps.findIndex((s) => s.type === 'inputText') : -1
         if (typing >= 0) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, typing, 'while a capture is open, type with type_text, so the capture can tell a password from plain text', { beforeRun: true })), null, 2))
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
@@ -998,7 +1006,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           return ok(JSON.stringify({ typed: true, length: [...text].length }))
         }
         await client.typeText(sessionId, text)
-        return ok(JSON.stringify({ typed: true, text }))
+        // A capture in its own Verify records nothing, and still echoes nothing (CodeRabbit, #1248).
+        return ok(JSON.stringify(captured(sessionId) ? { typed: true, length: [...text].length } : { typed: true, text }))
       } catch (e) {
         return err(`type_text failed: ${(e as Error).message}`)
       }
