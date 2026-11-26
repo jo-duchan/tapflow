@@ -1029,10 +1029,15 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      // Its wait ends 3 s after the pairing, which comes after this: at least that long from here.
+      const endedAt = Date.now()
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
       await vi.waitFor(() => expect(sent.find((m) => m.type === 'capture:touched')).toBeDefined(), { timeout: 2000 })
       // Now waiting for the verdict, polling every 50 ms.
       await vi.waitFor(() => expect(take.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 })
+      // Still well inside the wait, so the loop has another read to make: a loaded runner past it fails here rather than
+      // passing with nothing left to stop (CodeRabbit, #1247).
+      expect(Date.now() - endedAt).toBeLessThan(2_800)
       agent.disconnect()
       const after = take.mock.calls.length
       await new Promise((r) => setTimeout(r, 200))
@@ -1050,8 +1055,12 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      // Its wait ends 500 ms after the pairing starts, which is after this.
+      const endedAt = Date.now()
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
       await vi.waitFor(() => expect(take.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 })
+      // Inside the wait with a poll to spare, or the test fails rather than pass on a loop that had already ended.
+      expect(Date.now() - endedAt).toBeLessThan(400)
       agent.disconnect()
       const after = take.mock.calls.length
       await new Promise((r) => setTimeout(r, 200))
