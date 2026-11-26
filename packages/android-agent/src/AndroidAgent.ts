@@ -52,7 +52,7 @@ import {
   DeviceListWatcher,
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
-import { AdbWrapper } from './AdbWrapper.js'
+import { AdbWrapper, DumpNoXmlError } from './AdbWrapper.js'
 import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
 import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
 import { spawn } from 'child_process'
@@ -4025,6 +4025,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
+            // The relay passes the reason to its HTTP caller (a 502's body) but logs none: this is the only log line for it.
+            // Not what the device printed, which can be on-screen text: the caller has that in the reply.
+            logger.warn(`ui:tree on ${serial} failed: ${(e instanceof DumpNoXmlError ? e.logged : message).slice(0, 300)}`)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
           })
         break

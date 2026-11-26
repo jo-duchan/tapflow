@@ -186,6 +186,36 @@ describe('AdbWrapper through the field server', () => {
     }
   })
 
+  // Which request hung tells a stuck hold from a slow dump; the text it carried must not reach the log.
+  it('names the request the server did not answer, never its text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = runner(fakeServer(() => undefined))
+      const adb = new AdbWrapper(r)
+      ;(adb as unknown as { focusedServers: FocusedServers }).focusedServers = new FocusedServers({
+        spawn: r.spawnPiped!.bind(r), kill: async () => {}, answerTimeoutMs: 20,
+      })
+      await adb.setFocusedText('emulator-5554', 'hunter2')
+      const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toMatch(/no answer from the field server to 'set' in 20 ms/)
+      expect(logged).not.toMatch(/hunter2/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // A dump the server answered with an error goes the one-shot way; why it did is what a failed read needs explained.
+  it('warns with the reason a dump through the server fell back', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const server = fakeServer((op) => (op === 'dump' ? '{"error":"java.lang.IllegalStateException: already connected"}' : '{}'))
+      await new AdbWrapper(runner(server)).dumpUiHierarchy('emulator-5554').catch(() => {})
+      expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toMatch(/field server dump fell back: java\.lang\.IllegalStateException: already connected/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   // The server is asked for the dump first; these tests are about a server that cannot answer one (it says '{}'), so the
   // dump goes the one-shot way and the hold is let go of for it.
   const opsBut = (server: ReturnType<typeof fakeServer>) => server.lines.map((l) => l.split(' ')[1]).filter((op) => op !== 'dump')
