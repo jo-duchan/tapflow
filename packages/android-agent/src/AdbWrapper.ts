@@ -65,6 +65,14 @@ const PEEK_CALL_TIMEOUT_MS = 10_000
 /** The home package read (`homePackage`): one PackageManager query, which answers in tens of ms. */
 const HOME_PACKAGE_TIMEOUT_MS = 5_000
 
+/** A dump that ended with no hierarchy. Its message carries what the device printed, which can be on-screen text: fine
+ *  for the caller, who sees the screen, but `logged` is the same without it, for a log (CodeRabbit, #1242). */
+export class DumpNoXmlError extends PlatformError {
+  constructor(message: string, readonly logged: string) {
+    super(message)
+  }
+}
+
 export class AdbWrapper {
   // avdId ("avd:<name>") → ADB serial ("emulator-5554")
   private readonly serialMap = new Map<string, string>()
@@ -999,11 +1007,9 @@ export class AdbWrapper {
     const xml = hierarchyXml(output)
     if (!xml) {
       const detail = output.trim().slice(0, 200)
-      throw new PlatformError(
-        `uiautomator dump produced no XML within ${timeoutSec}s` +
-        (detail ? ` (${detail})` : '') +
-        ' — screens with continuous animation block the dump; retry on a settled screen',
-      )
+      const reason = `uiautomator dump produced no XML within ${timeoutSec}s`
+      const hint = ' — screens with continuous animation block the dump; retry on a settled screen'
+      throw new DumpNoXmlError(reason + (detail ? ` (${detail})` : '') + hint, reason + hint)
     }
     return xml
   }
