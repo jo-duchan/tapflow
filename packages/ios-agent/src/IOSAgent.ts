@@ -1663,6 +1663,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       }
       if (Date.now() >= until || this.touchWatch.get(deviceId) !== watch) return
       await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      if (this.touchWatch.get(deviceId) !== watch) return
     }
   }
 
@@ -1832,6 +1833,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       }
       if (Date.now() >= until) return
       await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      // Ended during the wait (a disconnect, a shutdown): nothing is left to read reports for, and a take now would drain
+      // them from under whoever watches the device next.
+      if (!this.touchWatch.get(deviceId)) return
       const taken = await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouchReport[])
       // Into the watch current now: a boot during the wait replaced it, and what was taken off disk is the new one's
       // (CodeRabbit, #1168). With none left, they go as they would at teardown.
