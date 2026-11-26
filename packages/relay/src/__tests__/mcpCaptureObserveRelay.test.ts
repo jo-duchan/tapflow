@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import net from 'net'
 import os from 'os'
@@ -303,6 +303,30 @@ describe('MCP capture observation through the relay', () => {
     await tap(mcp, 's3')
     await tap(mcp, 's4')
     expect(seen).toEqual([{ on: false }])
+  })
+
+  // CodeRabbit, #1243: a recorded person's boot goes observed. An MCP holder that takes the device while it runs and
+  // says `off` is put right at its ready, though it never armed; a person's own boot is left as it was sent.
+  it('puts a person\'s observed boot right at its ready only when an MCP holder said otherwise while it ran', async () => {
+    const person = await client(2)
+    await join(person, 'dashboard')
+    person.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'p1', payload: { deviceId: 'dev-1' } }))
+    expect((await waitForType<{ type: string; payload: { observed?: boolean } }>(agent, 'device:boot')).payload.observed).toBe(true)
+    const seen: Array<{ on: boolean }> = []
+    agent.on('message', (d) => { const m = JSON.parse(String(d)) as { type: string; payload: { on: boolean } }; if (m.type === 'capture:observe') seen.push(m.payload) })
+    agent.send(JSON.stringify({ type: 'device:ready', sessionId, requestId: 'p1', payload: { deviceId: 'dev-1', cold: false } }))
+    await tap(person, 's1')
+    await tap(person, 's2')
+    expect(seen).toEqual([])
+    person.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'p2', payload: { deviceId: 'dev-1' } }))
+    expect((await waitForType<{ type: string; payload: { observed?: boolean } }>(agent, 'device:boot')).payload.observed).toBe(true)
+    person.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    const mcp = await client(1)
+    await join(mcp, 'mcp')
+    await observe(mcp, false)
+    await vi.waitFor(() => expect(seen).toEqual([{ on: false }]))
+    agent.send(JSON.stringify({ type: 'device:ready', sessionId, requestId: 'p2', payload: { deviceId: 'dev-1', cold: false } }))
+    await vi.waitFor(() => expect(seen).toEqual([{ on: false }, { on: false }]))
   })
 
   // The same person back as a dashboard is not the MCP holder that armed it (CodeRabbit, #1243).

@@ -89,9 +89,9 @@ export interface Session {
    * goes (`RelayServer.disarmObserve`).
    */
   observe?: { owner: string; sent: string[] }
-  /** Whether the boot last sent to the agent went armed by an MCP holder (`observe`), read and cleared by that boot's
-   *  own `device:ready` (its `requestId`). */
-  bootArmed?: { requestId: string; armed: boolean }
+  /** The boot last sent to the agent: the `observed` it carried, and the last `capture:observe` an MCP holder's
+   *  arming sent the agent since (`said`). Read and cleared by that boot's own `device:ready` (its `requestId`). */
+  bootArmed?: { requestId: string; sent: boolean; said?: boolean }
   /** Who cold-booted the device this session drives, and when — kept after the holder leaves, since that is when
    *  it matters: it is what the per-Mac automation cap counts and shuts down (`admission/capacity.ts`). Set when
    *  the relay forwards a cold boot, undone if that boot fails or turns out warm, cleared on `shutdown-done`.

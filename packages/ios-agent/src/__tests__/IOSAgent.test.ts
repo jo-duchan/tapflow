@@ -834,6 +834,7 @@ describe('IOSAgent', () => {
     type Internals = {
       lastBundleIds: Map<string, string>
       touchWatch: Map<string, unknown>
+      observeChains: Map<string, Promise<void>>
       handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string }): void
       sendMsg(msg: { type: string }): void
     }
@@ -1078,7 +1079,10 @@ describe('IOSAgent', () => {
     // not turn app accessibility on with no restore to come.
     it('sets nothing for a capture:observe that a newer boot overtook while it waited its turn', async () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
-      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(() => new Promise((r) => setTimeout(r, 80)))
+      // o1's write is held until the newer boot is ready, so o2 can only start after it (CodeRabbit, #1243: no timers).
+      let release!: () => void
+      const held = new Promise<void>((r) => { release = r })
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementationOnce(() => held).mockResolvedValue()
       const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
       const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-b', payload: { deviceId: 'dev-1', touchObservations: true } } as never)
@@ -1088,7 +1092,8 @@ describe('IOSAgent', () => {
       await vi.waitFor(() => expect(enable).toHaveBeenCalledTimes(1), { timeout: 2000 })
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-c', payload: { deviceId: 'dev-1', touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
-      await new Promise((r) => setTimeout(r, 200))
+      release()
+      await vi.waitFor(() => expect(internals.observeChains.has('dev-1')).toBe(false), { timeout: 2000 })
       // o1 was already writing when the boot came; o2 had not started, and starts nothing.
       expect(enable).toHaveBeenCalledTimes(1)
       watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
@@ -1099,8 +1104,11 @@ describe('IOSAgent', () => {
     // CodeRabbit, #1243: the touch flag is the device's. A capture:observe that went stale while it wrote must not stop
     // the reports a newer boot's watch turned on for itself.
     it('leaves a newer boot\'s touch reports on when a capture:observe goes stale mid-write', async () => {
+      // o1's touch-flag write is held until the newer boot is ready (CodeRabbit, #1243: no timers).
       let slow = false
-      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation(() => (slow ? (slow = false, new Promise((r) => setTimeout(r, 150))) : Promise.resolve()))
+      let release!: () => void
+      const held = new Promise<void>((r) => { release = r })
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation(() => (slow ? (slow = false, held) : Promise.resolve()))
       const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
       const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockResolvedValue()
       const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
@@ -1113,7 +1121,11 @@ describe('IOSAgent', () => {
       stop.mockClear()
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-c', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
-      await new Promise((r) => setTimeout(r, 250))
+      const newer = internals.touchWatch.get('dev-1')
+      expect(newer).toBeDefined()
+      release()
+      await vi.waitFor(() => expect(internals.observeChains.has('dev-1')).toBe(false), { timeout: 2000 })
+      expect(internals.touchWatch.get('dev-1')).toBe(newer)
       expect(internals.touchWatch.has('dev-1')).toBe(true)
       expect(stop.mock.calls.filter(([id]) => id === 'dev-1').length).toBe(0)
       watch.mockRestore(); stop.mockRestore(); enable.mockRestore(); restore.mockRestore()

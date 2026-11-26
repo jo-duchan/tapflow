@@ -332,9 +332,12 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   (`Session.observe`, the newest 64) and passes each one's `capture:touched`/`capture:landed` back to it as
   `capture:observation`, and nothing else: a touch another holder sent, or one sent before arming, is passed to nobody.
   An arming ends with its holder's socket: a client that reconnects and joins again must arm again, and until it does
-  nothing is passed back. A boot sets observation by the arming when it was sent, so a change while it runs (an `off`
-  from a holder that left, an `on` sent after it) is put right once at its own `device:ready` (`bootArmed` carries the boot's `requestId`, set where the boot is sent to
-  the agent: an earlier boot's late ready, or a boot refused before it went, must not stand in for it). A client checks the relay's
+  nothing is passed back. A boot sets observation by the `observed` it was sent, so an MCP holder's word while it runs (an
+  `off` from a holder that left or never armed, an `on` sent after it) is put right once at that boot's own `device:ready`
+  (`bootArmed`: the boot's `requestId`, what it was sent, and the last `capture:observe` sent since; set where the boot
+  goes to the agent, so an earlier boot's late ready or a refused boot cannot stand in for it). A person's observation is
+  left as their boot decided: judging it at the ready by whether they record would turn it off under a Verify's pause,
+  with nothing to turn it back on. A client checks the relay's
   `capture-observe` feature as well as the agent's capability: an older relay drops the request unanswered while still
   passing the capability through. None of it is kept. An observation carries no typed value (an input is named by its identifier only), so this does
   not reopen what the cookie-only capture routes keep from a PAT.

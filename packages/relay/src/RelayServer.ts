@@ -1967,14 +1967,16 @@ export class RelayServer {
         this.sessions.setReadySent(session.id, true)
         // Again on every ready: an agent that restarted has lost the watch, and one that did not changes nothing.
         this.syncAppLogWatch(session, { resend: true })
-        // A boot sets observation by the arming when it was sent, after any `capture:observe` that reached the agent while
-        // it ran: an `off` from a holder that left mid-boot, or an `on` sent after the boot. Put right once (pre-PR review).
-        // Only that boot's own ready reads its snapshot.
-        const armedAtBoot = session.bootArmed && session.bootArmed.requestId === msg.requestId ? session.bootArmed.armed : undefined
-        if (armedAtBoot !== undefined && armedAtBoot !== this.mcpArmed(session) && hasCapability(session.agentCapabilities, 'capture-observe')) {
-          this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: this.mcpArmed(session) } })
+        // A boot sets observation by what it was sent, after any `capture:observe` that reached the agent while it ran: an
+        // `off` from a holder that left mid-boot, an `on` sent after the boot. Put right once, to the last of those (pre-PR
+        // review). Only that boot's own ready reads its snapshot, and only an MCP holder's word moves it: a person's
+        // observation is the boot's decision, and a Verify's pause would otherwise turn it off with nothing to turn it
+        // back on (CodeRabbit, #1243).
+        const atBoot = session.bootArmed && session.bootArmed.requestId === msg.requestId ? session.bootArmed : undefined
+        if (atBoot?.said !== undefined && atBoot.said !== atBoot.sent && hasCapability(session.agentCapabilities, 'capture-observe')) {
+          this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: atBoot.said } })
         }
-        if (armedAtBoot !== undefined) session.bootArmed = undefined
+        if (atBoot) session.bootArmed = undefined
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
@@ -2288,7 +2290,10 @@ export class RelayServer {
         } else {
           session.observe = undefined
         }
-        if (observing) session.agentSocket.send(JSON.stringify(msg))
+        if (observing) {
+          session.agentSocket.send(JSON.stringify(msg))
+          if (session.bootArmed) session.bootArmed.said = msg.payload.on
+        }
         this.sendTo(ws, { type: 'capture:observe-done', sessionId: msg.sessionId, requestId: msg.requestId, observing })
         break
       }
@@ -2587,11 +2592,11 @@ export class RelayServer {
     this.sessions.noteBootSent(msg.sessionId)
     // `=== 'full-erase'`, never truthy: the dashboard sends `app-only` on every boot, which erases nothing.
     if (msg.payload.resetMode === 'full-erase' || msg.payload.runReset) this.forgetInstall(boot.session, 'The device is being reset')
-    // What this boot will set, so its own ready — by `requestId`, not an earlier boot's late one — can put right an
-    // arming that changed while it ran (`device:ready`). Here, where the boot goes: one refused never reaches the agent
-    // and must not replace the snapshot of one that did (CodeRabbit, #1243). An MCP holder's boot is automation, so it
-    // goes the moment it is admitted, with the `observed` `handleBoot` just set.
-    boot.session.bootArmed = { requestId: msg.requestId, armed: this.mcpArmed(boot.session) }
+    // What this boot will set — the `observed` it carries, a person's recording included — so its own ready, by
+    // `requestId` and not an earlier boot's late one, can put right an MCP arming that changed while it ran
+    // (`device:ready`). Here, where the boot goes: one refused never reaches the agent and must not replace the snapshot
+    // of one that did (CodeRabbit, #1243).
+    boot.session.bootArmed = { requestId: msg.requestId, sent: (msg.payload as Record<string, unknown>)['observed'] === true }
     // The parse product, so a key a viewer appended from devtools is gone before the agent sees it.
     boot.session.agentSocket.send(JSON.stringify(msg))
   }
@@ -4355,6 +4360,7 @@ export class RelayServer {
     session.observe = undefined
     if (hasCapability(session.agentCapabilities, 'capture-observe') && session.agentSocket.readyState === WebSocket.OPEN) {
       this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: false } })
+      if (session.bootArmed) session.bootArmed.said = false
     }
   }
 
