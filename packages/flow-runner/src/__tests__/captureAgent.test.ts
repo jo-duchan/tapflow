@@ -118,6 +118,20 @@ describe('agentSteps', () => {
     expect(r.flow.notes).toContain('Not named by an element whose name holds a typed secret: #3')
   })
 
+  it('keeps a secret a secret when it is typed again into a plain field (CodeRabbit, #1244)', () => {
+    const steps = agentSteps(capture([
+      { kind: 'launch', at: 0 },
+      { kind: 'type', at: 1, text: 'tok-123', field: { secure: true } },
+      { kind: 'type', at: 2, text: 'tok-123', field: { secure: false } },
+      { kind: 'type', at: 3, text: 'jane', field: { secure: false } },
+    ]))
+    expect(steps.slice(1).map((s) => s.step?.type ?? null)).toEqual([null, null, 'inputText'])
+    const r = agentFlow(steps, { name: 'retype' })
+    if (!r.ok) throw new Error(JSON.stringify(r.refusals))
+    expect(r.flow.yaml).not.toContain('tok-123')
+    expect(r.flow.yaml).toContain('jane')
+  })
+
   it('keeps typing with a Tab or a Return in it a secret: it may have moved to the next field', () => {
     const steps = agentSteps(capture([
       { kind: 'type', at: 1, text: 'a@b.c\thunter2', field: { secure: false } },

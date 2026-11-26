@@ -196,7 +196,9 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
         })
         break
       case 'type': {
-        const plain = writable(a)
+        // Text typed as a secret elsewhere stays one here: a password shown and typed again into a plain field
+        // (CodeRabbit, #1244).
+        const plain = writable(a) && !mentionsSecret(a.text, secrets)
         out.push({
           raw: raw(a.at), origin: 'agent', ...common,
           step: plain ? { type: 'inputText', text: a.text } : null,
