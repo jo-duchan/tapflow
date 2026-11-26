@@ -643,8 +643,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         })
         if (rec) {
           rec.take()
-          if (buildId !== undefined) rec.buildId = buildId
           const passed = result.steps.findIndex((s) => s.status !== 'passed')
+          // The build is the capture's only once this block launched it: a tap-only block naming another changes nothing
+          // the device runs (CodeRabbit, #1248).
+          const launched = parsed.steps.slice(0, passed < 0 ? undefined : passed).some((st) => st.type === 'launchApp')
+          if (buildId !== undefined && launched) rec.buildId = buildId
           rec.addBlock({
             kind: 'flow', at: blockAt, steps: parsed.steps, passed: passed < 0 ? parsed.steps.length : passed,
             source: { ...(flowPath !== undefined ? { path: flowPath } : {}), hash: createHash('sha256').update(yamlText).digest('hex').slice(0, 12) },
@@ -713,6 +716,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       const c = currentCapture()
       if (!c) return err('capture_flow: no capture is open — connect_device with capture: true, then use the device')
       if (c.verifying) return err('capture_flow: a Verify of this capture is already running')
+      // Taken before the first await, and given back on every way out: a second call in between would reset and replay
+      // beside this one (CodeRabbit, #1248). Nothing the agent does meanwhile is recorded, nor anything the Verify sends.
+      c.verifying = true
       try {
         const platform = await platformOf(client, sessionId)
         if (c.platform !== undefined && platform !== undefined && platform !== c.platform) {
@@ -738,23 +744,19 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         if (c.buildId === undefined && made.flow.steps.some((st) => st.type === 'launchApp')) {
           return err('capture_flow: the flow launches the app, and no build was launched while capturing — launch it with launch_app first, so Verify knows which')
         }
-        c.attempts++
-        // The Verify's own inputs are not the agent's: nothing it sends is recorded or paired (R-E).
-        c.verifying = true
-        let reset: Awaited<ReturnType<typeof client.runReset>>
-        let result: FlowResult
-        try {
-          reset = await client.runReset(sessionId, appId ? [appId] : [])
-          if (reset === undefined && appId) await client.clearState(sessionId, appId)
-          result = await runFlow(
-            { name, ...(appId ? { appId } : {}), ...(made.flow.viewport ? { viewport: made.flow.viewport } : {}), steps: made.flow.steps },
-            makeFlowDriver(client, sessionId, c.buildId),
-            { secrets: made.flow.secrets, ...(platform !== undefined ? { platform } : {}) },
-          )
-        } finally {
-          c.take()
-          c.verifying = false
+        const reset = await client.runReset(sessionId, appId ? [appId] : [])
+        // A reset that left something (Android's `pm clear` timing out reports `app-data` failed) may leave a sign-in a
+        // replay passes on: not a start a CI run gets (CodeRabbit, #1248).
+        if (reset?.failed.length) {
+          return err(`capture_flow: the device's reset failed for ${reset.failed.join(', ')}, so the flow was not verified — try again, or reboot the device`)
         }
+        if (reset === undefined && appId) await client.clearState(sessionId, appId)
+        c.attempts++
+        const result = await runFlow(
+          { name, ...(appId ? { appId } : {}), ...(made.flow.viewport ? { viewport: made.flow.viewport } : {}), steps: made.flow.steps },
+          makeFlowDriver(client, sessionId, c.buildId),
+          { secrets: made.flow.secrets, ...(platform !== undefined ? { platform } : {}) },
+        )
         const resetNote = reset ? {} : { resetNote: appId ? 'The device\'s agent cannot reset it as a run does: only the app\'s data was cleared.' : 'The device\'s agent cannot reset it as a run does, and nothing was reset.' }
         if (result.status === 'passed') {
           return ok(JSON.stringify({ verified: true, attempt: c.attempts, ...resetNote, notes: made.flow.notes, yaml: made.flow.yaml }))
@@ -771,6 +773,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         }))
       } catch (e) {
         return err(`capture_flow failed: ${(e as Error).message}`)
+      } finally {
+        c.take()
+        c.verifying = false
       }
     },
   )

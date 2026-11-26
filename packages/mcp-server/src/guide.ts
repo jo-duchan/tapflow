@@ -83,7 +83,7 @@ Rotation, dark mode, font size, locale and RTL, network loss or throttling, push
 - Selectors: id first, then exact label, then { role, index }. No coordinates.
 - Wait with assertVisible (add timeout for a slow step), never a pause. End on an assertion about the outcome, and assertNotVisible for what should be gone (spinner, error).
 - One flow per scenario: the happy path, and one per important negative case.
-- Or capture it: connect_device with capture: true, do the path with tap and type_text, then list_captured_steps and capture_flow, which returns the YAML only after it replays passing on a reset device. A password typed there stays a secret.
+- Or capture it: connect_device with capture: true, launch_app, do the path with tap and type_text, then list_captured_steps and capture_flow, which returns the YAML only after it replays passing on a reset device. A password typed there stays a secret.
 - Replay it twice and keep it only if both pass. If it fails, fix the selector or the wait, or report the instability. Never loosen an assertion to make it pass.
 - For a failed CI run, list_runs then get_run: it separates app failures from environment ones and suggests selectors.
 

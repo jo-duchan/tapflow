@@ -249,6 +249,37 @@ describe('MCP Flow Capture', () => {
     expect(body['notes']).toContainEqual(expect.stringContaining('1 input was not confirmed'))
   })
 
+  it('does not verify on a device whose reset failed, and runs one Verify at a time', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    h.client.runReset.mockResolvedValueOnce({ done: [], failed: ['app-data'] } as never)
+    const failed = await h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    expect(failed.isError).toBe(true)
+    expect(failed.content[0]!.text).toContain('app-data')
+    expect(h.client.launchApp).toHaveBeenCalledTimes(1)
+    // A second call while the first is still looking its build up is refused, and the first goes on.
+    let answer!: () => void
+    h.client.lookupBuild.mockImplementationOnce(() => new Promise((r) => { answer = () => r({ kind: 'found', bundleId: 'com.app', platform: 'ios' }) }) as never)
+    const first = h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    const second = await h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    expect(second.content[0]!.text).toContain('already running')
+    answer()
+    expect(JSON.parse((await first).content[0]!.text!)['verified']).toBe(true)
+    expect(h.client.runReset).toHaveBeenCalledTimes(2)
+  })
+
+  it('takes a run_flow\'s build as the capture\'s only when the block launched it', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await h.call('run_flow', { sessionId: 's1', flow: 'name: t\nsteps:\n  - tapOn: { id: login }\n', buildId: 8, install: false })
+    await h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    expect(h.client.lookupBuild).toHaveBeenLastCalledWith(7)
+  })
+
   it('lists a tap whose landing could not be confirmed, and says so', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })
