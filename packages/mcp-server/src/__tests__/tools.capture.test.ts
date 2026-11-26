@@ -218,7 +218,7 @@ describe('MCP Flow Capture', () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })
     await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
-    expect((await h.json('list_captured_steps')).body['notes']).toContainEqual(expect.stringContaining('No launch was captured'))
+    expect((await h.json('list_captured_steps')).body['notes']).toContainEqual(expect.stringContaining('No build was launched'))
     // A flow always begins with a launch, and Verify would not know which build.
     const none = await h.call('capture_flow', { sessionId: 's1', name: 'l' })
     expect(none.isError).toBe(true)
@@ -233,6 +233,20 @@ describe('MCP Flow Capture', () => {
     expect(res.isError).toBe(true)
     expect(res.content[0]!.text).toContain('relay unreachable')
     for (const c of [h, unknown]) expect(c.client.runReset).not.toHaveBeenCalled()
+  })
+
+  it('lists an element tap whose landing could not be confirmed, by the element', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    const sent = h.client.tap.getMockImplementation()!
+    h.client.tap.mockImplementationOnce(async (s: string) => {
+      await sent(s)
+      throw new Error('Could not confirm the input reached the device')
+    })
+    expect((await h.call('tap', { sessionId: 's1', element: { id: 'login' } })).isError).toBe(true)
+    const { body } = await h.json('list_captured_steps')
+    expect((body as unknown as Listed).steps.map((st) => st.step)).toEqual([{ type: 'tapOn', selector: { id: 'login' } }])
+    expect(body['notes']).toContainEqual(expect.stringContaining('1 input was not confirmed'))
   })
 
   it('lists a tap whose landing could not be confirmed, and says so', async () => {

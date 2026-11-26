@@ -149,14 +149,13 @@ export function recordingDriver(base: FlowDriver, rec: AgentCaptureRecorder, tou
     tap: async (x, y) => {
       const at = Date.now()
       rec.take()
-      await base.tap(x, y)
-      touched([x, y], at)
+      // Kept when the ack fails too: the touch left, and may have landed.
+      try { await base.tap(x, y) } finally { touched([x, y], at) }
     },
     longPress: async (x, y, durationMs) => {
       const at = Date.now()
       rec.take()
-      await base.longPress(x, y, durationMs)
-      touched([x, y], at, durationMs)
+      try { await base.longPress(x, y, durationMs) } finally { touched([x, y], at, durationMs) }
     },
   }
 }

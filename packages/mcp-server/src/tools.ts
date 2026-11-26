@@ -686,7 +686,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       const steps = agentSteps(c)
       const notes: string[] = []
       if (!c.observing) notes.push('Touches were not observed on this device: taps by coordinates are named by the tree before them, or kept as points.')
-      if (!steps.some((s) => s.step?.type === 'launchApp')) notes.push('No launch was captured: Verify resets the device and launches nothing, so launch the app with launch_app (or run_flow with buildId) before the steps.')
+      if (!steps.some((s) => s.step?.type === 'launchApp')) notes.push('No build was launched while capturing: every flow begins by launching the app, so capture_flow refuses until you launch it with launch_app (or run_flow with buildId).')
       if (c.launchOptions) notes.push('The app was launched with arguments, which a flow\'s launchApp does not carry.')
       if (c.unconfirmed) notes.push(`${c.unconfirmed} input${c.unconfirmed === 1 ? ' was' : 's were'} not confirmed and may not have landed; they are listed, and Verify shows whether they belong.`)
       if (c.failedBefore.size) notes.push(`Failed in an earlier Verify: ${[...c.failedBefore].sort((a, b) => a - b).map((k) => `#${k}`).join(', ')}`)
@@ -853,9 +853,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       if (x === undefined || y === undefined || screenshotWidth === undefined || screenshotHeight === undefined) {
         return err('tap needs an element, or x, y, screenshotWidth and screenshotHeight')
       }
+      const at = Date.now()
       try {
         const rec = recording(sessionId)
-        const at = Date.now()
         rec?.take()
         if (holdMs !== undefined) await client.longPress(sessionId, x / screenshotWidth, y / screenshotHeight, holdMs)
         else await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
@@ -865,7 +865,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // Its touch-end left, so it may have landed: kept, as the device may show it (`could not confirm`).
         const rec = recording(sessionId)
         const ends = rec?.take() ?? []
-        if (rec && ends.length) rec.addUnconfirmed({ kind: 'tap', at: Date.now(), point: rec.appPoint(x / screenshotWidth, y / screenshotHeight), ...(holdMs !== undefined ? { holdMs } : {}) }, ends)
+        if (rec && ends.length) rec.addUnconfirmed({ kind: 'tap', at, point: rec.appPoint(x / screenshotWidth, y / screenshotHeight), ...(holdMs !== undefined ? { holdMs } : {}) }, ends)
         return err(`tap failed: ${(e as Error).message}`)
       }
     },
@@ -888,9 +888,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       const done = result.steps[0]
       // The element as the agent named it, without the wait this tool added: the flow's own step waits as any does.
       const said = flow.steps[0]
-      if (rec && touch.last && done?.status === 'passed' && said && (said.type === 'tapOn' || said.type === 'longPressOn')) {
+      if (rec && touch.last && touch.ends?.length && said && (said.type === 'tapOn' || said.type === 'longPressOn')) {
         const { timeoutMs: _wait, ...selector } = said.selector
-        rec.add({ ...touch.last, selector }, touch.ends)
+        // A touch that left but was not confirmed may have landed, as a point tap's (below).
+        if (done?.status === 'passed') rec.add({ ...touch.last, selector }, touch.ends)
+        else rec.addUnconfirmed({ ...touch.last, selector }, touch.ends)
       }
       if (!done || done.status !== 'passed') {
         // What `run_flow` reports of the same failure: whose it was, and the screen it failed on.
@@ -928,9 +930,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       },
     },
     async ({ sessionId, startX, startY, endX, endY, screenshotWidth, screenshotHeight, durationMs }) => {
+      const at = Date.now()
       try {
         const rec = recording(sessionId)
-        const at = Date.now()
         rec?.take()
         await client.swipe(
           sessionId,
@@ -950,7 +952,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         const ends = rec?.take() ?? []
         if (rec && ends.length) {
           rec.addUnconfirmed({
-            kind: 'swipe', at: Date.now(), durationMs: durationMs ?? 300,
+            kind: 'swipe', at, durationMs: durationMs ?? 300,
             from: rec.appPoint(startX / screenshotWidth, startY / screenshotHeight), to: rec.appPoint(endX / screenshotWidth, endY / screenshotHeight),
           }, ends)
         }
