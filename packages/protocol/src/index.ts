@@ -800,6 +800,57 @@ export interface DeviceRunResetError extends SessionScoped {
 export type DeviceRunResetReply = DeviceRunResetDone | DeviceRunResetError
 export type DeviceRunResetReplyBody<T = DeviceRunResetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
 
+/**
+ * Turn record-time touch observation on or off for the session's device, without a boot (MCP Flow Capture, L6a). The
+ * boot's `observed` arms it for a person Flow Capture records; an MCP client capturing its own steps arms it with this,
+ * since a device it picks up may be running already and get no boot. Browser → relay → agent, unchanged: only the
+ * session's holder, and only an `mcp` one, and forwarded only to an agent naming `capture-observe`. The relay also
+ * originates it — `on` again when the agent comes back, `off` when the holder goes — since app accessibility stays on
+ * the device. The agent does not answer it; the relay answers the client (`capture:observe-done`).
+ *
+ * One interface for both legs, with `requestId` required, unlike `device:shutdown` (protocol AGENTS.md: a request the
+ * relay originates rules out a required correlator). Here no reply exists on the agent leg at all, so the id the relay
+ * mints for its own on and off is read by nobody and cannot be mistaken for anyone's answer; the client leg is the
+ * correlated one.
+ */
+export interface CaptureObserve {
+  type: 'capture:observe'
+  sessionId: string
+  requestId: string
+  payload: { on: boolean }
+}
+
+/** Relay → the client that sent `capture:observe`: `observing` is whether the device's agent takes it. `false` is not
+ *  a refusal: the capture goes on, and its coordinate touches are named by nothing but their points. */
+export interface CaptureObserveDone {
+  type: 'capture:observe-done'
+  sessionId: string
+  requestId: string
+  observing: boolean
+}
+
+/** Refused: the session is not there, its agent is away, the sender does not hold it or holds it as something other
+ *  than an MCP client, or the request was malformed. An `off` from the holder is still kept when its agent is away. */
+export interface CaptureObserveError extends SessionScoped {
+  type: 'capture:observe-error'
+  message: string
+  requestId: string
+}
+
+/**
+ * Relay → the MCP client that armed observation: what the agent observed for a touch **that client sent**
+ * (`requestId` is its own `input:touch:end`'s or `input:pinch:end`'s). The relay keeps none of it: a touch another
+ * holder sent, or one sent while the client was away, is never passed on. Exactly one of `touched` and `landed`, as the
+ * agent sent them (`CaptureTouched`, `CaptureLanded`); neither carries what was typed.
+ */
+export interface CaptureObservation {
+  type: 'capture:observation'
+  sessionId: string
+  requestId: string
+  touched?: TouchObservation
+  landed?: TouchLanding
+}
+
 export type RelayToAgent =
   | AgentRegistered
   | AgentDevicesApplied
@@ -816,6 +867,7 @@ export type RelayToAgent =
   | UiKeyboardRequest
   | DeviceKeyboardSet
   | DeviceRunReset
+  | CaptureObserve
   | AppLogsWatch
   | AppLogsUnwatch
 
@@ -1457,8 +1509,10 @@ export interface AgentsListed {
 
 /** Values of `AgentsListed.features`. A client meeting one it does not know ignores it.
  *  `'launch-options'`: `app:launch` carries `arguments` and `env` through. An older relay's validator strips both and
- *  still answers `app:launch-done`, so a client checks this before sending either. */
-export type RelayFeature = 'device-lease' | 'launch-options'
+ *  still answers `app:launch-done`, so a client checks this before sending either.
+ *  `'capture-observe'`: the relay takes `capture:observe` (L6a). An older one drops it unanswered while still passing an
+ *  agent's `capture-observe` capability through, so a client needs both before it sends one. */
+export type RelayFeature = 'device-lease' | 'launch-options' | 'capture-observe'
 
 export interface SessionJoined {
   type: 'session:joined'
@@ -1737,6 +1791,9 @@ export type RelayToBrowser =
   | WatchHolderLeft
   | WatchEnded
   | WatchAction
+  | CaptureObserveDone
+  | CaptureObserveError
+  | CaptureObservation
 
 export interface DeviceBooting {
   type: 'device:booting'
@@ -2720,6 +2777,7 @@ export type BrowserToRelay =
   | AppClearState
   | DeviceKeyboardSet
   | DeviceRunReset
+  | CaptureObserve
   | OpenUrl
   | InputTouchStart
   | InputTouchMove

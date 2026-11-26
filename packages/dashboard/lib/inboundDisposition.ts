@@ -156,4 +156,7 @@ export const INBOUND_DISPOSITION = {
   'watch:holder-left': { at: 'useWatchSession' },
   'watch:ended': { at: 'useWatchSession' },
   'watch:action': { at: 'useWatchSession' },
+  'capture:observe-done': { ignored: 'Answers `capture:observe`, which only an MCP client may send (L6a); a person is observed by the boot.' },
+  'capture:observe-error': { ignored: 'Answers `capture:observe`, which only an MCP client may send (L6a).' },
+  'capture:observation': { ignored: 'Sent only to an MCP holder that armed observation (L6a), never to a dashboard.' },
 } satisfies Record<BrowserInbound['type'], Disposition>

@@ -138,4 +138,7 @@ export const INBOUND_DISPOSITION = {
   'watch:holder-left': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:ended': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:action': { ignored: 'Sent only to a watching socket; this client never watches.' },
+  'capture:observe-done': { ignored: 'Not asked yet: the capture tools that send `capture:observe` come with MCP Flow Capture (L6a).' },
+  'capture:observe-error': { ignored: 'Not asked yet: the capture tools that send `capture:observe` come with MCP Flow Capture (L6a).' },
+  'capture:observation': { ignored: 'Sent only after `capture:observe`, which this client does not send yet (L6a).' },
 } satisfies Record<BrowserInbound['type'], Disposition>

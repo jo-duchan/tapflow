@@ -65,7 +65,7 @@ import type {
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
   SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, CaptureLanded, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
-  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
+  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError, CaptureObserve,
   WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
@@ -232,6 +232,10 @@ const BROWSER_INBOUND = {
   'device:run-reset': z.object({
     type: z.literal('device:run-reset'), sessionId, requestId,
     payload: z.object({ apps: appIds }),
+  }),
+  'capture:observe': z.object({
+    type: z.literal('capture:observe'), sessionId, requestId,
+    payload: z.object({ on: z.boolean() }),
   }),
   'open-url': z.object({
     type: z.literal('open-url'), sessionId, requestId, payload: z.object({ url: z.string() }),
@@ -542,6 +546,7 @@ const ANSWERABLE = {
   'app:clear-state': envC('app:clear-state'),
   'device:keyboard-set': envC('device:keyboard-set'),
   'device:run-reset': envC('device:run-reset'),
+  'capture:observe': envC('capture:observe'),
   'open-url': envC('open-url'),
   'input:touch:end': envC('input:touch:end'),
   'input:pinch:end': envC('input:pinch:end'),
@@ -729,6 +734,7 @@ type _AppLaunch = Assert<V<'app:launch', AppLaunchToRelay>>
 type _AppClearState = Assert<V<'app:clear-state', AppClearState>>
 type _DeviceKeyboardSet = Assert<V<'device:keyboard-set', DeviceKeyboardSet>>
 type _DeviceRunReset = Assert<V<'device:run-reset', DeviceRunReset>>
+type _CaptureObserve = Assert<V<'capture:observe', CaptureObserve>>
 type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>

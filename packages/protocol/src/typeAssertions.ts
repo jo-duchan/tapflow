@@ -24,6 +24,7 @@ import type {
   StreamRegistered, StreamRequestIdr, UiTreeError, UiTreeRequest, UiTreeResponse, UiReachRequest, UiReachResponse, UiFieldRequest, UiFieldResponse, CaptureTouched, CaptureLanded, DeviceKeyboardReset,
   UiKeyboardRequest, UiKeyboardResponse, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
   DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
+  CaptureObserve, CaptureObserveDone, CaptureObserveError, CaptureObservation,
   NetworkRequestState,
   InputPosture, DevicePostures,
   WatchStart, WatchStop, WatchStarted, WatchRefused, WatchHolderLeft, WatchEnded, WatchAction, SessionActivity,
@@ -231,6 +232,10 @@ export const _DeviceKeyboardSetError: DeviceKeyboardSetError['type'] = 'device:k
 export const _DeviceRunReset: DeviceRunReset['type'] = 'device:run-reset'
 export const _DeviceRunResetDone: DeviceRunResetDone['type'] = 'device:run-reset-done'
 export const _DeviceRunResetError: DeviceRunResetError['type'] = 'device:run-reset-error'
+export const _CaptureObserve: CaptureObserve['type'] = 'capture:observe'
+export const _CaptureObserveDone: CaptureObserveDone['type'] = 'capture:observe-done'
+export const _CaptureObserveError: CaptureObserveError['type'] = 'capture:observe-error'
+export const _CaptureObservation: CaptureObservation['type'] = 'capture:observation'
 export const _AgentRegister: AgentRegister['type'] = 'agent:register'
 export const _AgentDevices: AgentDevices['type'] = 'agent:devices'
 export const _AgentResourceReport: AgentResourceReport['type'] = 'agent:resources'

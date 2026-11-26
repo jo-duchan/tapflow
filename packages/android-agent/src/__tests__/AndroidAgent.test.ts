@@ -2840,6 +2840,28 @@ describe('AndroidAgent', () => {
         expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
       })
 
+      // MCP Flow Capture (L6a): a running device gets no boot, so `capture:observe` arms it; arming again keeps the
+      // watch (a gesture in flight keeps its report), and off lets go of the connection.
+      it('arms observation on a booted device with capture:observe, keeps it when armed again, and disarms it', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        expect(hold).not.toHaveBeenCalled()
+        const watches = () => (agent as unknown as { touchWatches: Map<string, unknown> }).touchWatches
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        const armed = watches().get('avd:Pixel_8_API_34')
+        expect(armed).toBeDefined()
+        inject({ type: 'capture:observe', requestId: 'o2', payload: { on: true } })
+        expect(watches().get('avd:Pixel_8_API_34')).toBe(armed)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        inject({ type: 'capture:observe', requestId: 'o3', payload: { on: false } })
+        expect(watches().has('avd:Pixel_8_API_34')).toBe(false)
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
       // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
       it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
         const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
