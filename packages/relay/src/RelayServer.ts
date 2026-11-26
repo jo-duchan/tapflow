@@ -2592,6 +2592,9 @@ export class RelayServer {
     this.sessions.noteBootSent(msg.sessionId)
     // `=== 'full-erase'`, never truthy: the dashboard sends `app-only` on every boot, which erases nothing.
     if (msg.payload.resetMode === 'full-erase' || msg.payload.runReset) this.forgetInstall(boot.session, 'The device is being reset')
+    // A person's boot that waited at the gate goes to whoever holds the device now: an MCP holder that took it meanwhile
+    // decides by its own arming, not by the recording the boot was received under (CodeRabbit, #1243).
+    if (boot.session.holderKind === 'mcp') (msg.payload as Record<string, unknown>)['observed'] = this.mcpArmed(boot.session)
     // What this boot will set — the `observed` it carries, a person's recording included — so its own ready, by
     // `requestId` and not an earlier boot's late one, can put right an MCP arming that changed while it ran
     // (`device:ready`). Here, where the boot goes: one refused never reaches the agent and must not replace the snapshot

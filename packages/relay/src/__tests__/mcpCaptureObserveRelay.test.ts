@@ -329,6 +329,36 @@ describe('MCP capture observation through the relay', () => {
     await vi.waitFor(() => expect(seen).toEqual([{ on: false }, { on: false }]))
   })
 
+  // CodeRabbit, #1243: a person's boot waiting at the gate is sent later, to whoever holds the device then. The same
+  // person taking it over MCP and saying `off` meanwhile must not be overridden by the recording it was received under.
+  it('sends a waiting person\'s boot observed by the MCP holder that took the device meanwhile', async () => {
+    const mac = new WebSocket(`ws://localhost:${relayPort}`)
+    open.push(mac)
+    await waitForOpen(mac)
+    mac.send(JSON.stringify({
+      type: 'agent:register', agentId: `mac-${seq}`, platform: 'ios', agentName: `gate-agent-${seq}`, capabilities: ['capture-observe'],
+      devices: [{ id: 'dev-1', name: 'iPhone 17 Pro', platform: 'ios', status: 'shutdown' }],
+    }))
+    sessionId = (await waitForType<AgentRegistered>(mac, 'agent:registered')).registeredSessions[0]!.sessionId
+    const resources = (memoryPressure?: string) => JSON.stringify({
+      type: 'agent:resources',
+      resources: { cpuPercent: 40, memUsedMB: 4000, memTotalMB: 16000, slotsAvailable: 1, slotsTotal: 2, reportedAt: Date.now(), memoryPressure },
+    })
+    mac.send(resources('critical'))
+    const person = await client(1)
+    await join(person, 'dashboard')
+    const waiting = waitForType(person, 'device:boot-waiting')
+    person.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'p1', payload: { deviceId: 'dev-1' } }))
+    await waiting
+    const mcp = await client(1)
+    await join(mcp, 'mcp')
+    await observe(mcp, false)
+    await waitForType(mac, 'capture:observe')
+    const sent = waitForType<{ type: string; requestId: string; payload: { observed?: boolean } }>(mac, 'device:boot')
+    mac.send(resources('normal'))
+    expect(await sent).toMatchObject({ requestId: 'p1', payload: { observed: false } })
+  })
+
   // The same person back as a dashboard is not the MCP holder that armed it (CodeRabbit, #1243).
   it('turns observation off when the armed holder comes back as another kind of client, and passes it nothing', async () => {
     const mcp = await client(1)
