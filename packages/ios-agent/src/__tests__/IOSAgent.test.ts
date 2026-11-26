@@ -1019,28 +1019,37 @@ describe('IOSAgent', () => {
 
     // A paired touch waits up to 3 s for its verdict, reading the app's reports as it goes. An agent that disconnected in
     // that wait read once more after it, and drained reports meant for whoever watched the device next — which is how
-    // the next test here lost its report on a loaded CI runner (main, ff03922d).
+    // the next test here lost its report on a loaded CI runner (main, ff03922d). The wait's sleep is held, so the watch
+    // ends inside it whatever the runner's speed, and the loop's next step is awaited rather than given time (CodeRabbit,
+    // #1247).
+    const heldSleeps = () => {
+      const pending: Array<() => void> = []
+      return { pending, touchPollSleep: () => new Promise<void>((r) => { pending.push(r) }) }
+    }
+    const wake = async (pending: Array<() => void>) => {
+      for (const r of pending.splice(0)) r()
+      // The loop's step after its sleep is a check and a call, in the microtasks this lets run.
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+    }
+
     it('reads no touch reports after its watch ended, though a verdict was still awaited', async () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
       const reports = [{ seq: 1, at: Date.now(), bundle: 'com.app', observation: { point: { x: 0.41, y: 0.52 }, moving: false } }]
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockImplementation(async () => reports.splice(0).map((r) => ({ ...r, at: Date.now() })))
-      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const sleeps = heldSleeps()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { touchPollSleep: sleeps.touchPollSleep })
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-r', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
-      // Its wait ends 3 s after the pairing, which comes after this: at least that long from here.
-      const endedAt = Date.now()
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g1' } as never)
       await vi.waitFor(() => expect(sent.find((m) => m.type === 'capture:touched')).toBeDefined(), { timeout: 2000 })
-      // Now waiting for the verdict, polling every 50 ms.
-      await vi.waitFor(() => expect(take.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 })
-      // Still well inside the wait, so the loop has another read to make: a loaded runner past it fails here rather than
-      // passing with nothing left to stop (CodeRabbit, #1247).
-      expect(Date.now() - endedAt).toBeLessThan(2_800)
+      // Paired at the first read, so this sleep is the verdict's wait.
+      await vi.waitFor(() => expect(sleeps.pending.length).toBeGreaterThan(0), { timeout: 2000 })
       agent.disconnect()
       const after = take.mock.calls.length
-      await new Promise((r) => setTimeout(r, 200))
+      await wake(sleeps.pending)
       expect(take.mock.calls.length).toBe(after)
       watch.mockRestore(); take.mockRestore()
       browser.close()
@@ -1050,20 +1059,18 @@ describe('IOSAgent', () => {
     it('stops waiting for a touch report once its watch ended', async () => {
       const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
       const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
-      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      const sleeps = heldSleeps()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false, { touchPollSleep: sleeps.touchPollSleep })
       internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-p', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
       await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
       internals.lastBundleIds.set('dev-1', 'com.app')
       internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
-      // Its wait ends 500 ms after the pairing starts, which is after this.
-      const endedAt = Date.now()
       internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
-      await vi.waitFor(() => expect(take.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 })
-      // Inside the wait with a poll to spare, or the test fails rather than pass on a loop that had already ended.
-      expect(Date.now() - endedAt).toBeLessThan(400)
+      // Read once, found nothing, asleep before the next read.
+      await vi.waitFor(() => expect(sleeps.pending.length).toBeGreaterThan(0), { timeout: 2000 })
       agent.disconnect()
       const after = take.mock.calls.length
-      await new Promise((r) => setTimeout(r, 200))
+      await wake(sleeps.pending)
       expect(take.mock.calls.length).toBe(after)
       watch.mockRestore(); take.mockRestore()
       browser.close()

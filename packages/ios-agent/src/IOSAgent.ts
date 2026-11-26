@@ -204,6 +204,9 @@ export interface IOSAgentOptions {
   /** UIKit's dispatch log for a recorded device (#1214). Under vitest the default reads nothing, so a suite never spawns
    *  into a real simulator; a test passes its own. */
   dispatchLog?: (udid: string) => DispatchLog | null
+  /** How the touch-report waits sleep between reads (every `TOUCH_REPORT_POLL_MS`). Injectable so a test can hold a wait
+   *  and end the watch inside it, rather than guess at real time. */
+  touchPollSleep?: (ms: number) => Promise<void>
   /** How a launched app's log stream is spawned, and its orphans found (#1235). Under vitest the default spawns nothing. */
   appLogStreamDeps?: AppLogStreamDeps
   /** How a watched app's log stream is spawned and its runs read (`app:logs:watch`). Under vitest the default spawns
@@ -471,6 +474,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly observeChains = new Map<string, Promise<void>>()
   /** Where each recorded touch landed is read from UIKit's dispatch log, one stream per device; null reads nothing. */
   private readonly dispatchLog: (udid: string) => DispatchLog | null
+  private readonly touchPollSleep: (ms: number) => Promise<void>
   private readonly appLogStreamDeps: AppLogStreamDeps
   private readonly appLogWatchDeps: AppLogWatchDeps
   private readonly appLogWatchRefreshRetryMs: number
@@ -549,6 +553,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
     )
     this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
+    this.touchPollSleep = options.touchPollSleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
     this.appLogStreamDeps = options.appLogStreamDeps ?? (process.env.VITEST ? inertAppLogStreamDeps : defaultAppLogStreamDeps)
     this.appLogWatchDeps = options.appLogWatchDeps ?? (process.env.VITEST ? inertAppLogWatchDeps : defaultAppLogWatchDeps)
     this.appLogWatchRefreshRetryMs = options.appLogWatchRefreshRetryMs ?? APP_LOG_WATCH_REFRESH_RETRY_MS
@@ -1662,7 +1667,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         return
       }
       if (Date.now() >= until || this.touchWatch.get(deviceId) !== watch) return
-      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
       if (this.touchWatch.get(deviceId) !== watch) return
     }
   }
@@ -1794,7 +1799,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (pick.kind === 'none' && log.attached) this.missLanding(deviceId, watch)
         return
       }
-      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
     }
   }
 
@@ -1832,7 +1837,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         return
       }
       if (Date.now() >= until) return
-      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
       // Ended during the wait (a disconnect, a shutdown): nothing is left to read reports for, and a take now would drain
       // them from under whoever watches the device next.
       if (!this.touchWatch.get(deviceId)) return
