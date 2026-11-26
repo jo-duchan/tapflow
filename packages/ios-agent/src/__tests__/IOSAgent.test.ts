@@ -1041,6 +1041,25 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // The pairing's own wait, before any report came: it polls for 500 ms, and a disconnect in that wait ends it too.
+    it('stops waiting for a touch report once its watch ended', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const take = vi.spyOn(AppObserver.prototype, 'takeTouches').mockResolvedValue([])
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-p', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.lastBundleIds.set('dev-1', 'com.app')
+      internals.handleRelayMessage({ type: 'input:touch:start', sessionId: agent.sessionId!, payload: { x: 0.4, y: 0.5 } } as never)
+      internals.handleRelayMessage({ type: 'input:touch:end', sessionId: agent.sessionId!, requestId: 'g2' } as never)
+      await vi.waitFor(() => expect(take.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 })
+      agent.disconnect()
+      const after = take.mock.calls.length
+      await new Promise((r) => setTimeout(r, 200))
+      expect(take.mock.calls.length).toBe(after)
+      watch.mockRestore(); take.mockRestore()
+      browser.close()
+    })
+
     // MCP Flow Capture (L6a): a device picked up running gets no boot, so `capture:observe` arms it then; the app
     // reports touches from the flag on. Arming again keeps the watch (a gesture in flight keeps its report); off puts
     // app accessibility back and stops the reports.

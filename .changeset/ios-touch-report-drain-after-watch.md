@@ -2,4 +2,6 @@
 "@tapflowio/ios-agent": patch
 ---
 
-A paired touch's wait for the app's verdict stops reading touch reports once the device's watch has ended. A disconnect or shutdown during that wait (up to 3 s) read the reports once more after it, and drained ones meant for whoever watched the device next.
+<!-- changelog: internal — no user-reachable path: the watch's teardown always clears the device's reports (stopTouches) and the next watch is set before reports are written; the drain only crossed tests sharing a spied AppObserver. -->
+
+The iOS agent's touch-report waits stop reading once the device's watch has ended, instead of reading once more after a disconnect or shutdown.
