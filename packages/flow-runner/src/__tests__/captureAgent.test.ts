@@ -189,6 +189,27 @@ describe('agentFlow', () => {
     expect(r.flow.yaml).not.toContain('hunter2')
     expect(r.flow.yaml).toMatch(/^# Captured from an AI agent's session over MCP: 5 steps recorded\.\n# Left out by the agent: #2\n/)
     expect(parseFlow(r.flow.yaml, 'x.yaml').steps).toEqual(r.flow.steps)
+    // Each flow step in the agent's numbers, so a Verify that fails on one can say which: the expectation is its tap's.
+    expect(r.flow.origins).toEqual([null, 1, 3, 3, 4, 5])
+  })
+
+  it('numbers the steps after a clear-state the range began with, the added launch between', () => {
+    const cleared = agentSteps(capture([{ kind: 'clearState', at: 1 }, tapAt(10, [0.25, 0.82], { selector: { id: 'login' } })], [{ at: 5, elements: home }]))
+    const r = agentFlow(cleared, { name: 'l' }, { appId: 'com.app' })
+    if (!r.ok) throw new Error('refused')
+    expect(r.flow.steps.map((s) => s.type)).toEqual(['clearState', 'launchApp', 'tapOn'])
+    expect(r.flow.origins).toEqual([1, null, 2])
+  })
+
+  it('writes the screen size only for a flow that touches a point', () => {
+    const viewport = { width: 1206, height: 2622 }
+    const point = agentSteps(capture([tapAt(10, [0.9, 0.05])]))
+    const p = agentFlow(point, { name: 'p' }, { viewport })
+    if (!p.ok) throw new Error('refused')
+    expect(parseFlow(p.flow.yaml, 'p.yaml').viewport).toEqual(viewport)
+    const named = agentFlow(steps, { name: 'n', to: 3 }, { viewport })
+    if (!named.ok) throw new Error('refused')
+    expect(parseFlow(named.flow.yaml, 'n.yaml').viewport).toBeUndefined()
   })
 
   it('says when a step was left out after it failed in an earlier Verify, and which try passed', () => {

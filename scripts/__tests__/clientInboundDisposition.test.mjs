@@ -182,12 +182,14 @@ describe('both clients declare what they do with every browser-inbound message',
     // for the buttons a flow's `pressButton` is checked against before it runs. The paste pair differs since Flow
     // Capture: its replay pastes what the person pasted (`pasteText`), and nothing in `mcp-server` pastes. So does the
     // keyboard-set pair (#1135): the dashboard's replay asks for it through this package's channel, `run_flow` resets nothing.
+    // And MCP Flow Capture's (L6a): only an MCP client arms observation, reads what it saw, and resets for its Verify.
     const [mcp, flow] = PACKAGES.map(({ dir }) =>
       entries(readFileSync(join(root, dir, 'inboundDisposition.ts'), 'utf8')))
     const differing = [...mcp].filter(([t, v]) => HANDLED.test(v) !== HANDLED.test(flow.get(t) ?? ''))
     expect(differing.map(([t]) => t).sort()).toEqual([
+      'capture:observation', 'capture:observe-done', 'capture:observe-error',
       'clipboard:error', 'clipboard:write-done', 'device:keyboard-set-done', 'device:keyboard-set-error',
-      'device:lease-refused', 'device:leased', 'device:shutdown-done',
+      'device:lease-refused', 'device:leased', 'device:run-reset-done', 'device:run-reset-error', 'device:shutdown-done',
       'device:shutdown-error', 'session:deviceInfo',
     ])
   })

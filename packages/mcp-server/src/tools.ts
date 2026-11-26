@@ -4,8 +4,11 @@ import os from 'os'
 import path from 'path'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { fromFramePoint, toFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
-import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, reachTargetOf, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
+import { createHash } from 'crypto'
+import { EnvironmentStepError, isEligible, missingSecret, missingSecretMessage, parseFlow, reachTargetOf, refusedFlow, runFlow, unavailableButton, unavailableButtonMessage, viewportOf, type FlowDriver, type FlowResult } from '@tapflowio/flow-runner'
+import { agentFlow, agentSteps, type AgentStep } from '@tapflowio/flow-runner/browser'
 import { SessionEndedError, SessionLeftError, type TapflowClient } from './client.js'
+import { AgentCaptureRecorder, KEEP_AFTER_RELEASE_MS, recordingDriver } from './capture.js'
 import { TESTING_GUIDE } from './guide.js'
 import { compactLaunchOptions, launchOptionsProblem, type LaunchApplied } from '@tapflowio/protocol/launch'
 
@@ -241,6 +244,28 @@ function err(text: string): ToolResult {
 }
 
 export function registerTools(server: McpServer, client: TapflowClient): void {
+  // MCP Flow Capture (L6a): one capture per server process, opened by `connect_device` with `capture: true` (D8).
+  let capture: AgentCaptureRecorder | null = null
+  let dropTimer: NodeJS.Timeout | undefined
+  // Listened to from the first capture on: a server nobody captures with pays nothing per message.
+  let listening = false
+  const listen = () => {
+    if (listening) return
+    listening = true
+    client.onSend((msg) => capture?.noteSent(msg))
+    client.onObservation((msg) => capture?.noteObservation(msg))
+  }
+  /** The capture, unless it outlived its device by the hour it is kept. */
+  const currentCapture = (): AgentCaptureRecorder | null => {
+    if (capture?.expired) capture = null
+    return capture
+  }
+  /** The capture recording this session's actions now: open, on this session, and not in its own Verify. */
+  const recording = (sessionId: string): AgentCaptureRecorder | null => {
+    const c = currentCapture()
+    return c && c.sessionId === sessionId && !c.verifying ? c : null
+  }
+
   // Every tool first gives a socket the relay closed its one reconnect (`reconnectIfClosed`), and a tool aimed at a
   // session the relay released because of it says so instead of failing for a reason it cannot name.
   const register = ((name: string, config: unknown, cb: (...args: unknown[]) => unknown) =>
@@ -389,11 +414,29 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'get_testing_guide; when done, call disconnect_device so the device is free for others.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
+        capture: z.boolean().optional().describe('Record your actions to save as a flow'),
       },
     },
-    async ({ sessionId }) => {
+    async ({ sessionId, capture: open }) => {
       try {
         const { watchUrl } = await client.connectDevice(sessionId)
+        if (open) {
+          // A new capture drops the one before, whatever device it was on: it holds what was typed.
+          capture = null
+          listen()
+          clearTimeout(dropTimer)
+          const platform = await platformOf(client, sessionId)
+          let observing = false
+          let why: string | undefined
+          try { observing = await client.observe(sessionId, true) } catch (e) { why = (e as Error).message }
+          capture = new AgentCaptureRecorder(sessionId, platform, observing)
+          const note = observing
+            ? 'Touches by coordinates are named by what they hit; on iOS, only in an app started after this (launch_app with arguments, or a fresh install).'
+            : `This device's touches cannot be observed${why ? ` (${why})` : ' (an older relay or agent)'}: a tap by coordinates is named by the tree you read before it, or kept as a point.`
+          return ok(JSON.stringify({ connected: true, sessionId, watchUrl, capture: { open: true, observing, note } }))
+        }
+        // Back on the capture's device: it is held again, so the hour after a release starts over at the next.
+        if (currentCapture()?.sessionId === sessionId) capture!.hold()
         return ok(JSON.stringify({ connected: true, sessionId, watchUrl }))
       } catch (e) {
         return err(`connect_device failed: ${(e as Error).message}`)
@@ -412,6 +455,13 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     async ({ sessionId }) => {
       try {
         client.disconnectDevice(sessionId)
+        const c = currentCapture()
+        if (c?.sessionId === sessionId) {
+          c.release()
+          clearTimeout(dropTimer)
+          dropTimer = setTimeout(() => { if (capture === c) capture = null }, KEEP_AFTER_RELEASE_MS)
+          dropTimer.unref()
+        }
         return ok(JSON.stringify({ disconnected: true, sessionId }))
       } catch (e) {
         return err(`disconnect_device failed: ${(e as Error).message}`)
@@ -474,7 +524,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId }) => {
       try {
-        const elements = await client.queryUITree(sessionId)
+        const read = await client.queryUITreeWithTurn(sessionId)
+        recording(sessionId)?.tree(read.elements, { interfaceTurn: read.interfaceTurn, ...(read.aspect !== undefined ? { aspect: read.aspect } : {}) })
+        const elements = read.elements
         return ok(JSON.stringify({ count: elements.length, elements }, null, 2))
       } catch (e) {
         return err(`query_ui_tree failed: ${(e as Error).message}`)
@@ -553,6 +605,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // refused here, before the install, as the engine would refuse it after.
         const secret = missingSecret(parsed, undefined)
         if (secret) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, secret.index, missingSecretMessage(secret.name), { beforeRun: true })), null, 2))
+        // A capture cannot tell whether text a flow types is a secret (it reads the field before type_text does), and a
+        // flow it saves would write it as it is.
+        const rec = recording(sessionId)
+        const typing = rec ? parsed.steps.findIndex((s) => s.type === 'inputText') : -1
+        if (typing >= 0) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, typing, 'while a capture is open, type with type_text, so the capture can tell a password from plain text', { beforeRun: true })), null, 2))
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
         let appCheckSkipped: string | undefined
@@ -570,15 +627,134 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         if (buildId !== undefined && install !== false) {
           await client.installApp(sessionId, buildId)
         }
-        const driver = makeFlowDriver(client, sessionId, buildId)
+        const base = makeFlowDriver(client, sessionId, buildId)
+        const driver = rec ? recordingDriver(base, rec) : base
         // Each step as it starts, for whoever watches this session (A2); named without anything it types.
         const result = await runFlow(parsed, driver, {
           onStep: (mark) => { if (mark.phase === 'start' && mark.label) client.activity(sessionId, `step ${mark.index + 1}: ${mark.label}`) },
           ...(platform !== undefined ? { platform } : {}),
         })
+        if (rec) {
+          rec.take()
+          if (buildId !== undefined) rec.buildId = buildId
+          const passed = result.steps.findIndex((s) => s.status !== 'passed')
+          rec.addBlock({
+            kind: 'flow', at: Date.now(), steps: parsed.steps, passed: passed < 0 ? parsed.steps.length : passed,
+            source: { ...(flowPath !== undefined ? { path: flowPath } : {}), hash: createHash('sha256').update(yamlText).digest('hex').slice(0, 12) },
+          })
+        }
         return ok(JSON.stringify(flowResponse(result, appCheckSkipped), null, 2))
       } catch (e) {
         return err(`run_flow failed: ${(e as Error).message}`)
+      }
+    },
+  )
+
+  /** A step as `list_captured_steps` shows it: what is known, and what may be chosen, never a typed secret's value. */
+  function listed(s: AgentStep, n: number): Record<string, unknown> {
+    return {
+      n,
+      step: s.step ?? { type: 'inputSecret', name: '(named in capture_flow secrets)' },
+      origin: s.origin,
+      ...(s.fragile ? { fragile: s.fragile } : {}),
+      ...(s.mismatch ? { touchHit: s.mismatch } : {}),
+      ...(s.noResponse ? { noResponse: true } : {}),
+      ...(s.landed && s.landed.on !== 'app' ? { landed: s.landed } : {}),
+      ...(s.withheld ? { withheld: true } : {}),
+      ...(s.block !== undefined ? { block: s.block } : {}),
+      ...(s.failed ? { failed: true } : {}),
+      ...(s.expectable?.length ? { expect: s.expectable.map((c, i) => ({ candidate: i, selector: c.selector, ...(c.warnings.length ? { warnings: c.warnings } : {}) })) } : {}),
+    }
+  }
+
+  register(
+    'list_captured_steps',
+    {
+      description:
+        'The open capture\'s numbered steps, how each is named, and what each may expect. Choose from them in capture_flow.',
+    },
+    async () => {
+      const c = currentCapture()
+      if (!c) return err('list_captured_steps: no capture is open — connect_device with capture: true, then use the device')
+      const steps = agentSteps(c)
+      const notes: string[] = []
+      if (!c.observing) notes.push('Touches were not observed on this device: taps by coordinates are named by the tree before them, or kept as points.')
+      if (!steps.some((s) => s.step?.type === 'launchApp')) notes.push('No launch was captured: Verify resets the device first, so a flow that does not launch the app starts on the home screen.')
+      if (c.launchOptions) notes.push('The app was launched with arguments, which a flow\'s launchApp does not carry.')
+      if (c.failedBefore.size) notes.push(`Failed in an earlier Verify: ${[...c.failedBefore].sort((a, b) => a - b).map((k) => `#${k}`).join(', ')}`)
+      return ok(JSON.stringify({ sessionId: c.sessionId, verifyAttempts: c.attempts, steps: steps.map((s, i) => listed(s, i + 1)), ...(notes.length ? { notes } : {}) }))
+    },
+  )
+
+  register(
+    'capture_flow',
+    {
+      description:
+        'Make a flow of the captured steps by your choices, reset the device as CI does, and replay it. Returns the YAML only if it passes.',
+      inputSchema: {
+        sessionId: z.string().describe('Session to verify on'),
+        name: z.string(),
+        from: z.number().int().optional(),
+        to: z.number().int().optional(),
+        drop: z.array(z.number().int()).optional(),
+        expect: z.array(z.object({ step: z.number().int(), candidate: z.number().int() })).optional(),
+        secrets: z.array(z.object({ step: z.number().int(), name: z.string() })).optional().describe('e.g. APP_PASSWORD'),
+      },
+    },
+    async ({ sessionId, name, from, to, drop, expect, secrets }) => {
+      const c = currentCapture()
+      if (!c) return err('capture_flow: no capture is open — connect_device with capture: true, then use the device')
+      if (c.verifying) return err('capture_flow: a Verify of this capture is already running')
+      try {
+        const platform = await platformOf(client, sessionId)
+        if (c.platform !== undefined && platform !== undefined && platform !== c.platform) {
+          return err(`capture_flow: the capture was made on ${c.platform}, and session ${sessionId} is ${platform}`)
+        }
+        let appId: string | undefined
+        if (c.buildId !== undefined) {
+          const build = await client.lookupBuild(c.buildId)
+          if (build.kind === 'found' && build.bundleId) appId = build.bundleId
+        }
+        const viewport = viewportOf(await client.chrome(sessionId, 2_000).catch(() => null))
+        const made = agentFlow(agentSteps(c), {
+          name, ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}),
+          ...(drop ? { drop } : {}), ...(expect ? { expect } : {}), ...(secrets ? { secrets } : {}),
+          failedBefore: [...c.failedBefore], attempt: c.attempts + 1,
+        }, { ...(appId ? { appId } : {}), ...(viewport ? { viewport } : {}) })
+        if (!made.ok) return err(JSON.stringify({ verified: false, refused: made.refusals }))
+        c.attempts++
+        // The Verify's own inputs are not the agent's: nothing it sends is recorded or paired (R-E).
+        c.verifying = true
+        let reset: Awaited<ReturnType<typeof client.runReset>>
+        let result: FlowResult
+        try {
+          reset = await client.runReset(sessionId, appId ? [appId] : [])
+          if (reset === undefined && appId) await client.clearState(sessionId, appId)
+          result = await runFlow(
+            { name, ...(appId ? { appId } : {}), ...(made.flow.viewport ? { viewport: made.flow.viewport } : {}), steps: made.flow.steps },
+            makeFlowDriver(client, sessionId, c.buildId),
+            { secrets: made.flow.secrets, ...(platform !== undefined ? { platform } : {}) },
+          )
+        } finally {
+          c.take()
+          c.verifying = false
+        }
+        const resetNote = reset ? {} : { resetNote: 'The device\'s agent cannot reset it as a run does: only the app\'s data was cleared.' }
+        if (result.status === 'passed') {
+          return ok(JSON.stringify({ verified: true, attempt: c.attempts, ...resetNote, notes: made.flow.notes, yaml: made.flow.yaml }))
+        }
+        const failed = result.steps.find((s) => s.status === 'failed')
+        const k = failed ? made.flow.origins[failed.index] : null
+        if (k) c.failedBefore.add(k)
+        return ok(JSON.stringify({
+          verified: false, attempt: c.attempts, ...resetNote,
+          ...(k ? { failedStep: k } : {}), ...(failed ? { flowStep: failed.index + 1, name: failed.name } : {}),
+          ...(result.failureMessage ? { message: result.failureMessage } : {}),
+          ...(result.failureKind ? { failureKind: result.failureKind } : {}),
+          ...(failed?.suggestions ? { suggestions: failed.suggestions } : {}),
+        }))
+      } catch (e) {
+        return err(`capture_flow failed: ${(e as Error).message}`)
       }
     },
   )
@@ -662,8 +838,12 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         return err('tap needs an element, or x, y, screenshotWidth and screenshotHeight')
       }
       try {
+        const rec = recording(sessionId)
+        const at = Date.now()
+        rec?.take()
         if (holdMs !== undefined) await client.longPress(sessionId, x / screenshotWidth, y / screenshotHeight, holdMs)
         else await client.tap(sessionId, x / screenshotWidth, y / screenshotHeight)
+        rec?.add({ kind: 'tap', at, point: rec.appPoint(x / screenshotWidth, y / screenshotHeight), ...(holdMs !== undefined ? { holdMs } : {}) }, rec.take())
         return ok(JSON.stringify({ tapped: true, x, y, ...(holdMs !== undefined ? { holdMs } : {}) }))
       } catch (e) {
         return err(`tap failed: ${(e as Error).message}`)
@@ -682,8 +862,16 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     try {
       // JSON is YAML, and the parser `run_flow` uses is what says an element names nothing.
       const flow = parseFlow(JSON.stringify({ steps: [step] }), 'tap')
-      const result = await runFlow(flow, makeFlowDriver(client, sessionId), {})
+      const rec = recording(sessionId)
+      const touch: Parameters<typeof recordingDriver>[2] = {}
+      const result = await runFlow(flow, rec ? recordingDriver(makeFlowDriver(client, sessionId), rec, touch) : makeFlowDriver(client, sessionId), {})
       const done = result.steps[0]
+      // The element as the agent named it, without the wait this tool added: the flow's own step waits as any does.
+      const said = flow.steps[0]
+      if (rec && touch.last && done?.status === 'passed' && said && (said.type === 'tapOn' || said.type === 'longPressOn')) {
+        const { timeoutMs: _wait, ...selector } = said.selector
+        rec.add({ ...touch.last, selector }, touch.ends)
+      }
       if (!done || done.status !== 'passed') {
         // What `run_flow` reports of the same failure: whose it was, and the screen it failed on.
         let screenshotPath: string | undefined
@@ -721,6 +909,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, startX, startY, endX, endY, screenshotWidth, screenshotHeight, durationMs }) => {
       try {
+        const rec = recording(sessionId)
+        const at = Date.now()
+        rec?.take()
         await client.swipe(
           sessionId,
           startX / screenshotWidth,
@@ -729,6 +920,10 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           endY / screenshotHeight,
           durationMs,
         )
+        rec?.add({
+          kind: 'swipe', at, durationMs: durationMs ?? 300,
+          from: rec.appPoint(startX / screenshotWidth, startY / screenshotHeight), to: rec.appPoint(endX / screenshotWidth, endY / screenshotHeight),
+        }, rec.take())
         return ok(JSON.stringify({ swiped: true, from: { x: startX, y: startY }, to: { x: endX, y: endY } }))
       } catch (e) {
         return err(`swipe failed: ${(e as Error).message}`)
@@ -749,6 +944,24 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, text }) => {
       try {
+        const rec = recording(sessionId)
+        if (rec) {
+          // The field typed into, read just before: only one read as not secure has its text written into a flow, so a
+          // read that fails or finds nothing focused leaves it a secret (R-C). Never `ui:field:request`, whose answer
+          // carries the field's value through the relay.
+          let field: { secure?: boolean; identifier?: string } | null | undefined
+          try {
+            const read = await client.queryUITreeWithTurn(sessionId)
+            rec.tree(read.elements, { interfaceTurn: read.interfaceTurn, ...(read.aspect !== undefined ? { aspect: read.aspect } : {}) })
+            const focused = read.elements.filter((e) => e.focused === true)
+            field = focused.length === 1 ? { ...(focused[0]!.secure !== undefined ? { secure: focused[0]!.secure } : {}), ...(focused[0]!.identifier ? { identifier: focused[0]!.identifier } : {}) } : null
+          } catch { field = undefined }
+          const at = Date.now()
+          await client.typeText(sessionId, text)
+          rec.add({ kind: 'type', at, text, ...(field !== undefined ? { field } : {}) })
+          // Not echoed: what is typed while capturing may be a password, and a result stays in the model's context.
+          return ok(JSON.stringify({ typed: true, length: [...text].length }))
+        }
         await client.typeText(sessionId, text)
         return ok(JSON.stringify({ typed: true, text }))
       } catch (e) {
@@ -771,7 +984,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, key }) => {
       try {
+        const at = Date.now()
         await client.pressKey(sessionId, key)
+        recording(sessionId)?.add({ kind: 'key', at, code: key === 'Return' ? 'Enter' : key })
         return ok(JSON.stringify({ pressed: true, key }))
       } catch (e) {
         return err(`press_key failed: ${(e as Error).message}`)
@@ -793,7 +1008,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     },
     async ({ sessionId, button }) => {
       try {
+        const at = Date.now()
         await client.pressButton(sessionId, button)
+        recording(sessionId)?.add({ kind: 'button', at, name: button })
         return ok(JSON.stringify({ pressed: true, button }))
       } catch (e) {
         return err(`press_button failed: ${(e as Error).message}`)
@@ -840,7 +1057,14 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       if (problem) return err(`launch_app failed: ${problem}`)
       try {
         // `applied` names what reached the app, the relay's per-app defaults included.
+        const at = Date.now()
         const applied = await client.launchApp(sessionId, buildId, compactLaunchOptions({ arguments: args, env }))
+        const rec = recording(sessionId)
+        if (rec) {
+          rec.add({ kind: 'launch', at })
+          rec.buildId = buildId
+          if (args !== undefined || env !== undefined) rec.launchOptions = true
+        }
         return ok(JSON.stringify({ launched: true, buildId, ...(applied ? { applied } : {}) }))
       } catch (e) {
         return err(`launch_app failed: ${(e as Error).message}`)

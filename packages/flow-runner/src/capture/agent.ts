@@ -1,7 +1,8 @@
 import type { UIElement } from '@tapflowio/agent-core'
 import type { TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { matchSelector } from '../selector.js'
-import { isSecretName, type Selector, type Step } from '../schema.js'
+import { firstPointStep } from '../engine.js'
+import { isSecretName, type Selector, type Step, type Viewport } from '../schema.js'
 import { expectedFor, mentionsSecret, type ExpectWarning } from './expected.js'
 import { centre, hitTest, recordedSelector, target, toFlowSteps, flowSteps, type CapturedStep, type FragileReason } from './match.js'
 import { LONG_PRESS_MS, type Point, type RawStep } from './segment.js'
@@ -251,6 +252,11 @@ export interface AgentFlow {
   secrets: Record<string, string>
   /** What a person reviewing the file should know; also the comment's body. */
   notes: string[]
+  /** For each of `steps`, the number of the listed step it came from (an expectation, its step's); `null` for one the
+   *  export added (the app's clear-state and launch). How a Verify's failed step is told to the agent in its numbers. */
+  origins: Array<number | null>
+  /** Written only when a step touches a point. */
+  viewport?: Viewport
 }
 
 /** Steps that do something, beyond starting the app. */
@@ -267,7 +273,7 @@ const MANY_DROPPED = 3
  * Refused: a step number out of the list, a step past where its `run_flow` failed, an expectation not offered, and a flow
  * that does nothing but start the app.
  */
-export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: { appId?: string } = {}): { ok: true; flow: AgentFlow } | { ok: false; refusals: JudgementRefusal[] } {
+export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: { appId?: string; viewport?: Viewport } = {}): { ok: true; flow: AgentFlow } | { ok: false; refusals: JudgementRefusal[] } {
   const refusals: JudgementRefusal[] = []
   const n = steps.length
   const inList = (k: number) => Number.isInteger(k) && k >= 1 && k <= n
@@ -314,7 +320,15 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   if (taken.length) return { ok: false, refusals: taken }
   const withExpects = captured.steps.flatMap((s, i) => [s, ...(expectAfter.get(chosen[i]!.k) ?? [])
     .map((selector): CapturedStep => ({ raw: s.raw, step: { type: 'assertVisible', selector } }))])
+  const withExpectsFrom = captured.steps.flatMap((_, i) => [chosen[i]!.k, ...(expectAfter.get(chosen[i]!.k) ?? []).map(() => chosen[i]!.k)])
   const flowStepsOut = flowSteps({ ...captured, steps: withExpects }, opts)
+  // `flowSteps` drops the steps that say nothing and adds the clear-state and launch right after a leading clear-state,
+  // or first: so the added ones are the gap between what was said and what came out.
+  const saidFrom = withExpectsFrom.filter((_, i) => withExpects[i]!.step !== null)
+  const added = Array<null>(flowStepsOut.length - saidFrom.length).fill(null)
+  const origins = withExpects.find((s) => s.step !== null)?.step?.type === 'clearState'
+    ? [saidFrom[0]!, ...added, ...saidFrom.slice(1)]
+    : [...added, ...saidFrom]
   if (!flowStepsOut.some((s) => ACTING.has(s.type))) return { ok: false, refusals: [{ reason: 'nothing-done' }] }
 
   const notes: string[] = []
@@ -342,6 +356,8 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const acting = steps.filter((s) => s.step && ACTING.has(s.step.type)).length
   if (dropped.size >= MANY_DROPPED || (acting > 0 && dropped.size * 2 >= acting)) notes.push(`Warning: ${dropped.size} of ${n} steps left out`)
   const header = [`Captured from an AI agent's session over MCP${j.attempt ? `, verified on try ${j.attempt}` : ''}: ${n} steps recorded.`, ...notes]
-  const yaml = flowToYaml({ name: j.name, ...(opts.appId ? { appId: opts.appId } : {}), steps: flowStepsOut }, { comment: header.join('\n') })
-  return { ok: true, flow: { steps: flowStepsOut, yaml, secrets, notes } }
+  // The screen the points were made on, only where a step touches one: a selector finds its element on any screen.
+  const viewport = opts.viewport && firstPointStep({ steps: flowStepsOut }) >= 0 ? { viewport: opts.viewport } : {}
+  const yaml = flowToYaml({ name: j.name, ...(opts.appId ? { appId: opts.appId } : {}), ...viewport, steps: flowStepsOut }, { comment: header.join('\n') })
+  return { ok: true, flow: { steps: flowStepsOut, yaml, secrets, notes, origins, ...viewport } }
 }
