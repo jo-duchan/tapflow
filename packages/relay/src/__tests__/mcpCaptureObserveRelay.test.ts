@@ -278,6 +278,51 @@ describe('MCP capture observation through the relay', () => {
     expect((await waitForType<{ type: string; payload: { on: boolean } }>(agent, 'capture:observe')).payload).toEqual({ on: false })
   })
 
+  // Only a boot's own ready reads what that boot set (CodeRabbit, #1243). A later boot went armed and the holder then
+  // turned observation off: an earlier boot's late ready must not take that snapshot as its own, or the later boot's
+  // ready — the one that actually sets the device — finds nothing to put right and leaves observation on.
+  it('puts right at a boot\'s own ready, not at an earlier boot\'s late one', async () => {
+    const mcp = await client(1)
+    await join(mcp, 'mcp')
+    mcp.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1' } }))
+    expect((await waitForType<{ type: string; payload: { observed?: boolean } }>(agent, 'device:boot')).payload.observed).toBe(false)
+    await observe(mcp, true)
+    await waitForType(agent, 'capture:observe')
+    mcp.send(JSON.stringify({ type: 'device:boot', sessionId, requestId: 'b2', payload: { deviceId: 'dev-1' } }))
+    expect((await waitForType<{ type: string; payload: { observed?: boolean } }>(agent, 'device:boot')).payload.observed).toBe(true)
+    await observe(mcp, false)
+    await waitForType(agent, 'capture:observe')
+    const seen: Array<{ on: boolean }> = []
+    agent.on('message', (d) => { const m = JSON.parse(String(d)) as { type: string; payload: { on: boolean } }; if (m.type === 'capture:observe') seen.push(m.payload) })
+    agent.send(JSON.stringify({ type: 'device:ready', sessionId, requestId: 'b1', payload: { deviceId: 'dev-1', cold: false } }))
+    // Two round trips through the agent's socket: anything the ready made the relay send has arrived by then.
+    await tap(mcp, 's1')
+    await tap(mcp, 's2')
+    expect(seen).toEqual([])
+    agent.send(JSON.stringify({ type: 'device:ready', sessionId, requestId: 'b2', payload: { deviceId: 'dev-1', cold: false } }))
+    await tap(mcp, 's3')
+    await tap(mcp, 's4')
+    expect(seen).toEqual([{ on: false }])
+  })
+
+  // The same person back as a dashboard is not the MCP holder that armed it (CodeRabbit, #1243).
+  it('turns observation off when the armed holder comes back as another kind of client, and passes it nothing', async () => {
+    const mcp = await client(1)
+    await join(mcp, 'mcp')
+    await observe(mcp, true)
+    await waitForType(agent, 'capture:observe')
+    await tap(mcp, 'mine')
+    const off = waitForType<{ type: string; payload: { on: boolean } }>(agent, 'capture:observe')
+    const dash = await client(1)
+    await join(dash, 'dashboard')
+    expect((await off).payload).toEqual({ on: false })
+    let passed = false
+    for (const ws of [mcp, dash]) ws.on('message', (d) => { if (String(d).includes('capture:observation')) passed = true })
+    agent.send(touched('mine', 'Mine'))
+    await tap(dash, 'after')
+    expect(passed).toBe(false)
+  })
+
   it('keeps an off sent while the agent is away, so the agent coming back is not armed again', async () => {
     const mcp = await client(1)
     await join(mcp, 'mcp')

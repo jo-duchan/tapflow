@@ -1074,6 +1074,53 @@ describe('IOSAgent', () => {
       browser.close()
     })
 
+    // CodeRabbit, #1243: a capture:observe queued behind another runs after a newer boot has set the device. It must
+    // not turn app accessibility on with no restore to come.
+    it('sets nothing for a capture:observe that a newer boot overtook while it waited its turn', async () => {
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockResolvedValue()
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockImplementation(() => new Promise((r) => setTimeout(r, 80)))
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-b', payload: { deviceId: 'dev-1', touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      internals.handleRelayMessage({ type: 'capture:observe', sessionId: agent.sessionId!, requestId: 'o1', payload: { on: true } } as never)
+      internals.handleRelayMessage({ type: 'capture:observe', sessionId: agent.sessionId!, requestId: 'o2', payload: { on: true } } as never)
+      await vi.waitFor(() => expect(enable).toHaveBeenCalledTimes(1), { timeout: 2000 })
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-c', payload: { deviceId: 'dev-1', touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
+      await new Promise((r) => setTimeout(r, 200))
+      // o1 was already writing when the boot came; o2 had not started, and starts nothing.
+      expect(enable).toHaveBeenCalledTimes(1)
+      watch.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
+    // CodeRabbit, #1243: the touch flag is the device's. A capture:observe that went stale while it wrote must not stop
+    // the reports a newer boot's watch turned on for itself.
+    it('leaves a newer boot\'s touch reports on when a capture:observe goes stale mid-write', async () => {
+      let slow = false
+      const watch = vi.spyOn(AppObserver.prototype, 'watchTouches').mockImplementation(() => (slow ? (slow = false, new Promise((r) => setTimeout(r, 150))) : Promise.resolve()))
+      const stop = vi.spyOn(AppObserver.prototype, 'stopTouches').mockResolvedValue()
+      const enable = vi.spyOn(AppAccessibility.prototype, 'enable').mockResolvedValue()
+      const restore = vi.spyOn(AppAccessibility.prototype, 'restore').mockResolvedValue()
+      const { agent, browser, internals, sent } = await bootedAgent(mockSimctl(true), false)
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-b', payload: { deviceId: 'dev-1', touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.some((m) => m.type === 'device:ready')).toBe(true), { timeout: 3000 })
+      slow = true
+      internals.handleRelayMessage({ type: 'capture:observe', sessionId: agent.sessionId!, requestId: 'o1', payload: { on: true } } as never)
+      await vi.waitFor(() => expect(watch).toHaveBeenLastCalledWith('dev-1', true), { timeout: 2000 })
+      stop.mockClear()
+      internals.handleRelayMessage({ type: 'device:boot', sessionId: agent.sessionId!, requestId: 'rq-c', payload: { deviceId: 'dev-1', observed: true, touchObservations: true } } as never)
+      await vi.waitFor(() => expect(sent.filter((m) => m.type === 'device:ready')).toHaveLength(2), { timeout: 3000 })
+      await new Promise((r) => setTimeout(r, 250))
+      expect(internals.touchWatch.has('dev-1')).toBe(true)
+      expect(stop.mock.calls.filter(([id]) => id === 'dev-1').length).toBe(0)
+      watch.mockRestore(); stop.mockRestore(); enable.mockRestore(); restore.mockRestore()
+      agent.disconnect()
+      browser.close()
+    })
+
     // Correctness review: two pairings in flight lost a report to the list one replaced under the other; and of two
     // reports at one spot the first, not the nearest in time, was taken.
     it('pairs overlapping gestures each with its own report, the nearest in time at the same spot', async () => {

@@ -502,7 +502,9 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   capturing on mid-session, or a boot during a replay's pause, is observed from the next boot. An MCP holder arms a running
   device with `capture:observe` instead (L6a; `applyObservation` is the boot's own setup, shared): the app reports touches
   from the moment its flag is written, and only element names wait for a new process, as above. Arming again keeps the
-  watch, so a gesture in flight keeps its report. Without it a field is told apart by placeholder and
+  watch, so a gesture in flight keeps its report. A request a newer boot overtook while it waited its turn sets
+  nothing, and one that goes stale mid-write leaves the touch flag to whichever watch now holds the device: the flag is
+  the device's, and a `capture:observe` is not ordered against a boot. Without it a field is told apart by placeholder and
   frame, failures that show as unread or a divergence, never a wrong flow. The home screen is outside the app too,
   hence the marker.
 - **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and

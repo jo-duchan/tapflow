@@ -1969,10 +1969,12 @@ export class RelayServer {
         this.syncAppLogWatch(session, { resend: true })
         // A boot sets observation by the arming when it was sent, after any `capture:observe` that reached the agent while
         // it ran: an `off` from a holder that left mid-boot, or an `on` sent after the boot. Put right once (pre-PR review).
-        if (session.bootArmed !== undefined && session.bootArmed !== this.mcpArmed(session) && hasCapability(session.agentCapabilities, 'capture-observe')) {
+        // Only that boot's own ready reads its snapshot.
+        const armedAtBoot = session.bootArmed && session.bootArmed.requestId === msg.requestId ? session.bootArmed.armed : undefined
+        if (armedAtBoot !== undefined && armedAtBoot !== this.mcpArmed(session) && hasCapability(session.agentCapabilities, 'capture-observe')) {
           this.sendTo(session.agentSocket, { type: 'capture:observe', sessionId: session.id, requestId: randomUUID(), payload: { on: this.mcpArmed(session) } })
         }
-        session.bootArmed = undefined
+        if (armedAtBoot !== undefined) session.bootArmed = undefined
         if (session.browserSocket?.readyState === WebSocket.OPEN) {
           session.browserSocket.send(JSON.stringify(raw))
         }
@@ -2585,6 +2587,11 @@ export class RelayServer {
     this.sessions.noteBootSent(msg.sessionId)
     // `=== 'full-erase'`, never truthy: the dashboard sends `app-only` on every boot, which erases nothing.
     if (msg.payload.resetMode === 'full-erase' || msg.payload.runReset) this.forgetInstall(boot.session, 'The device is being reset')
+    // What this boot will set, so its own ready — by `requestId`, not an earlier boot's late one — can put right an
+    // arming that changed while it ran (`device:ready`). Here, where the boot goes: one refused never reaches the agent
+    // and must not replace the snapshot of one that did (CodeRabbit, #1243). An MCP holder's boot is automation, so it
+    // goes the moment it is admitted, with the `observed` `handleBoot` just set.
+    boot.session.bootArmed = { requestId: msg.requestId, armed: this.mcpArmed(boot.session) }
     // The parse product, so a key a viewer appended from devtools is gone before the agent sees it.
     boot.session.agentSocket.send(JSON.stringify(msg))
   }
@@ -2991,8 +2998,6 @@ export class RelayServer {
       // An MCP holder that armed observation keeps it across its own boots: without this, the `boot_device` an MCP
       // client sends after arming would turn it off on both agents (design review 2 of L6a).
       || this.mcpArmed(boot.session)
-    // What this boot will set, so its ready can put right an arming that changed while it ran (`device:ready`).
-    boot.session.bootArmed = this.mcpArmed(boot.session)
     if (boot.session.keyboardResetOwed && hasCapability(boot.session.agentCapabilities, 'keyboard-reset')) {
       // Ahead of the boot, which the agent then finishes before it resets (it waits for the boot's keyboard sync).
       this.sendTo(boot.session.agentSocket, { type: 'device:keyboard-reset', sessionId: boot.session.id })
@@ -3225,7 +3230,8 @@ export class RelayServer {
       this.captures.noteJoin(msg.sessionId, captureHolder(session))
       // A holder whose socket stopped answering can be replaced by a join before its close is seen, and the close then
       // finds no session to disarm: the newcomer's device must not stay observed for it (pre-PR review).
-      if (session.observe && session.observe.owner !== session.owner) this.disarmObserve(session)
+      // The same person coming back as a dashboard or a flow runner is not the MCP holder that armed it (CodeRabbit, #1243).
+      if (session.observe && (session.observe.owner !== session.owner || session.holderKind !== 'mcp')) this.disarmObserve(session)
       // Another person's keyboard language would type this person's keys (#1134). Owed until their boot reaches the
       // agent: sent here, an agent away for the moment would never hear it, and the next join is the same person.
       if (joined.personChanged) session.keyboardResetOwed = true
@@ -4338,7 +4344,7 @@ export class RelayServer {
    *  holder sent, or one this holder sent before it armed or while it was away, is not passed on. */
   private passObservation(session: Session, requestId: string, what: { touched: TouchObservation } | { landed: TouchLanding }): void {
     const armed = session.observe
-    if (!armed || armed.owner !== session.owner || !session.browserSocket || !armed.sent.includes(requestId)) return
+    if (!armed || !this.mcpArmed(session) || !session.browserSocket || !armed.sent.includes(requestId)) return
     this.sendTo(session.browserSocket, { type: 'capture:observation', sessionId: session.id, requestId, ...what })
   }
 

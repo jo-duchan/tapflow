@@ -1674,6 +1674,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * midway (a newer boot, a shutdown): whatever this turned on is turned off again.
    */
   private async applyObservation(deviceId: string, observed: boolean, touchObservations: boolean, isStale: () => boolean, keepWatch = false): Promise<boolean> {
+    // A request queued behind a newer boot sets nothing: that boot has set the device, and a late `on` would leave app
+    // accessibility on with no restore to come, a late `off` turn off what the boot turned on (CodeRabbit, #1243).
+    if (isStale()) return false
     // Best-effort: without it a touch is recorded as before, unnamed.
     await (observed ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
       logger.warn(`could not ${observed ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
@@ -1699,11 +1702,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
     })
     // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
-    // read it. A newer boot is still waiting for its device here, so this stop cannot land on its watch.
+    // read it.
     if (observeTouches && isStale()) {
       // Its own stream, unless a newer boot has replaced the watch already.
       if (watched && this.touchWatch.get(deviceId) === watched) this.endTouchWatch(deviceId)
-      await this.appObserver.stopTouches(deviceId).catch(() => {})
+      // The flag is the device's, not this request's: a newer boot's watch wrote it for itself and keeps it (CodeRabbit,
+      // #1243 — a queued `capture:observe` is not ordered against a boot).
+      if (!this.touchWatch.get(deviceId)) await this.appObserver.stopTouches(deviceId).catch(() => {})
       return false
     }
     return true
