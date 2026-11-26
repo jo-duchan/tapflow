@@ -143,7 +143,7 @@ export function hitTest(tree: readonly UIElement[], point: Point): UIElement | n
   return best
 }
 
-const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2]
+export const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2]
 
 /**
  * A selector for what is at `point`, or why the point has to be kept. A selector is used only when the element's centre
@@ -152,7 +152,7 @@ const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.
  * device answered, its word decides: reached at the centre, or the point is kept. Where it could not judge, the tree's
  * frames are all there is, as before reach.
  */
-function target(tree: UIElement[], point: Point, reach: ReachResult | undefined): { selector: Selector } | { fragile: FragileReason } {
+export function target(tree: UIElement[], point: Point, reach: ReachResult | undefined): { selector: Selector } | { fragile: FragileReason } {
   const hit = hitTest(tree, point)
   if (!hit) return { fragile: 'no-element' }
   if (hitTest(tree, centre(hit)) !== hit) return { fragile: 'not-centre' }

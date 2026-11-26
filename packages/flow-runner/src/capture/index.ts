@@ -18,3 +18,5 @@ export { replayStep, replaySteps, rangeStartOrientation, focusTap } from './repl
 export { rangeStartKeyboard, judgeTouch } from './keyboard.js'
 export type { TouchVerdict } from './keyboard.js'
 export type { ReplayChannel, ReplayOutcome, ReplayHooks } from './replay.js'
+export { agentSteps, agentFlow } from './agent.js'
+export type { AgentAction, AgentCapture, AgentStep, AgentJudgement, AgentFlow, JudgementRefusal, StepOrigin, TreeRead } from './agent.js'

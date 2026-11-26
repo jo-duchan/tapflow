@@ -77,7 +77,7 @@ const hex = (n: number, width: number): string => n.toString(16).toUpperCase().p
  * or would load as different steps, fails here instead of in the person's CI. Points and modifier lists are written
  * inline (`[0.4, 0.6]`), as a person writes them.
  */
-export function flowToYaml(flow: Omit<Flow, 'file'>): string {
+export function flowToYaml(flow: Omit<Flow, 'file'>, opts: { comment?: string } = {}): string {
   const doc = new Document({
     name: flow.name,
     ...(flow.appId !== undefined ? { appId: flow.appId } : {}),
@@ -104,6 +104,8 @@ export function flowToYaml(flow: Omit<Flow, 'file'>): string {
       node.value = placeholder(escaped.length - 1)
     },
   })
+  // A comment above the file says where it came from (MCP Flow Capture's provenance, L6a); the read-back ignores it.
+  if (opts.comment) doc.commentBefore = opts.comment.split('\n').map((l) => ` ${l}`).join('\n')
   let text = doc.toString({ lineWidth: 0 })
   escaped.forEach((q, i) => { text = text.replace(placeholder(i), () => q) })
   const back = parseFlow(text, 'captured.yaml')
