@@ -2,7 +2,7 @@ import type { UIElement } from '@tapflowio/agent-core'
 import type { TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { matchSelector } from '../selector.js'
 import { isSecretName, type Selector, type Step } from '../schema.js'
-import { expectedFor, type ExpectWarning } from './expected.js'
+import { expectedFor, mentionsSecret, type ExpectWarning } from './expected.js'
 import { centre, hitTest, recordedSelector, target, toFlowSteps, flowSteps, type CapturedStep, type FragileReason } from './match.js'
 import { LONG_PRESS_MS, type Point, type RawStep } from './segment.js'
 import { flowToYaml } from './yaml.js'
@@ -79,6 +79,8 @@ export interface AgentStep extends CapturedStep {
   /** A tap the app did not respond to (Manual's rule): offered to be left out, never left out by itself. */
   noResponse?: true
   landed?: TouchLanding
+  /** A name for it held a secret's value, so it was not used: named by the next way, or left a point. */
+  withheld?: true
 }
 
 /** The relay-record half of a step, which an agent's step has none of: only its time, and a swipe's ends, are read
@@ -122,8 +124,11 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
   const out: AgentStep[] = []
   let previousAt = -Infinity
   const actions = [...capture.actions].sort((a, b) => a.at - b.at)
-  // What was typed as a secret: an element showing it is never offered to expect, or the value would be written.
-  const secrets = actions.flatMap((a) => (a.kind === 'type' && !writable(a) ? [a.text] : []))
+  // What was typed as a secret: an element showing it is never offered to expect, or named by it, or the value would be
+  // written. Each piece between a Tab or a Return too, since those may have typed into two fields (CodeRabbit, #1244).
+  const secrets = actions.flatMap((a) => (a.kind === 'type' && !writable(a) ? [a.text, ...a.text.split(/[\t\n\r]/)] : []))
+    .filter((v) => v.length > 0)
+  const leaks = (s: Selector): boolean => [s.text, s.id, s.label, s.role].some((v) => v !== undefined && mentionsSecret(v, secrets))
   for (const [i, a] of actions.entries()) {
     const nextAt = actions[i + 1]?.at ?? Infinity
     const before = treeBetween(capture.trees, previousAt, a.at)
@@ -146,14 +151,23 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
           step: long ? { type: 'longPressPoint', at: a.point, durationMs: a.holdMs! } : { type: 'tapPoint', at: a.point },
           fragile, origin: 'coordinate',
         })
-        const observed = recordedSelector(a.observed)
+        // A name holding a secret's value is passed over for the next way, down to a point, so it is never written
+        // (CodeRabbit, #1244).
+        const hid = { any: false }
+        const usable = (s: Selector | null | undefined): Selector | undefined => {
+          if (s && leaks(s)) { hid.any = true; return undefined }
+          return s ?? undefined
+        }
+        const seen = recordedSelector(a.observed)
+        const mine = usable(a.selector)
+        const observed = usable(seen)
         const base = { raw: raw(a.at), ...common, ...(a.landed ? { landed: a.landed } : {}),
-          ...(a.observed?.acted === false ? { noResponse: true as const } : {}) }
-        if (a.selector) {
-          const mine = before && onlyMatch(before.elements, a.selector)
+          ...(a.observed?.acted === false ? { noResponse: true as const } : {}), ...(hid.any ? { withheld: true as const } : {}) }
+        if (mine) {
+          const asked = before && onlyMatch(before.elements, mine)
           const theirs = before && observed && onlyMatch(before.elements, observed)
-          const mismatch = mine && theirs && mine !== theirs ? { mismatch: observed! } : {}
-          out.push({ ...base, step: said(a.selector), origin: 'agent', ...mismatch })
+          const mismatch = asked && theirs && asked !== theirs ? { mismatch: observed! } : {}
+          out.push({ ...base, step: said(mine), origin: 'agent', ...mismatch })
           break
         }
         if (observed) {
@@ -165,7 +179,9 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
         }
         if (before && !a.observed?.surface) {
           const t = target(before.elements, a.point, undefined)
-          out.push({ ...base, ...('selector' in t ? { step: said(t.selector), origin: 'tree' as const } : point(t.fragile)) })
+          const named = 'selector' in t ? usable(t.selector) : undefined
+          out.push({ ...base, ...(hid.any ? { withheld: true as const } : {}),
+            ...(named ? { step: said(named), origin: 'tree' as const } : point('fragile' in t ? t.fragile : 'no-selector')) })
           break
         }
         out.push({ ...base, ...point('no-element') })
@@ -255,7 +271,8 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const inList = (k: number) => Number.isInteger(k) && k >= 1 && k <= n
   const from = j.from ?? 1
   const to = j.to ?? n
-  if (!inList(from) || !inList(to) || from > to) refusals.push({ reason: 'bad-range' })
+  // Before anything walks the range: `to` is the agent's number, and a huge one would be walked (CodeRabbit, #1244).
+  if (!inList(from) || !inList(to) || from > to) return { ok: false, refusals: [{ reason: 'bad-range' }] }
   for (const k of j.drop ?? []) if (!inList(k)) refusals.push({ step: k, reason: 'out-of-range' })
   const dropped = new Set(j.drop ?? [])
   const kept = (k: number) => k >= from && k <= to && !dropped.has(k)
@@ -312,6 +329,8 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const fragile = chosen.flatMap((c, i) => (captured.steps[i]!.fragile && captured.steps[i]!.step?.type !== 'scroll' ? [`${label(c.k)} ${captured.steps[i]!.fragile}`] : []))
   if (fragile.length) notes.push(`Fragile: ${fragile.join(', ')}`)
   const mismatched = chosen.filter((c) => (c.s as AgentStep).mismatch).map((c) => label(c.k))
+  const withheld = chosen.filter((c) => (c.s as AgentStep).withheld).map((c) => label(c.k))
+  if (withheld.length) notes.push(`Not named by an element whose name holds a typed secret: ${withheld.join(', ')}`)
   if (mismatched.length) notes.push(`The touch was seen to hit another element than the agent named: ${mismatched.join(', ')}`)
   const blocks = [...new Set(chosen.flatMap((c) => ((c.s as AgentStep).origin === 'agent-step' ? [(c.s as AgentStep).block!] : [])))]
   if (blocks.length) notes.push(`Written by the agent (run_flow), not observed: ${blocks.length} block${blocks.length === 1 ? '' : 's'}`)

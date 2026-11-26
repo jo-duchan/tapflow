@@ -87,6 +87,37 @@ describe('agentSteps', () => {
     expect(steps[1]!.expectable!.map((c) => c.selector.label)).toEqual(['Welcome back'])
   })
 
+  it('never offers to expect an element showing one piece of a secret typed with a Tab in it (CodeRabbit, #1244)', () => {
+    const shows = el('Hello hunter2', { role: 'text', frame: { x: 0.1, y: 0.3, width: 0.8, height: 0.05 } })
+    const steps = agentSteps(capture([
+      { kind: 'type', at: 1, text: 'a@b.c\thunter2', field: { secure: false } },
+      tapAt(10, [0.25, 0.82], { selector: { id: 'login' } }),
+      { kind: 'button', at: 30, name: 'home' },
+    ], [{ at: 5, elements: home }, { at: 20, elements: [shows, welcome] }]))
+    expect(steps[1]!.expectable!.map((c) => c.selector.label)).toEqual(['Welcome back'])
+  })
+
+  it('never names a tap by an element whose name holds a typed secret: the next way, down to a point (CodeRabbit, #1244)', () => {
+    const copy = el('Copy', { identifier: 'copy-tok-123', frame: { x: 0.1, y: 0.5, width: 0.3, height: 0.05 } })
+    const bare = el('Copy tok-123', { frame: { x: 0.1, y: 0.5, width: 0.3, height: 0.05 } })
+    const typed: AgentAction = { kind: 'type', at: 1, text: 'tok-123', field: { secure: true } }
+    const [, byTree] = agentSteps(capture([typed, tapAt(10, [0.25, 0.52], { selector: { id: 'copy-tok-123' } })],
+      [{ at: 5, elements: [copy] }]))
+    expect(byTree).toMatchObject({ step: { type: 'tapOn', selector: { text: 'Copy' } }, origin: 'tree', withheld: true })
+    const [, point] = agentSteps(capture([typed, tapAt(10, [0.25, 0.52], { selector: { label: 'Copy tok-123', exact: true } })],
+      [{ at: 5, elements: [bare] }]))
+    expect(point).toMatchObject({ step: { type: 'tapPoint', at: [0.25, 0.52] }, origin: 'coordinate', fragile: 'no-selector', withheld: true })
+    const [, seen] = agentSteps(capture([typed, tapAt(10, [0.25, 0.52], {
+      observed: { point: { x: 0.25, y: 0.52 }, moving: false, element: { label: 'Copy tok-123', traits: 1 } },
+    })], [{ at: 5, elements: [bare] }]))
+    expect(seen).toMatchObject({ step: { type: 'tapPoint' }, withheld: true })
+    const r = agentFlow(agentSteps(capture([{ kind: 'launch', at: 0 }, typed, tapAt(10, [0.25, 0.52], { selector: { label: 'Copy tok-123', exact: true } })],
+      [{ at: 5, elements: [bare] }])), { name: 'copy' })
+    if (!r.ok) throw new Error(JSON.stringify(r.refusals))
+    expect(r.flow.yaml).not.toContain('tok-123')
+    expect(r.flow.notes).toContain('Not named by an element whose name holds a typed secret: #3')
+  })
+
   it('keeps typing with a Tab or a Return in it a secret: it may have moved to the next field', () => {
     const steps = agentSteps(capture([
       { kind: 'type', at: 1, text: 'a@b.c\thunter2', field: { secure: false } },
@@ -181,6 +212,8 @@ describe('agentFlow', () => {
       { step: 9, reason: 'out-of-range' }, { step: 3, reason: 'no-candidate' }, { step: 2, reason: 'not-secret' }, { step: 4, reason: 'bad-secret-name' },
     ] })
     expect(agentFlow(steps, { name: 'l', from: 4, to: 2 })).toMatchObject({ ok: false, refusals: [{ reason: 'bad-range' }] })
+    // Refused before the range is walked: a number this large would otherwise be counted up to (CodeRabbit, #1244).
+    expect(agentFlow(steps, { name: 'l', to: Number.MAX_SAFE_INTEGER })).toEqual({ ok: false, refusals: [{ reason: 'bad-range' }] })
   })
 
   it('turns a swipe that brought the next tapped element into view into scroll until, as Manual does', () => {
