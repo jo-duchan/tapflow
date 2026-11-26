@@ -66,7 +66,9 @@ before** it saw focused, each tree read, a `run_flow` as one block of the agent'
   memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
   or with the process.
 - **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its
-  platform. Its inputs are marked `verifying`, so none is recorded or paired. A failed step is told in the agent's own
+  platform. It refuses rather than verify what it cannot reset: no build launched while capturing (every flow begins
+  with a launch), or a build whose bundle id the relay cannot give. `viewport` is the capture's screen, read when it
+  opened, not the Verify device's. Its inputs are marked `verifying`, so none is recorded or paired. A failed step is told in the agent's own
   numbers (`AgentFlow.origins`) and noted as failed before, so leaving it out is written into the file as such.
 - **The two tools are listed in every session**, not added once a capture opens: `tools/list_changed` is off by default
   in Codex and unreliable in Cursor (their docs and issue trackers, 2026-11-26), so a capture there would have had nothing to call. They cost

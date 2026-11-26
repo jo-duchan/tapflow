@@ -1,7 +1,7 @@
 import type { BrowserToRelay, CaptureObservation, UIElement } from '@tapflowio/protocol'
 import { fromFramePoint, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { AgentAction, AgentCapture, TreeRead } from '@tapflowio/flow-runner/browser'
-import type { FlowDriver } from '@tapflowio/flow-runner'
+import type { FlowDriver, Viewport } from '@tapflowio/flow-runner'
 
 /** How long a capture outlives the device it was made on (D8): an upper bound, not a promise. It holds what was typed,
  *  passwords included, so it is dropped sooner when a new capture opens or this process ends. */
@@ -28,8 +28,12 @@ export class AgentCaptureRecorder implements AgentCapture {
   buildId: number | undefined
   /** A `launch_app` carried arguments, which a flow's `launchApp` does not write. */
   launchOptions = false
+  /** The capture's screen, read when it opened: what a flow touching a point is written for. */
+  viewport: Viewport | undefined
   verifying = false
   attempts = 0
+  /** Inputs whose touch left but whose landing was not confirmed: recorded, and said in the list. */
+  unconfirmed = 0
   readonly failedBefore = new Set<number>()
   private blocks = 0
   /** When the device was let go; the capture is kept `KEEP_AFTER_RELEASE_MS` after it. */
@@ -58,7 +62,11 @@ export class AgentCaptureRecorder implements AgentCapture {
     }
   }
 
-  /** The touch-ends sent since the last call: the one input a tool just made. */
+  /**
+   * The touch-ends sent since the last call: the one input a tool just made. One list for the capture, so it assumes the
+   * agent's tool calls on its device do not overlap, as a person's inputs do not; two at once could trade ids, which only
+   * pairs an observation with the other touch.
+   */
   take(): string[] {
     return this.sent.splice(0)
   }
@@ -94,6 +102,12 @@ export class AgentCaptureRecorder implements AgentCapture {
     this.touches.set(id, action)
     for (const msg of this.early.get(id) ?? []) this.noteObservation(msg)
     this.early.delete(id)
+  }
+
+  /** An input that may have landed: its tool could not confirm it. */
+  addUnconfirmed(action: AgentAction, touchEnds: string[]): void {
+    this.unconfirmed++
+    this.add(action, touchEnds)
   }
 
   /** A `run_flow` the agent ran while capturing, numbered from 1. */

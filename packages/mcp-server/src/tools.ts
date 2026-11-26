@@ -430,13 +430,18 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           let why: string | undefined
           try { observing = await client.observe(sessionId, true) } catch (e) { why = (e as Error).message }
           capture = new AgentCaptureRecorder(sessionId, platform, observing)
+          // The screen the capture's points are made on, and so the one its flow is written for, whatever Verify runs on.
+          capture.viewport = viewportOf(await client.chrome(sessionId, 2_000).catch(() => null))
           const note = observing
             ? 'Touches by coordinates are named by what they hit; on iOS, only in an app started after this (launch_app with arguments, or a fresh install).'
             : `This device's touches cannot be observed${why ? ` (${why})` : ' (an older relay or agent)'}: a tap by coordinates is named by the tree you read before it, or kept as a point.`
           return ok(JSON.stringify({ connected: true, sessionId, watchUrl, capture: { open: true, observing, note } }))
         }
         // Back on the capture's device: it is held again, so the hour after a release starts over at the next.
-        if (currentCapture()?.sessionId === sessionId) capture!.hold()
+        if (currentCapture()?.sessionId === sessionId) {
+          capture!.hold()
+          clearTimeout(dropTimer)
+        }
         return ok(JSON.stringify({ connected: true, sessionId, watchUrl }))
       } catch (e) {
         return err(`connect_device failed: ${(e as Error).message}`)
@@ -629,6 +634,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         }
         const base = makeFlowDriver(client, sessionId, buildId)
         const driver = rec ? recordingDriver(base, rec) : base
+        // The block's time is its start: a tree it reads is after it, not the screen after the step before it.
+        const blockAt = Date.now()
         // Each step as it starts, for whoever watches this session (A2); named without anything it types.
         const result = await runFlow(parsed, driver, {
           onStep: (mark) => { if (mark.phase === 'start' && mark.label) client.activity(sessionId, `step ${mark.index + 1}: ${mark.label}`) },
@@ -639,7 +646,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           if (buildId !== undefined) rec.buildId = buildId
           const passed = result.steps.findIndex((s) => s.status !== 'passed')
           rec.addBlock({
-            kind: 'flow', at: Date.now(), steps: parsed.steps, passed: passed < 0 ? parsed.steps.length : passed,
+            kind: 'flow', at: blockAt, steps: parsed.steps, passed: passed < 0 ? parsed.steps.length : passed,
             source: { ...(flowPath !== undefined ? { path: flowPath } : {}), hash: createHash('sha256').update(yamlText).digest('hex').slice(0, 12) },
           })
         }
@@ -679,8 +686,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       const steps = agentSteps(c)
       const notes: string[] = []
       if (!c.observing) notes.push('Touches were not observed on this device: taps by coordinates are named by the tree before them, or kept as points.')
-      if (!steps.some((s) => s.step?.type === 'launchApp')) notes.push('No launch was captured: Verify resets the device first, so a flow that does not launch the app starts on the home screen.')
+      if (!steps.some((s) => s.step?.type === 'launchApp')) notes.push('No launch was captured: Verify resets the device and launches nothing, so launch the app with launch_app (or run_flow with buildId) before the steps.')
       if (c.launchOptions) notes.push('The app was launched with arguments, which a flow\'s launchApp does not carry.')
+      if (c.unconfirmed) notes.push(`${c.unconfirmed} input${c.unconfirmed === 1 ? ' was' : 's were'} not confirmed and may not have landed; they are listed, and Verify shows whether they belong.`)
       if (c.failedBefore.size) notes.push(`Failed in an earlier Verify: ${[...c.failedBefore].sort((a, b) => a - b).map((k) => `#${k}`).join(', ')}`)
       return ok(JSON.stringify({ sessionId: c.sessionId, verifyAttempts: c.attempts, steps: steps.map((s, i) => listed(s, i + 1)), ...(notes.length ? { notes } : {}) }))
     },
@@ -713,15 +721,23 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         let appId: string | undefined
         if (c.buildId !== undefined) {
           const build = await client.lookupBuild(c.buildId)
-          if (build.kind === 'found' && build.bundleId) appId = build.bundleId
+          // Without the app's id the reset would leave its data, and a flow could pass on a sign-in left over.
+          if (build.kind !== 'found' || !build.bundleId) {
+            return err(`capture_flow: cannot reset the app of build ${c.buildId} (${build.kind === 'unknown' ? build.reason : build.kind === 'not-found' ? 'build not found' : 'no bundle id'}), so it was not verified`)
+          }
+          appId = build.bundleId
         }
-        const viewport = viewportOf(await client.chrome(sessionId, 2_000).catch(() => null))
+        // The capture's own screen; read here only if it was not known when the capture opened, and only on its device.
+        const viewport = c.viewport ?? (sessionId === c.sessionId ? viewportOf(await client.chrome(sessionId, 2_000).catch(() => null)) : undefined)
         const made = agentFlow(agentSteps(c), {
           name, ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}),
           ...(drop ? { drop } : {}), ...(expect ? { expect } : {}), ...(secrets ? { secrets } : {}),
           failedBefore: [...c.failedBefore], attempt: c.attempts + 1,
         }, { ...(appId ? { appId } : {}), ...(viewport ? { viewport } : {}) })
         if (!made.ok) return err(JSON.stringify({ verified: false, refused: made.refusals }))
+        if (c.buildId === undefined && made.flow.steps.some((st) => st.type === 'launchApp')) {
+          return err('capture_flow: the flow launches the app, and no build was launched while capturing — launch it with launch_app first, so Verify knows which')
+        }
         c.attempts++
         // The Verify's own inputs are not the agent's: nothing it sends is recorded or paired (R-E).
         c.verifying = true
@@ -739,7 +755,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           c.take()
           c.verifying = false
         }
-        const resetNote = reset ? {} : { resetNote: 'The device\'s agent cannot reset it as a run does: only the app\'s data was cleared.' }
+        const resetNote = reset ? {} : { resetNote: appId ? 'The device\'s agent cannot reset it as a run does: only the app\'s data was cleared.' : 'The device\'s agent cannot reset it as a run does, and nothing was reset.' }
         if (result.status === 'passed') {
           return ok(JSON.stringify({ verified: true, attempt: c.attempts, ...resetNote, notes: made.flow.notes, yaml: made.flow.yaml }))
         }
@@ -846,6 +862,10 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         rec?.add({ kind: 'tap', at, point: rec.appPoint(x / screenshotWidth, y / screenshotHeight), ...(holdMs !== undefined ? { holdMs } : {}) }, rec.take())
         return ok(JSON.stringify({ tapped: true, x, y, ...(holdMs !== undefined ? { holdMs } : {}) }))
       } catch (e) {
+        // Its touch-end left, so it may have landed: kept, as the device may show it (`could not confirm`).
+        const rec = recording(sessionId)
+        const ends = rec?.take() ?? []
+        if (rec && ends.length) rec.addUnconfirmed({ kind: 'tap', at: Date.now(), point: rec.appPoint(x / screenshotWidth, y / screenshotHeight), ...(holdMs !== undefined ? { holdMs } : {}) }, ends)
         return err(`tap failed: ${(e as Error).message}`)
       }
     },
@@ -926,6 +946,14 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         }, rec.take())
         return ok(JSON.stringify({ swiped: true, from: { x: startX, y: startY }, to: { x: endX, y: endY } }))
       } catch (e) {
+        const rec = recording(sessionId)
+        const ends = rec?.take() ?? []
+        if (rec && ends.length) {
+          rec.addUnconfirmed({
+            kind: 'swipe', at: Date.now(), durationMs: durationMs ?? 300,
+            from: rec.appPoint(startX / screenshotWidth, startY / screenshotHeight), to: rec.appPoint(endX / screenshotWidth, endY / screenshotHeight),
+          }, ends)
+        }
         return err(`swipe failed: ${(e as Error).message}`)
       }
     },

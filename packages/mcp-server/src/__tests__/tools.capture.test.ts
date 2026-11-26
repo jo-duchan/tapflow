@@ -197,6 +197,58 @@ describe('MCP Flow Capture', () => {
     expect(h.client.runReset).not.toHaveBeenCalled()
   })
 
+  it('keeps a capture whose device was taken back, past the hour after it was first let go', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      await h.call('connect_device', { sessionId: 's1', capture: true })
+      await h.call('disconnect_device', { sessionId: 's1' })
+      await h.call('connect_device', { sessionId: 's1' })
+      vi.advanceTimersByTime(KEEP_AFTER_RELEASE_MS + 60_000)
+      expect((await h.call('list_captured_steps')).isError).toBeFalsy()
+      await h.call('disconnect_device', { sessionId: 's1' })
+      vi.advanceTimersByTime(KEEP_AFTER_RELEASE_MS + 60_000)
+      expect((await h.call('list_captured_steps')).isError).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('verifies nothing it cannot reset or launch: no build launched, or a build whose app cannot be named', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    expect((await h.json('list_captured_steps')).body['notes']).toContainEqual(expect.stringContaining('No launch was captured'))
+    // A flow always begins with a launch, and Verify would not know which build.
+    const none = await h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    expect(none.isError).toBe(true)
+    expect(none.content[0]!.text).toContain('launch_app')
+
+    const unknown = harness()
+    unknown.client.lookupBuild.mockResolvedValue({ kind: 'unknown', reason: 'relay unreachable' } as never)
+    await unknown.call('connect_device', { sessionId: 's1', capture: true })
+    await unknown.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await unknown.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    const res = await unknown.call('capture_flow', { sessionId: 's1', name: 'l' })
+    expect(res.isError).toBe(true)
+    expect(res.content[0]!.text).toContain('relay unreachable')
+    for (const c of [h, unknown]) expect(c.client.runReset).not.toHaveBeenCalled()
+  })
+
+  it('lists a tap whose landing could not be confirmed, and says so', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    const sent = h.client.tap.getMockImplementation()!
+    h.client.tap.mockImplementationOnce(async (s: string) => {
+      await sent(s)
+      throw new Error('Could not confirm the input reached the device')
+    })
+    expect((await h.call('tap', { sessionId: 's1', x: 90, y: 10, screenshotWidth: 100, screenshotHeight: 200 })).isError).toBe(true)
+    const { body } = await h.json('list_captured_steps')
+    expect((body as unknown as Listed).steps.map((st) => st.step)).toEqual([{ type: 'tapPoint', at: [0.9, 0.05] }])
+    expect(body['notes']).toContainEqual(expect.stringContaining('1 input was not confirmed'))
+  })
+
   it('answers list_captured_steps and capture_flow with an error when no capture is open', async () => {
     const h = harness()
     expect((await h.call('list_captured_steps')).isError).toBe(true)
