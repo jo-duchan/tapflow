@@ -52,7 +52,7 @@ import {
   DeviceListWatcher,
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
-import { AdbWrapper } from './AdbWrapper.js'
+import { AdbWrapper, DumpNoXmlError } from './AdbWrapper.js'
 import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
 import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
 import { spawn } from 'child_process'
@@ -89,7 +89,7 @@ const APP_LOG_PID_RETRY_INTERVAL_MS = 250
 // string on its own is what puts a control on screen.
 const AGENT_CAPABILITIES: AgentCapability[] = [
   'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
-  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch', 'capture-observe',
 ]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
@@ -2375,6 +2375,28 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     })
   }
 
+  /**
+   * The touch watch on or off for a device (record-time observation): by a boot, which always starts a new one, or by
+   * `capture:observe` (MCP Flow Capture, L6a, `keepWatch`), which keeps one already on so a gesture in flight keeps its
+   * report. Only touches on the gRPC channel are observed, and only for the app this agent last installed or launched.
+   */
+  private applyObservation(avdId: string, observe: boolean, keepWatch = false): void {
+    const current = this.touchWatches.get(avdId)
+    if (observe && keepWatch && current) return
+    current?.stop()
+    this.touchWatches.delete(avdId)
+    const serial = this.adb.getSerial(avdId)
+    if (!observe || !serial) return
+    this.touchWatches.set(avdId, new TouchWatch({
+      hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
+      framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
+      ping: (sr) => this.adb.pingFocusedServer(sr),
+      hold: (sr, on) => this.adb.holdConnection(sr, on),
+      send: (m) => this.sendMsg(m),
+      ...(this.relayTakesLandings ? { landings: { send: (m) => this.sendMsg(m), home: (sr) => this.adb.homePackage(sr) } } : {}),
+    }, serial, () => this.appPackages.get(avdId)))
+  }
+
   /** One more step's time at most. A clear still running past that fails the boot rather than announcing a device the
    *  run's install could lose its data on: failing the step does not stop the clear, and nothing else orders the two. */
   private async awaitPendingClears(deviceId: string): Promise<void> {
@@ -2525,21 +2547,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.sendChrome(state)
       void this.sendPostures(state)
       state.booted = true
-      // What each touch hits, while this person is recorded — decided at the boot, as iOS: turning capturing on
-      // mid-session is observed from the next boot. The stream's teardown (`cleanupDeviceState`) ends it.
-      this.touchWatches.get(avdId)?.stop()
-      this.touchWatches.delete(avdId)
-      const serial = this.adb.getSerial(avdId)
-      if (observeTouches && serial) {
-        this.touchWatches.set(avdId, new TouchWatch({
-          hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
-          framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
-          ping: (sr) => this.adb.pingFocusedServer(sr),
-          hold: (sr, on) => this.adb.holdConnection(sr, on),
-          send: (m) => this.sendMsg(m),
-          ...(this.relayTakesLandings ? { landings: { send: (m) => this.sendMsg(m), home: (sr) => this.adb.homePackage(sr) } } : {}),
-        }, serial, () => this.appPackages.get(avdId)))
-      }
+      // What each touch hits, while this person is recorded or an MCP client armed it — decided at the boot for a
+      // person, as iOS: turning capturing on mid-session is observed from the next boot. An MCP client arms a running
+      // device with `capture:observe`. The stream's teardown (`cleanupDeviceState`) ends it.
+      this.applyObservation(avdId, observeTouches)
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
       this.raiseAppLogWatch(state)
       // Clear a network condition the last session left behind, then report (#607).
@@ -3964,6 +3975,16 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         this.stopAppLogWatcher(state)
         break
       }
+      case 'capture:observe': {
+        // MCP Flow Capture (L6a): arm or disarm observation on a device that may be running already, with no boot. The
+        // relay sends it only from an MCP holder, again when this agent comes back, and `off` when the holder goes.
+        // Mid-boot it changes nothing for long: the boot starts its own watch by the relay's `observed`, which counts
+        // an armed MCP holder.
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state) break
+        this.applyObservation(state.deviceId, (msg.payload as { on?: unknown } | undefined)?.on === true, true)
+        break
+      }
       case 'device:run-reset': {
         const requestId = this.correlatorOf(msg)
         if (requestId === null) break
@@ -4025,6 +4046,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
+            // The relay passes the reason to its HTTP caller (a 502's body) but logs none: this is the only log line for it.
+            // Not what the device printed, which can be on-screen text: the caller has that in the reply.
+            logger.warn(`ui:tree on ${serial} failed: ${(e instanceof DumpNoXmlError ? e.logged : message).slice(0, 300)}`)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
           })
         break

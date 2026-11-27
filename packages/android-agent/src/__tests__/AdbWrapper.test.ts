@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { PlatformError, ValidationError } from '@tapflowio/agent-core'
-import { AdbWrapper } from '../AdbWrapper'
+import { AdbWrapper, DumpNoXmlError } from '../AdbWrapper'
 import type { AdbRunner } from '../adb'
 
 function mockRunner(responses: {
@@ -1129,6 +1129,17 @@ describe('AdbWrapper', () => {
       const cut = `<?xml version='1.0'?>\n<hierarchy rotation="0"><node `
       const runner = dumper({ tree: cut, stock: cut })
       await expect(new AdbWrapper(runner).dumpUiHierarchy('emulator-5554')).rejects.toThrow(PlatformError)
+    })
+
+    // The cut-off output can be on-screen text: the caller's message keeps it, the log's does not (CodeRabbit, #1242).
+    it('keeps what a cut-off dump printed out of the error\'s text for a log', async () => {
+      const cut = `<?xml version='1.0'?>\n<hierarchy rotation="0"><node text="Jane Doe" `
+      const runner = dumper({ tree: cut, stock: cut })
+      const e = await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554').catch((x: unknown) => x)
+      expect(e).toBeInstanceOf(DumpNoXmlError)
+      expect((e as DumpNoXmlError).message).toContain('Jane Doe')
+      expect((e as DumpNoXmlError).logged).not.toContain('Jane Doe')
+      expect((e as DumpNoXmlError).logged).toContain('produced no XML')
     })
   })
 

@@ -55,6 +55,13 @@ describe('what the flow gets', () => {
     expect(editedCapture(secret)!.steps.some((s) => s.step?.type === 'assertVisible')).toBe(false)
   })
 
+  // #1248: one rule with MCP's capture (flow-runner `selectorHoldsSecret`), every string of the selector — not its
+  // label and id alone.
+  it('reads a bare selector\'s text for a secret too', () => {
+    const bare = reduce(reduce(edit, { type: 'add-expected', index: 1, selector: { text: 'Hi alice@x.com' } }), { type: 'make-secret', index: 3 })
+    expect(editedCapture(bare)!.steps.some((s) => s.step?.type === 'assertVisible')).toBe(false)
+  })
+
   // CodeRabbit on #1158: removing the step made a secret does not let its value back into the file.
   it('keeps a made secret\'s value out of the file after its step is removed', () => {
     const signedIn = { label: 'Signed in as alice@x.com', exact: true as const }

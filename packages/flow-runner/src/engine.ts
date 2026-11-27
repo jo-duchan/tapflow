@@ -1217,7 +1217,8 @@ const sameViewport = (a: Viewport, b: Viewport): boolean =>
   Math.abs(Math.min(a.width, a.height) - b.width) < 0.5 && Math.abs(Math.max(a.width, a.height) - b.height) < 0.5
 
 /** The first step that touches a point the flow wrote, which lands where that fraction of the screen is, or -1. */
-function firstPointStep(flow: Flow): number {
+/** The first step that touches a point a flow wrote, or -1: what makes a flow's `viewport` matter. */
+export function firstPointStep(flow: Pick<Flow, 'steps'>): number {
   return flow.steps.findIndex((s) => s.type === 'tapPoint' || s.type === 'longPressPoint' || s.type === 'swipe'
     || (s.type === 'pinch' && Array.isArray(s.on)))
 }

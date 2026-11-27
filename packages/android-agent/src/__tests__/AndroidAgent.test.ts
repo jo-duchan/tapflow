@@ -148,7 +148,7 @@ import { hasEnvelope, readEnvelopeFlags, CODEC_H264, CODEC_JPEG } from '@tapflow
 import { AndroidAgent, pickAndroidBackend, parseSpsFromNal, toNaturalPoint } from '../AndroidAgent'
 import { isPosturable, SHUTDOWN_NO_SESSION_STATE } from '@tapflowio/agent-core'
 import type { SkinRotation } from '../emulator/EmulatorGrpcClient'
-import { AdbWrapper, StorageFullError } from '../AdbWrapper'
+import { AdbWrapper, DumpNoXmlError, StorageFullError } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
 import { EmulatorVideo } from '../emulator/EmulatorVideo'
 import { EmulatorGrpcClient } from '../emulator/EmulatorGrpcClient'
@@ -2840,6 +2840,28 @@ describe('AndroidAgent', () => {
         expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
       })
 
+      // MCP Flow Capture (L6a): a running device gets no boot, so `capture:observe` arms it; arming again keeps the
+      // watch (a gesture in flight keeps its report), and off lets go of the connection.
+      it('arms observation on a booted device with capture:observe, keeps it when armed again, and disarms it', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        expect(hold).not.toHaveBeenCalled()
+        const watches = () => (agent as unknown as { touchWatches: Map<string, unknown> }).touchWatches
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        const armed = watches().get('avd:Pixel_8_API_34')
+        expect(armed).toBeDefined()
+        inject({ type: 'capture:observe', requestId: 'o2', payload: { on: true } })
+        expect(watches().get('avd:Pixel_8_API_34')).toBe(armed)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        inject({ type: 'capture:observe', requestId: 'o3', payload: { on: false } })
+        expect(watches().has('avd:Pixel_8_API_34')).toBe(false)
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
       // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
       it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
         const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
@@ -3352,6 +3374,42 @@ describe('AndroidAgent', () => {
         expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k3', keyboard: { shown: false } })
         expect((out.find((m) => m['type'] === 'ui:keyboard:response')!['keyboard'] as { onHome?: boolean }).onHome).toBeUndefined()
       })
+    })
+
+    // What the device printed can be on-screen text: the caller gets it, the log does not (CodeRabbit, #1242).
+    it('logs a dump that produced no XML without what the device printed', async () => {
+      vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new DumpNoXmlError('no XML within 10s (<node text="Jane Doe 010-1234") — retry', 'no XML within 10s — retry'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        inject({ type: 'ui:tree:request', requestId: 'rq-t2' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-t2')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-t2')!['message']).toContain('Jane Doe')
+        const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+        expect(logged).toMatch(/ui:tree on emulator-5554 failed: no XML within 10s — retry/)
+        expect(logged).not.toContain('Jane Doe')
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // The relay hands a failed tree read's reason to its HTTP caller and logs none: the agent's log is where it is kept.
+    it('logs why a tree read failed, and still answers the error', async () => {
+      vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new Error('uidump: another UiAutomation is connected'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        inject({ type: 'ui:tree:request', requestId: 'rq-t1' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-t1')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-t1')).toMatchObject({ type: 'ui:tree:error', message: 'uidump: another UiAutomation is connected' })
+        expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toMatch(/ui:tree on emulator-5554 failed: uidump: another UiAutomation is connected/)
+      } finally {
+        warn.mockRestore()
+      }
     })
 
     // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.

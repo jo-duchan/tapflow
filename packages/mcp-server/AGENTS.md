@@ -48,6 +48,38 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 
 `query_ui_tree` returns the unified element schema (`role`/`label`/`identifier`/`placeholder`/`frame`/`enabled`/`rawRole`) via `GET /api/v1/sessions/:sessionId/ui-tree`. Frames are normalized 0-1, so a frame center multiplied by the screenshot pixel size feeds straight into `tap` — except on an iOS app drawn in landscape, where the frames are in the app's space and the screenshot is the portrait framebuffer (#1119). `run_flow` turns its points by the tree's `interfaceTurn`; these two tools do not.
 
+### MCP Flow Capture (L6a): this server keeps the record, the relay keeps none
+
+`connect_device` with `capture: true` opens a capture (`src/capture.ts`, one per process): from then on the tools record
+what the agent did on that session — an element tap with the selector it named (the engine's wait left out), a tap or
+swipe by pixels carried into the app's space by the latest tree's turn, typed text with the field a tree read **just
+before** it saw focused, each tree read, a `run_flow` as one block of the agent's steps, keys, buttons and launches.
+`list_captured_steps` and `capture_flow` hand that to flow-runner's `agentSteps` and `agentFlow`; nothing is named here.
+
+- **Observation is paired by `requestId`, which only this client knows.** `client.onSend` hears every touch-end as it
+  leaves, and the relay passes on `capture:observation` only for a touch this socket sent. An observation of a touch the
+  capture did not send (a Verify's, a dashboard's) is dropped, and one that arrives before its tool recorded the touch is
+  held until it does. The listeners are attached at the first capture, so a server nobody captures with pays nothing.
+- **What is typed is a secret unless a read said otherwise** (fail-closed): a field only becomes `inputText` when the
+  read before it found one focused field with `secure: false`. While capturing, `type_text` answers with the length, not
+  the text, and `run_flow` refuses an `inputText` step, since its field is never read. A key is the same text by
+  another door, so `press_key` and a `run_flow` `pressKey` take only an allowlist of keys that type nothing (Enter, Tab,
+  Backspace, arrows…) — an allowlist, because `Numpad1` or a layout's punctuation would slip past a list of letters
+  and digits. The values live in this process's
+  memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
+  or with the process.
+- **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its
+  platform. It refuses rather than verify what it cannot reset: no build launched while capturing (every flow begins
+  with a launch), or a build whose bundle id the relay cannot give. `viewport` is the capture's screen, read when it
+  opened, not the Verify device's. Its inputs are marked `verifying`, so none is recorded or paired. A failed step is told in the agent's own
+  numbers (`AgentFlow.origins`) and noted as failed before, so leaving it out is written into the file as such.
+- **The two tools are listed in every session**, not added once a capture opens: `tools/list_changed` is off by default
+  in Codex and unreliable in Cursor (their docs and issue trackers, 2026-11-26), so a capture there would have had nothing to call. They cost
+  1,533 bytes of the budget `guide.test.ts` holds.
+- **iOS names what a touch hit only in an app process started after observation was armed** (app accessibility is read
+  at launch), which `connect_device` says. The plan's automatic relaunch on opening a capture is not done: the tree read
+  before a tap still names it, and Verify starts from a reset either way.
+
 ### Input acks: silence is answered "could not confirm", and never retried here
 
 `awaitInputAck` used to report **success** when no ack arrived within 2s. That fallback was for agents
