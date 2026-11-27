@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process'
 import busboy from 'busboy'
 import { androidSdkCandidates, findOnPath, hostExecutableName } from '@tapflowio/agent-core/utils'
 import { getDb } from '../db.js'
+import { parseBinaryPlist } from '../lib/binaryPlist.js'
 import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
 import { pipeUpload, unlinkSafe, StorageFullError, assertDiskRoom } from '../lib/uploads.js'
@@ -44,11 +45,25 @@ function stripArchiveExt(filename: string): string {
 
 // ── zip / plist helpers ────────────────────────────────────────────────────
 
+const XML_ENTITIES = new Map([['amp', '&'], ['lt', '<'], ['gt', '>'], ['quot', '"'], ['apos', "'"]])
+
+/** An app named "R&D" is written `R&amp;D`; read it back as the binary parser does, so both hosts agree. */
+function decodeXmlEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (whole, name: string) => {
+    if (name[0] !== '#') return XML_ENTITIES.get(name) ?? whole
+    const code = name[1] === 'x' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
+    return code <= 0x10ffff ? String.fromCodePoint(code) : whole
+  })
+}
+
+// Matches a key at any depth, and a later match wins. A nested dict repeating a top-level CFBundle* key
+// after it would therefore override it here but not in the binary parser, which reads the top level
+// only. No Xcode template nests one (the usual nested keys are CFBundleURLName and CFBundleTypeName).
 function parseXmlPlist(xml: string): Record<string, string> {
   const result: Record<string, string> = {}
   const re = /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(xml)) !== null) result[m[1]] = m[2]
+  while ((m = re.exec(xml)) !== null) result[decodeXmlEntities(m[1])] = decodeXmlEntities(m[2])
   return result
 }
 
@@ -59,18 +74,38 @@ type AppInfo = {
   appName: string | null
 }
 
+/**
+ * The parser checks every offset itself and its tests corrupt every byte to hold that. This catch is the
+ * second line, not the first: an upload whose plist slipped past both is stored without metadata
+ * instead of failing the request.
+ */
+function parseBinaryPlistSafely(plistBuf: Buffer): Record<string, string> | null {
+  try {
+    return parseBinaryPlist(plistBuf)
+  } catch {
+    return null
+  }
+}
+
+/** A binary plist converted to XML by `plutil`, or null where it is missing (Docker, Linux) or fails. */
+function plutilToXml(plistBuf: Buffer): string | null {
+  const plutil = spawnSync('plutil', ['-convert', 'xml1', '-o', '-', '-'], {
+    input: plistBuf,
+    encoding: 'utf8',
+  })
+  return plutil.status === 0 ? plutil.stdout : null
+}
+
 /** Info.plist Buffer(xml 또는 bplist)에서 CFBundle* 를 파싱한다. 아카이브 종류와 무관. */
-function parseInfoPlist(plistBuf: Buffer): AppInfo {
+export function parseInfoPlist(plistBuf: Buffer, toXml: (buf: Buffer) => string | null = plutilToXml): AppInfo {
   let parsed: Record<string, string>
 
   if (plistBuf.subarray(0, 6).toString() === 'bplist') {
-    // binary plist — plutil 시도 (macOS only; 없으면 빈 결과)
-    const plutil = spawnSync('plutil', ['-convert', 'xml1', '-o', '-', '-'], {
-      input: plistBuf,
-      encoding: 'utf8',
-    })
-    if (plutil.status !== 0) return { bundleId: null, versionName: null, buildNumber: null, appName: null }
-    parsed = parseXmlPlist(plutil.stdout as string)
+    // plutil first, so a relay on macOS reads exactly what it always has; the parser covers hosts without it (#1257).
+    const xml = toXml(plistBuf)
+    const fromBinary = xml === null ? parseBinaryPlistSafely(plistBuf) : parseXmlPlist(xml)
+    if (fromBinary === null) return { bundleId: null, versionName: null, buildNumber: null, appName: null }
+    parsed = fromBinary
   } else {
     parsed = parseXmlPlist(plistBuf.toString('utf8'))
   }
