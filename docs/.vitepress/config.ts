@@ -111,6 +111,7 @@ const enSidebar = [
         collapsed: true,
         items: [
           { text: 'MCP server', link: '/automation/mcp-server' },
+          { text: 'AI Agent Flow Capture', link: '/automation/agent-flow-capture' },
           { text: 'Flow reference', link: '/automation/flows' },
           { text: 'Flow Runs', link: '/automation/runs' },
           { text: 'MCP in CI/CD', link: '/automation/mcp-ci' },
@@ -226,6 +227,7 @@ const koSidebar = [
         collapsed: true,
         items: [
           { text: 'MCP 서버', link: '/ko/automation/mcp-server' },
+          { text: 'AI 에이전트 Flow Capture', link: '/ko/automation/agent-flow-capture' },
           { text: '플로우 레퍼런스', link: '/ko/automation/flows' },
           { text: '플로우 실행 기록 (Flow Runs)', link: '/ko/automation/runs' },
           { text: 'CI/CD에서 MCP 활용', link: '/ko/automation/mcp-ci' },
