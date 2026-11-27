@@ -80,7 +80,8 @@ export interface AgentStep extends CapturedStep {
   /** A tap the app did not respond to (Manual's rule): offered to be left out, never left out by itself. */
   noResponse?: true
   landed?: TouchLanding
-  /** A name for it held a secret's value, so it was not used: named by the next way, or left a point. */
+  /** A name for it held a secret's value, so it was not used: named by the next way, or left a point. A `run_flow`
+   *  step holding one is left out (`step: null`). */
   withheld?: true
 }
 
@@ -215,9 +216,15 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
         break
       case 'openUrl': out.push({ raw: raw(a.at), step: { type: 'openUrl', url: a.url }, origin: 'agent', ...common }); break
       case 'flow':
-        a.steps.forEach((step, k) => out.push({
-          raw: raw(a.at), step, origin: 'agent-step', block: a.block, ...(k >= a.passed ? { failed: true as const } : {}),
-        }))
+        // A step holding a typed secret anywhere (a selector, a URL) is left out: it has no other way to be named, and
+        // the agent wrote it, so nothing says which field is the secret's (CodeRabbit, #1248).
+        a.steps.forEach((step, k) => {
+          const hidden = mentionsSecret(JSON.stringify(step), secrets)
+          out.push({
+            raw: raw(a.at), step: hidden ? null : step, origin: 'agent-step', block: a.block,
+            ...(k >= a.passed ? { failed: true as const } : {}), ...(hidden ? { withheld: true as const } : {}),
+          })
+        })
         break
     }
   }
@@ -345,8 +352,11 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const fragile = chosen.flatMap((c, i) => (captured.steps[i]!.fragile && captured.steps[i]!.step?.type !== 'scroll' ? [`${label(c.k)} ${captured.steps[i]!.fragile}`] : []))
   if (fragile.length) notes.push(`Fragile: ${fragile.join(', ')}`)
   const mismatched = chosen.filter((c) => (c.s as AgentStep).mismatch).map((c) => label(c.k))
-  const withheld = chosen.filter((c) => (c.s as AgentStep).withheld).map((c) => label(c.k))
-  if (withheld.length) notes.push(`Not named by an element whose name holds a typed secret: ${withheld.join(', ')}`)
+  const withheld = chosen.filter((c) => (c.s as AgentStep).withheld)
+  const renamed = withheld.filter((c) => (c.s as AgentStep).origin !== 'agent-step').map((c) => label(c.k))
+  const hidden = withheld.filter((c) => (c.s as AgentStep).origin === 'agent-step').map((c) => label(c.k))
+  if (renamed.length) notes.push(`Not named by an element whose name holds a typed secret: ${renamed.join(', ')}`)
+  if (hidden.length) notes.push(`Left out, a run_flow step holding a typed secret: ${hidden.join(', ')}`)
   if (mismatched.length) notes.push(`The touch was seen to hit another element than the agent named: ${mismatched.join(', ')}`)
   const blocks = [...new Set(chosen.flatMap((c) => ((c.s as AgentStep).origin === 'agent-step' ? [(c.s as AgentStep).block!] : [])))]
   if (blocks.length) notes.push(`Written by the agent (run_flow), not observed: ${blocks.length} block${blocks.length === 1 ? '' : 's'}`)

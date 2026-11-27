@@ -254,6 +254,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   // MCP Flow Capture (L6a): one capture per server process, opened by `connect_device` with `capture: true` (D8).
   let capture: AgentCaptureRecorder | null = null
   let dropTimer: NodeJS.Timeout | undefined
+  /** The device a Verify is resetting and replaying on, which can be another than the capture's (same platform). Held by
+   *  the tools rather than the recorder: a recorder replaced mid-Verify would carry no trace of it (CodeRabbit, #1248). */
+  let verifyingOn: string | undefined
   // Listened to from the first capture on: a server nobody captures with pays nothing per message.
   let listening = false
   const listen = () => {
@@ -432,8 +435,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         if (open) {
           // A recorder replacing one mid-Verify would let a second capture_flow reset and replay beside it (CodeRabbit,
           // #1248).
-          if (capture?.verifying && capture.sessionId === sessionId) {
-            return err('connect_device: a Verify of this capture is running on this device — wait for capture_flow to answer')
+          // On any device: a new capture drops the one being verified, and could start a second Verify beside it.
+          if (verifyingOn !== undefined) {
+            return err(`connect_device: a capture is being verified on ${verifyingOn} — wait for capture_flow to answer, then open a new one`)
           }
           // A new capture drops the one before, whatever device it was on: it holds what was typed.
           capture = null
@@ -732,10 +736,12 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     async ({ sessionId, name, from, to, drop, expect, secrets }) => {
       const c = currentCapture()
       if (!c) return err('capture_flow: no capture is open — connect_device with capture: true, then use the device')
+      // The recorder's own flag is enough: `connect_device` refuses to replace it while `verifyingOn` is set.
       if (c.verifying) return err('capture_flow: a Verify of this capture is already running')
       // Taken before the first await, and given back on every way out: a second call in between would reset and replay
       // beside this one (CodeRabbit, #1248). Nothing the agent does meanwhile is recorded, nor anything the Verify sends.
       c.verifying = true
+      verifyingOn = sessionId
       try {
         const platform = await platformOf(client, sessionId)
         if (c.platform !== undefined && platform !== undefined && platform !== c.platform) {
@@ -793,6 +799,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       } finally {
         c.take()
         c.verifying = false
+        verifyingOn = undefined
       }
     },
   )

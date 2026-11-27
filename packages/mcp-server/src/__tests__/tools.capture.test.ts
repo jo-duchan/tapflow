@@ -307,6 +307,23 @@ describe('MCP Flow Capture', () => {
     expect(JSON.parse((await verifying).content[0]!.text!)['verified']).toBe(true)
   })
 
+  it('keeps a Verify on another device alone too, until it answers', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    let answer!: () => void
+    h.client.lookupBuild.mockImplementationOnce(() => new Promise((r) => { answer = () => r({ kind: 'found', bundleId: 'com.app', platform: 'ios' }) }) as never)
+    const verifying = h.call('capture_flow', { sessionId: 's2', name: 'l' })
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    // The capture was opened on s1, and its Verify runs on s2: a new capture there would let a second Verify start.
+    expect((await h.call('connect_device', { sessionId: 's2', capture: true })).isError).toBe(true)
+    expect((await h.call('capture_flow', { sessionId: 's2', name: 'l' })).isError).toBe(true)
+    answer()
+    expect(JSON.parse((await verifying).content[0]!.text!)['verified']).toBe(true)
+    expect((await h.call('connect_device', { sessionId: 's2', capture: true })).isError).toBeFalsy()
+  })
+
   it('takes a run_flow\'s build as the capture\'s only when the block launched it', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })

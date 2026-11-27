@@ -155,6 +155,24 @@ describe('agentSteps', () => {
     expect(steps.map((s) => [s.origin, s.block, s.failed])).toEqual([['agent-step', 1, undefined], ['agent-step', 1, true]])
   })
 
+  it('leaves out a run_flow step holding a typed secret anywhere, and says so (CodeRabbit, #1248)', () => {
+    const typed: AgentAction = { kind: 'type', at: 1, text: '4826', field: { secure: true } }
+    const block: AgentAction = { kind: 'flow', at: 2, block: 1, passed: 4, source: { hash: 'h' }, steps: [
+      { type: 'tapOn', selector: { label: 'PIN 4826' } },
+      { type: 'openUrl', url: 'app://unlock?pin=4826' },
+      { type: 'tapOn', selector: { id: 'login' } },
+      { type: 'assertVisible', selector: { label: 'Welcome' } },
+    ] }
+    const steps = agentSteps(capture([{ kind: 'launch', at: 0 }, typed, block]))
+    expect(steps.slice(2).map((s) => [s.step?.type ?? null, s.withheld])).toEqual([
+      [null, true], [null, true], ['tapOn', undefined], ['assertVisible', undefined],
+    ])
+    const r = agentFlow(steps, { name: 'pin' })
+    if (!r.ok) throw new Error(JSON.stringify(r.refusals))
+    expect(r.flow.yaml).not.toContain('4826')
+    expect(r.flow.notes).toContain('Left out, a run_flow step holding a typed secret: #3, #4')
+  })
+
   it('offers a tap the app did not respond to for leaving out', () => {
     const [s] = agentSteps(capture([tapAt(10, [0.25, 0.82], { selector: { id: 'login' }, observed: { point: { x: 0.25, y: 0.82 }, moving: false, acted: false } })]))
     expect(s!.noResponse).toBe(true)
