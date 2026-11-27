@@ -11,6 +11,7 @@ import type { LaunchOptions, ReachResult, ReachTarget } from '@tapflowio/protoco
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
 import { androidLaunchExtras, shellQuote } from './launchExtras.js'
 import { parseKeyguard } from './postures.js'
+import { withoutLeadingText } from './screenshotJpeg.js'
 
 const logger = createLogger('android-agent:adb-wrapper')
 
@@ -675,8 +676,19 @@ export class AdbWrapper {
     }
   }
 
+  /**
+   * The screen as a PNG.
+   *
+   * On a device with several displays, `screencap -p` writes a warning ahead of the PNG (#1118), so
+   * the bytes are not an image. The warning is cut here, where the bytes are read, so that every
+   * consumer gets a PNG — the MCP reply, the relay's screenshot endpoint and the platform-neutral
+   * `DeviceAgent.screenshot()` alike. Which display was captured is still the device's choice;
+   * pinning it is a separate change (#1118).
+   */
   async screenshot(serial: string): Promise<Buffer> {
-    return this.runner.execBinary('-s', serial, 'exec-out', 'screencap', '-p')
+    const shot = await this.runner.execBinary('-s', serial, 'exec-out', 'screencap', '-p')
+
+    return withoutLeadingText(shot)
   }
 
   /**
