@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -237,7 +237,18 @@ describe('parseBinaryPlist', () => {
     trailer.writeBigUInt64BE(BigInt(offsets.length), 8)
     trailer.writeBigUInt64BE(BigInt(K + 1), 16)
     trailer.writeBigUInt64BE(BigInt(tableAt), 24)
-    expect(parseBinaryPlist(Buffer.concat([body, table, trailer]))).toBeNull()
+    const input = Buffer.concat([body, table, trailer])
+
+    // A null result alone does not show the work stopped: decoding every key and then refusing returns
+    // null too, after the cost the budget exists to prevent. So count the decodes. The first key fits the
+    // budget, the second overruns it, and nothing after that is decoded.
+    const toString = vi.spyOn(Buffer.prototype, 'toString')
+    try {
+      expect(parseBinaryPlist(input)).toBeNull()
+      expect(toString.mock.calls.filter(([encoding]) => encoding === 'latin1').length).toBeLessThanOrEqual(3)
+    } finally {
+      toString.mockRestore()
+    }
   })
 
   it('returns null when many objects share one string\'s bytes', () => {
