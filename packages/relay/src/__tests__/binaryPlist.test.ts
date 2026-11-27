@@ -206,6 +206,67 @@ describe('parseBinaryPlist', () => {
     expect(parsed['k29999']).toHaveLength(400_000)
   })
 
+  // The two shapes below come from review: objects whose bytes overlap, which no writer produces, made
+  // every decode a distinct string. 40,000 overlapping keys in 760 KB exhausted the heap and killed the
+  // relay; these are small enough to stay harmless if the budget is ever removed, and still exceed it.
+  it('returns null when string objects overlap one another', () => {
+    const K = 200
+    const headers = 8 + 10 * K
+    const valueAt = headers
+    const dictAt = valueAt + 2
+    const tableAt = dictAt + 6 + 2 * K * 4
+    const body = Buffer.alloc(tableAt)
+    body.write('bplist00', 0, 'latin1')
+    for (let i = 0; i < K; i++) {
+      // Each key string runs to the end of the object area, so it contains every header after it.
+      const at = 8 + 10 * i
+      body[at] = 0x5f; body[at + 1] = 0x13
+      body.writeBigUInt64BE(BigInt(tableAt - (at + 10)), at + 2)
+    }
+    body[valueAt] = 0x51; body[valueAt + 1] = 0x76
+    body[dictAt] = 0xdf; body[dictAt + 1] = 0x12; body.writeUInt32BE(K, dictAt + 2)
+    for (let i = 0; i < K; i++) {
+      body.writeUInt32BE(i, dictAt + 6 + i * 4)
+      body.writeUInt32BE(K, dictAt + 6 + (K + i) * 4)
+    }
+    const offsets = [...Array.from({ length: K }, (_, i) => 8 + 10 * i), valueAt, dictAt]
+    const table = Buffer.alloc(offsets.length * 4)
+    offsets.forEach((o, i) => table.writeUInt32BE(o, i * 4))
+    const trailer = Buffer.alloc(32)
+    trailer[6] = 4; trailer[7] = 4
+    trailer.writeBigUInt64BE(BigInt(offsets.length), 8)
+    trailer.writeBigUInt64BE(BigInt(K + 1), 16)
+    trailer.writeBigUInt64BE(BigInt(tableAt), 24)
+    expect(parseBinaryPlist(Buffer.concat([body, table, trailer]))).toBeNull()
+  })
+
+  it('returns null when many objects share one string\'s bytes', () => {
+    // Objects 2.. all start at the same 1,000-byte string, so each key ref is a different object with the
+    // same bytes and none of them is decoded from the cache.
+    const K = 50
+    const longAt = 8
+    const long = Buffer.concat([Buffer.from([0x5f, 0x11, 0x03, 0xe8]), Buffer.alloc(1000, 0x78)])
+    const valueAt = longAt + long.length
+    const value = Buffer.from([0x51, 0x76])
+    const dictAt = valueAt + value.length
+    const dict = Buffer.alloc(3 + 2 * K * 4)
+    dict[0] = 0xdf; dict[1] = 0x10; dict[2] = K
+    for (let i = 0; i < K; i++) {
+      dict.writeUInt32BE(2 + i, 3 + i * 4)
+      dict.writeUInt32BE(1, 3 + (K + i) * 4)
+    }
+    const tableAt = dictAt + dict.length
+    const offsets = [dictAt, valueAt, ...Array.from({ length: K }, () => longAt)]
+    const table = Buffer.alloc(offsets.length * 4)
+    offsets.forEach((o, i) => table.writeUInt32BE(o, i * 4))
+    const trailer = Buffer.alloc(32)
+    trailer[6] = 4; trailer[7] = 4
+    trailer.writeBigUInt64BE(BigInt(offsets.length), 8)
+    trailer.writeBigUInt64BE(0n, 16)
+    trailer.writeBigUInt64BE(BigInt(tableAt), 24)
+    expect(parseBinaryPlist(Buffer.concat([Buffer.from('bplist00', 'latin1'), long, value, dict, table, trailer]))).toBeNull()
+  })
+
   it('never throws when any single byte is corrupted', () => {
     for (let i = 0; i < SMALL.length; i++) {
       for (const value of [0x00, 0x0f, 0x5f, 0x6f, 0xdf, 0xff]) {

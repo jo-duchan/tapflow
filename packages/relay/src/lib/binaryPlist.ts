@@ -8,8 +8,10 @@
  *
  * The input is an upload, so it is hostile: every offset and length is checked against the buffer
  * before it is read, and anything inconsistent returns null rather than throwing. Cost is bounded too:
- * the file is capped at MAX_PLIST_BYTES, and each string object is decoded once however many entries
- * name it, so a crafted file cannot make the work grow faster than its size.
+ * the file is capped at MAX_PLIST_BYTES, each string object is decoded once however many entries name
+ * it, and the bytes decoded in all may not exceed the object area. Objects in a real file do not
+ * overlap, so they fit; a crafted file whose objects overlap or share their bytes would otherwise make
+ * the work, and the memory it keeps, grow with the square of its size.
  *
  * Format: https://opensource.apple.com/source/CF/CF-1153.18/CFBinaryPList.c
  */
@@ -38,7 +40,11 @@ function readUint(buf: Buffer, at: number, width: number): number {
  * holds each string object already read: every dict entry may name the same large string, and decoding
  * it per entry makes the cost the product of two sizes instead of their sum.
  */
-type Layout = { buf: Buffer; offsets: number[]; tableAt: number; decoded: Map<number, string | null> }
+type Layout = {
+  buf: Buffer; offsets: number[]; tableAt: number; decoded: Map<number, string | null>
+  /** Bytes still allowed to be decoded; below zero means the file overlaps itself and is refused. */
+  budget: number
+}
 
 /** Where object `ref` starts, or -1 when the ref is not in the offset table. */
 function objectStart(layout: Layout, ref: number): number {
@@ -80,6 +86,8 @@ function decodeString(layout: Layout, ref: number): string | null {
   const bytes = kind === 0x5 ? header.count : header.count * 2
   const end = header.payload + bytes
   if (end > layout.tableAt) return null
+  layout.budget -= bytes
+  if (layout.budget < 0) return null
   if (kind === 0x5) return buf.toString('latin1', header.payload, end)
   // UTF-16 big-endian; Node decodes only little-endian, so swap a copy.
   return Buffer.from(buf.subarray(header.payload, end)).swap16().toString('utf16le')
@@ -106,7 +114,7 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
     if (offset < MAGIC.length || offset >= tableAt) return null
     offsets[i] = offset
   }
-  const layout: Layout = { buf, offsets, tableAt, decoded: new Map() }
+  const layout: Layout = { buf, offsets, tableAt, decoded: new Map(), budget: tableAt }
 
   const dictAt = offsets[topObject]
   if (buf[dictAt] >> 4 !== 0xd) return null
@@ -124,5 +132,5 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
     const value = readString(layout, readUint(buf, payload + (count + i) * refSize, refSize))
     if (value !== null) result[key] = value
   }
-  return result
+  return layout.budget < 0 ? null : result
 }

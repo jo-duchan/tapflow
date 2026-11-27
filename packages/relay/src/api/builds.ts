@@ -56,6 +56,9 @@ function decodeXmlEntities(text: string): string {
   })
 }
 
+// Matches a key at any depth, and a later match wins. A nested dict repeating a top-level CFBundle* key
+// after it would therefore override it here but not in the binary parser, which reads the top level
+// only. No Xcode template nests one (the usual nested keys are CFBundleURLName and CFBundleTypeName).
 function parseXmlPlist(xml: string): Record<string, string> {
   const result: Record<string, string> = {}
   const re = /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g
