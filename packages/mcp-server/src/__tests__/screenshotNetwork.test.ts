@@ -148,6 +148,7 @@ describe('screenshot transport failures', () => {
       expect(text).toContain('ECONNREFUSED')
       expect(text).toContain('relay closed 1006')
       expect(text).toContain('reconnecting failed')
+      expect(text).not.toContain('connect_device')
     } finally {
       await relay.close()
     }
