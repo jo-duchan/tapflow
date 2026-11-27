@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type Dispatch, type KeyboardEvent, 
 import { ChevronRight, Download, ImageOff, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
-  type RawStep, type ScreenRect, type Selector, type StepExpect,
+  withoutSecretNames, type RawStep, type ScreenRect, type Selector, type StepExpect,
 } from '@tapflowio/flow-runner/browser'
 import type { UIElement } from '@tapflowio/protocol'
 import { Badge } from '@/components/ui/badge'
@@ -850,7 +850,8 @@ export function EditScreen({ state, dispatch, flow, renameCheck, onVerify, onBac
           <h3 className="text-sm font-medium">{copy.editHeading(kept.length)}</h3>
           <ol ref={listRef} aria-label={copy.steps[2]} className="-m-1 min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
             {kept.map(({ s, i }, position) => (
-              <EditRow key={i} index={i} step={madeSecret(s, state.made[i])} made={state.made[i] !== undefined} selected={selected === i}
+              <EditRow key={i} index={i} step={withoutSecretNames(madeSecret(s, state.made[i]), secrets)}
+                typedText={madeSecret(s, state.made[i]).step?.type === 'inputText'} made={state.made[i] !== undefined} selected={selected === i}
                 onSelect={() => select(i)} onRemove={() => remove(i, position)}
                 onPutBack={s.skipped === 'no-response' && state.reviewed ? () => dispatch({ type: 'put-back', step: state.steps.indexOf(s.raw) }) : undefined}
                 expected={state.expected[i] ?? []} leftOut={(sel) => holdsSecret(sel, secrets)} canExpect={selected === i && after !== null} shown={view === 'after' ? shown : null}
@@ -888,11 +889,14 @@ const madeSecret = (step: CapturedRow, name: string | undefined): CapturedRow =>
 const secretBase = (step: CapturedRow): string | null => (step.step?.type === 'inputSecret' ? step.step.name : null)
 
 function EditRow({
-  index, step, made, selected, onSelect, onRemove, onPutBack, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
+  index, step, typedText, made, selected, onSelect, onRemove, onPutBack, renamedTo, onRename, renameCheck, onMakeSecret, onKeepAsText,
   expected, leftOut, canExpect, shown, onAddExpected, onShowExpected, onRemoveExpected,
 }: {
   index: number
   step: CapturedRow
+  /** Typed text, before a secret's value in it left the step out: Make secret is still what brings it back (review of
+   *  #1248's follow-up — a value typed into two fields, one made a secret). */
+  typedText: boolean
   /** Made a secret in Edit: it can be kept as text again. */
   made: boolean
   selected: boolean
@@ -920,7 +924,7 @@ function EditRow({
   const details = useRef<HTMLDivElement>(null)
   const secretName = secretBase(step)
   // Typed text written into the file as typed: the one kind of step Make secret is for.
-  const typed = step.step?.type === 'inputText' && 'text' in step.step
+  const typed = typedText
   // The control pressed goes with the swap: focus moves to what took its place, the name or Make secret.
   const swap = (change: () => void) => {
     change()
@@ -1005,8 +1009,8 @@ function EditRow({
             )
             : (
               <div className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2">
-                <p className="text-xs text-muted-foreground">{copy.typedIntoFile}</p>
-                <Button variant="outline" size="sm" className="shrink-0" onClick={() => swap(onMakeSecret)}>{copy.makeSecret}</Button>
+                {step.step !== null && <p className="text-xs text-muted-foreground">{copy.typedIntoFile}</p>}
+                <Button variant="outline" size="sm" className="ml-auto shrink-0" onClick={() => swap(onMakeSecret)}>{copy.makeSecret}</Button>
               </div>
             )}
         </div>
