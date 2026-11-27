@@ -142,7 +142,7 @@ Text treated as a secret is not written in the flow file. The flow keeps only an
 
 ## Edit a captured flow {#edit-a-captured-flow}
 
-To add what a capture cannot record (`assertNotVisible` for a spinner or error that should be gone, a `timeout` for a slow step), or to repair a flow that failed in CI, edit the YAML yourself:
+To add what the capture cannot make from taps and typing (`assertNotVisible` for a spinner or error that should be gone, a `timeout` for a slow step), or to repair a flow that failed in CI, edit the YAML yourself:
 
 1. End the capture with `connect_device` and `capture: false`. While a capture is open, `run_flow` does not run a step that types text.
 2. Edit the YAML.
@@ -167,7 +167,7 @@ An iOS app reads its accessibility setting when it starts, so taps in an app alr
 - A capture stays while you hold the device. After `disconnect_device` lets the device go, it is dropped an hour later; connecting to the same device again before then restarts that hour from the next release. It is also dropped when a new capture opens, when `capture: false` ends it, or when the MCP server process ends.
 - Verify resets the device before it replays. On iOS that resets the keychain, privacy permissions, clipboard and location of every app on the device, so do not use one whose other apps must stay signed in.
 - On Android, while observing, a coding agent's tap is lifted only once the device knows what it touched, at most a quarter of a second later. A person's taps, drags and flings are not delayed.
-- A captured flow has no `assertNotVisible` and no `timeout`. Add them as in [Edit a captured flow](#edit-a-captured-flow).
+- The steps the capture makes from taps and typing have no `assertNotVisible` and no `timeout`. Steps from a `run_flow` are kept as written, so one the coding agent wrote with them keeps them. Add them elsewhere as in [Edit a captured flow](#edit-a-captured-flow).
 - If the app was launched with launch arguments, the flow's `launchApp` does not carry them. `list_captured_steps` says so.
 
 ## Troubleshooting {#troubleshooting}
