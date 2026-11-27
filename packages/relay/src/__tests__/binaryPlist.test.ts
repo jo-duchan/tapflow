@@ -13,6 +13,16 @@ const FIXTURES = path.join(__dirname, 'fixtures')
 const SMALL = fs.readFileSync(path.join(FIXTURES, 'Info-binary.plist'))
 const LARGE = fs.readFileSync(path.join(FIXTURES, 'Info-binary-large.plist'))
 
+/** The trailer and offset table of a well-formed fixture, read independently of the parser under test. */
+function trailerOf(buf: Buffer): { offsetSize: number; tableAt: number; offsets: number[] } {
+  const t = buf.length - 32
+  const offsetSize = buf[t + 6]
+  const count = Number(buf.readBigUInt64BE(t + 8))
+  const tableAt = Number(buf.readBigUInt64BE(t + 24))
+  const offsets = Array.from({ length: count }, (_, i) => buf.readUIntBE(tableAt + i * offsetSize, offsetSize))
+  return { offsetSize, tableAt, offsets }
+}
+
 describe('parseBinaryPlist', () => {
   it('reads the string values of the top-level dictionary', () => {
     const parsed = parseBinaryPlist(SMALL)
@@ -75,16 +85,56 @@ describe('parseBinaryPlist', () => {
     }
   })
 
-  // An uploaded build is hostile input. These do not assert what comes back, only that the parser
-  // answers at all: a throw here would surface as a failed upload rather than a build without metadata.
-  it('never throws on a truncated plist', () => {
+  it('returns null when an object offset points into the offset table', () => {
+    const copy = Buffer.from(SMALL)
+    const t = trailerOf(copy)
+    copy.writeUIntBE(t.tableAt, t.tableAt + 1 * t.offsetSize, t.offsetSize)
+    expect(parseBinaryPlist(copy)).toBeNull()
+  })
+
+  // Without this bound a crafted count runs the loop that many times: 8 bytes of count is a relay
+  // stuck on one upload.
+  it('returns null when the dictionary claims more entries than the object area can hold', () => {
+    const copy = Buffer.from(LARGE)
+    const dictAt = trailerOf(copy).offsets[0]
+    // 0xDF: a dictionary whose count follows as an integer object, here 0x11 (2 bytes) holding 301.
+    expect([copy[dictAt], copy[dictAt + 1], copy.readUInt16BE(dictAt + 2)]).toEqual([0xdf, 0x11, 301])
+    copy.writeUInt16BE(0xffff, dictAt + 2)
+    expect(parseBinaryPlist(copy)).toBeNull()
+  })
+
+  it('leaves out a string that runs into the offset table', () => {
+    const copy = Buffer.from(LARGE)
+    const t = trailerOf(copy)
+    const lastAt = Math.max(...t.offsets)
+    // The object written last is Key230's value, 'value-230' (0x59: ASCII, 9 bytes), which ends where the table starts.
+    expect([copy[lastAt], copy.toString('latin1', lastAt + 1, lastAt + 10), lastAt + 10]).toEqual([0x59, 'value-230', t.tableAt])
+    copy[lastAt] = 0x5a
+    const parsed = parseBinaryPlist(copy)
+    expect(parsed!['Key229']).toBe('value-229')
+    expect(parsed!['Key230']).toBeUndefined()
+  })
+
+  it('leaves out a string whose length is not written as an integer object', () => {
+    const copy = Buffer.from(SMALL)
+    const at = copy.indexOf(Buffer.from('CFBundleShortVersionString', 'latin1')) - 3
+    expect([copy[at], copy[at + 1], copy[at + 2]]).toEqual([0x5f, 0x10, 26])
+    copy[at + 1] = 0x50
+    const parsed = parseBinaryPlist(copy)
+    expect(parsed!['CFBundleIdentifier']).toBe('com.example.apple-samplecode.Food-Truck')
+    expect(parsed!['CFBundleShortVersionString']).toBeUndefined()
+  })
+
+  it('returns null for every truncation of a plist', () => {
     for (const input of [SMALL, LARGE]) {
       for (let len = 0; len < input.length; len++) {
-        expect(() => parseBinaryPlist(input.subarray(0, len)), `length ${len}`).not.toThrow()
+        expect(parseBinaryPlist(input.subarray(0, len)), `length ${len}`).toBeNull()
       }
     }
   })
 
+  // An uploaded build is hostile input. This does not assert what comes back, only that the parser
+  // answers at all: a corrupted byte may still leave a readable plist, so null is not the only right answer.
   it('never throws when any single byte is corrupted', () => {
     for (let i = 0; i < SMALL.length; i++) {
       for (const value of [0x00, 0x0f, 0x5f, 0x6f, 0xdf, 0xff]) {

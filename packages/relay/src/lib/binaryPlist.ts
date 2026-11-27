@@ -15,18 +15,19 @@
 const MAGIC = 'bplist00'
 const TRAILER_BYTES = 32
 
-/** Big-endian unsigned integer of `width` bytes at `at`, or -1 when it is out of range or unsafe. */
+/**
+ * Big-endian unsigned integer of `width` bytes at `at`, or -1 when it does not fit in the buffer. An 8-byte
+ * value past 2^53 comes back rounded, which is harmless: every caller bounds it by the file's size.
+ */
 function readUint(buf: Buffer, at: number, width: number): number {
   if (width < 1 || width > 8 || at < 0 || at + width > buf.length) return -1
   let value = 0
-  for (let i = 0; i < width; i++) {
-    value = value * 256 + buf[at + i]
-    if (value > Number.MAX_SAFE_INTEGER) return -1
-  }
+  for (let i = 0; i < width; i++) value = value * 256 + buf[at + i]
   return value
 }
 
-type Layout = { buf: Buffer; offsets: number[]; refSize: number }
+/** `tableAt` is where the offset table starts, which is where every object must have ended. */
+type Layout = { buf: Buffer; offsets: number[]; tableAt: number }
 
 /** Where object `ref` starts, or -1 when the ref is not in the offset table. */
 function objectStart(layout: Layout, ref: number): number {
@@ -59,7 +60,7 @@ function readString(layout: Layout, ref: number): string | null {
   if (!header) return null
   const bytes = kind === 0x5 ? header.count : header.count * 2
   const end = header.payload + bytes
-  if (!Number.isSafeInteger(end) || end > buf.length) return null
+  if (end > layout.tableAt) return null
   if (kind === 0x5) return buf.toString('latin1', header.payload, end)
   // UTF-16 big-endian; Node decodes only little-endian, so swap a copy.
   return Buffer.from(buf.subarray(header.payload, end)).swap16().toString('utf16le')
@@ -85,7 +86,7 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
     if (offset < MAGIC.length || offset >= tableAt) return null
     offsets[i] = offset
   }
-  const layout: Layout = { buf, offsets, refSize }
+  const layout: Layout = { buf, offsets, tableAt }
 
   const dictAt = offsets[topObject]
   if (buf[dictAt] >> 4 !== 0xd) return null
