@@ -8,6 +8,7 @@ import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
 import {
   askedValues, segment, defaultRange, rangeWarnings, stepsBeforeRange, matchStep, reachQuestions, toFlowSteps, flowSteps, flowToYaml, rawStepLabel, capturedStepLabel,
   recordedTarget, recordedSelector, scrollDirectionOf, replayStep, noResponseTaps, leaveOut, retryCandidates, dropRetried, madeMidTransition,
+  withoutSecretNames,
   type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
 import type { Step } from '../schema.js'
@@ -1625,6 +1626,48 @@ describe('toFlowSteps', () => {
       { type: 'inputSecret', name: 'PASSWORD' }, { type: 'inputSecret', name: 'PASSWORD_2' }, { type: 'inputSecret', name: 'SECRET' },
     ])
     expect(flow.secrets).toEqual({ PASSWORD: 'one', PASSWORD_2: 'two', SECRET: 'three' })
+  })
+})
+
+describe('withoutSecretNames: a name holding a secret, said without it (#1248\'s follow-up)', () => {
+  const copy = el({ label: 'Copy tok-123', frame: { x: 0.3, y: 0.55, width: 0.4, height: 0.1 } })
+  const list = (n: number) => Array.from({ length: n }, (_, i) => el({ role: 'cell', label: `Item ${i}`, frame: { x: 0, y: i * 0.1, width: 1, height: 0.1 } }))
+  const item30 = el({ role: 'cell', label: 'Item 30', frame: { x: 0, y: 0.5, width: 1, height: 0.1 } })
+  const scrolledTo30 = [...list(8).map((e) => ({ ...e, frame: { ...e.frame, y: e.frame.y - 0.3 } })).filter((e) => e.frame.y >= 0), item30]
+
+  it('taps the point a tap named by a secret was made at, marked', () => {
+    const [tap] = new Rec().touch([[0.45, 0.6]]).steps()
+    const m = matchStep(tap!, ctxOf([copy]))
+    expect(m.step).toEqual({ type: 'tapOn', selector: { text: 'Copy tok-123' } })
+    expect(withoutSecretNames(m, ['tok-123'])).toMatchObject({ step: { type: 'tapPoint', at: [0.45, 0.6] }, fragile: 'secret-name' })
+  })
+
+  it('keeps a reason it was fragile already', () => {
+    const [tap] = new Rec().touch([[0.45, 0.6]]).steps()
+    const m = { ...matchStep(tap!, ctxOf([copy])), fragile: 'mid-transition' as const }
+    expect(withoutSecretNames(m, ['tok-123'])).toMatchObject({ step: { type: 'tapPoint' }, fragile: 'mid-transition' })
+  })
+
+  it('long-presses by its point too', () => {
+    const [hold] = new Rec().touch([[0.45, 0.6]], { holdMs: 1200 }).steps()
+    expect(withoutSecretNames(matchStep(hold!, ctxOf([copy])), ['tok-123'])).toMatchObject({ step: { type: 'longPressPoint', at: [0.45, 0.6] }, fragile: 'secret-name' })
+  })
+
+  it('replays a scroll to a secret\'s element as the swipe it was', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.7], [0.5, 0.4]]).touch([[0.5, 0.55]]).steps()
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', until: { text: 'Item 30' } })
+    const out = flow.steps.map((s) => withoutSecretNames(s, ['m 30']))
+    expect(out.map((s) => [s.step?.type, s.fragile, s.auto])).toEqual([['swipe', 'secret-name', undefined], ['tapPoint', 'secret-name', undefined]])
+  })
+
+  it('leaves out a step with no unnamed form, and keeps every other step the same object', () => {
+    const check: CapturedStep = { raw: new Rec().touch([[0.45, 0.6]]).steps()[0]!, step: { type: 'assertVisible', selector: { label: 'Hi tok-123' } } }
+    expect(withoutSecretNames(check, ['tok-123'])).toMatchObject({ step: null, skipped: 'holds-secret' })
+    const [tap] = new Rec().touch([[0.45, 0.6]]).steps()
+    const m = matchStep(tap!, ctxOf([copy]))
+    expect(withoutSecretNames(m, ['other'])).toBe(m)
+    expect(withoutSecretNames(m, [])).toBe(m)
   })
 })
 

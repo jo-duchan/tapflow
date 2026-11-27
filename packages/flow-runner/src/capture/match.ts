@@ -55,6 +55,8 @@ export type SkipReason =
   /** The app did not respond to it when it was recorded (`TouchObservation.acted === false`), and the person left it
    *  out at the end of Match (`noResponseTaps`, `leaveOut`). */
   | 'no-response'
+  /** Its name holds a value typed as a secret and it has no unnamed form to fall back to (`withoutSecretNames`). */
+  | 'holds-secret'
 
 export type FragileReason =
   /** Tapped where the tree names no element. */
@@ -75,6 +77,8 @@ export type FragileReason =
   /** A touch made while the screen the tap before it brought was still coming (`madeMidTransition`), whose effect the
    *  app did not report: replayed, but it may now land on that screen and do what the person's did not. */
   | 'mid-transition'
+  /** Its name held a value typed as a secret, so it is said by its point, or as the swipe it was (`withoutSecretNames`). */
+  | 'secret-name'
 
 export interface CapturedStep {
   raw: RawStep
@@ -90,6 +94,10 @@ export interface CapturedStep {
   secret?: { value: string; known: boolean }
   /** Turned into a step that says what the person meant (`scroll { until }`). */
   auto?: true
+  /** On a step named by an element: the same touch said without the name — a tap's or a long press's point, a pinch's
+   *  middle, the swipe a `scroll { until }` was — for when the name turns out to hold a secret's value, which can be
+   *  known only after Match (a value made a secret in Edit). See `withoutSecretNames`. */
+  unnamed?: Step
   /** The tree the step was matched against, kept for the scroll rule in `toFlowSteps`. */
   tree?: UIElement[]
   /** On a swipe: the elements of `tree`, by index, that were on it but not wholly in view — partly off the screen, or
@@ -287,7 +295,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
       const p = toScreen(raw.point, raw.space, ctx)
       const t = target(ctx.tree, p, reach)
       return 'selector' in t
-        ? { raw, step: { type: 'tapOn', selector: t.selector }, tree: ctx.tree }
+        ? { raw, step: { type: 'tapOn', selector: t.selector }, tree: ctx.tree, unnamed: { type: 'tapPoint', at: p } }
         : { raw, step: { type: 'tapPoint', at: p }, fragile: t.fragile, tree: ctx.tree }
     }
     case 'longPress': {
@@ -295,7 +303,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
       const p = toScreen(raw.point, raw.space, ctx)
       const t = target(ctx.tree, p, reach)
       return 'selector' in t
-        ? { raw, step: { type: 'longPressOn', selector: t.selector, durationMs: raw.durationMs } }
+        ? { raw, step: { type: 'longPressOn', selector: t.selector, durationMs: raw.durationMs }, unnamed: { type: 'longPressPoint', at: p, durationMs: raw.durationMs } }
         : { raw, step: { type: 'longPressPoint', at: p, durationMs: raw.durationMs }, fragile: t.fragile }
     }
     case 'swipe':
@@ -318,15 +326,11 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
       if (raw.durationMs > MAX_GESTURE_MS) return { raw, step: null, skipped: 'too-long' }
       const mid: Point = [round4((start[0][0] + start[1][0]) / 2), round4((start[0][1] + start[1][1]) / 2)]
       const t = target(ctx.tree, mid, reach)
+      const pinch = { scale: Math.round(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)) * 100) / 100, durationMs: Math.max(1, raw.durationMs) }
       return {
         raw,
-        step: {
-          type: 'pinch',
-          on: 'selector' in t ? t.selector : mid,
-          scale: Math.round(Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)) * 100) / 100,
-          durationMs: Math.max(1, raw.durationMs),
-        },
-        ...('fragile' in t ? { fragile: t.fragile } : {}),
+        step: { type: 'pinch', on: 'selector' in t ? t.selector : mid, ...pinch },
+        ...('fragile' in t ? { fragile: t.fragile } : { unnamed: { type: 'pinch', on: mid, ...pinch } }),
       }
     }
     case 'text': return typed(raw, raw.text, ctx)
@@ -675,7 +679,8 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
     if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
     // A trace Match left on the swipe goes with it (#1178): the scroll is the same gesture, still not compared.
-    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true, ...(swipe.notCompared ? { notCompared: true as const } : {}) }
+    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true, unnamed: swipe.step,
+      ...(swipe.notCompared ? { notCompared: true as const } : {}) }
   }
 
   const secrets: Record<string, string> = {}

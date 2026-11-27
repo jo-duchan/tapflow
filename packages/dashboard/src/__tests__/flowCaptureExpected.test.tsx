@@ -210,3 +210,46 @@ describe('Edit, a tap and the screen it left', () => {
     expect(within(row(1)).queryByText('by position')).not.toBeInTheDocument()
   })
 })
+
+// #1248's follow-up: a tap Match named by text the person then makes a secret is written by its point, and Edit says so.
+describe('a tap named by a secret', () => {
+  const named: CapturedFlow = {
+    launchAdded: false,
+    secrets: {},
+    steps: [
+      { raw: raw('launch'), step: { type: 'launchApp' } } as CapturedStep,
+      { raw: raw('text'), step: { type: 'inputText', text: 'alice@x.com', replace: true } } as CapturedStep,
+      { raw: raw('tap'), step: { type: 'tapOn', selector: { label: 'Copy alice@x.com' } }, unnamed: { type: 'tapPoint', at: [0.5, 0.5] } } as CapturedStep,
+      { raw: raw('tap'), step: { type: 'tapOn', selector: { text: 'Place order' } }, unnamed: { type: 'tapPoint', at: [0.5, 0.7] } } as CapturedStep,
+    ],
+  }
+  const state: CaptureState = { ...initialState, phase: 'edit', captured: named, name: 'Copy', reached: 3, screenshots: [] }
+
+  it('is written by its point once the text is a secret, and other taps keep their names', () => {
+    expect(editedCapture(state)!.steps[2]!.step).toEqual({ type: 'tapOn', selector: { label: 'Copy alice@x.com' } })
+    const secret = reduce(state, { type: 'make-secret', index: 1 })
+    const steps = editedCapture(secret)!.steps.map((s) => s.step)
+    expect(steps[2]).toEqual({ type: 'tapPoint', at: [0.5, 0.5] })
+    expect(steps[3]).toBe(named.steps[3]!.step)
+    expect(yamlOf(flowOf(secret, 'com.example')!)).not.toContain('alice@x.com')
+  })
+
+  it('shows the row by its point, with the reason', () => {
+    render(<EditScreen state={reduce(state, { type: 'make-secret', index: 1 })} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
+    const row = screen.getAllByRole('listitem')[2]!
+    expect(row).not.toHaveTextContent('alice@x.com')
+    expect(row).toHaveTextContent('This step named text you made a secret, so the flow replays it by position instead.')
+  })
+
+  // Review of #1248's follow-up: a value typed into two fields, one made a secret, leaves the other out — and Make
+  // secret on it is still what brings it back.
+  it('still offers Make secret on typed text a secret\'s value left out', () => {
+    const twice: CaptureState = { ...state, captured: { ...named, steps: [...named.steps, { raw: { ...raw('text'), text: 'alice@x.com' } as RawStep, step: { type: 'inputText', text: 'alice@x.com' } } as CapturedStep] } }
+    render(<EditScreen state={reduce(twice, { type: 'make-secret', index: 1 })} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
+    const row = screen.getAllByRole('listitem')[4]!
+    expect(row).toHaveTextContent('This step names text you made a secret, so it is not in the flow.')
+    fireEvent.click(within(row).getByRole('button', { name: /Details of/ }))
+    expect(within(row).getByRole('button', { name: 'Make secret' })).toBeInTheDocument()
+    expect(row).not.toHaveTextContent('The value goes into the file.')
+  })
+})

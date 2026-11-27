@@ -143,6 +143,7 @@ export const copy = {
     'field-unread': 'The field could not be read after typing, so this is the keys as typed on a US keyboard. Check the text.',
     'keyboard-unknown': 'tapflow could not tell whether this touched a key on the on-screen keyboard or the app. Remove it if it was a key.',
     'mid-transition': 'Tapped while the screen was still changing from the tap before it, so it may now land on the new screen. Remove it if it was a stray second tap.',
+    'secret-name': 'This step named text you made a secret, so the flow replays it by position instead.',
   } satisfies Record<FragileReason, string>,
   skipReasons: {
     refused: 'The device refused this input.',
@@ -161,6 +162,7 @@ export const copy = {
     'stopped-scroll': 'Tapped while the list was still moving: it stopped the list and pressed nothing, so it is not replayed.',
     'no-response': 'The app did not respond to this tap when you recorded it.',
     retried: 'You tapped the same element again right after, and the screen had not changed: this tap did nothing, so it is not replayed.',
+    'holds-secret': 'This step names text you made a secret, so it is not in the flow.',
   } satisfies Record<SkipReason, string>,
   autoReason: 'Turned into a scroll to the element the next step taps.',
   secretLabel: 'Secret name',

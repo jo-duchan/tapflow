@@ -270,6 +270,41 @@ describe('what Verify saw, in the exported flow', () => {
     expect(exportedFlow(state, null)?.steps).toEqual([{ ...tapSave, expect: { appear: [{ text: 'Saved', role: 'text' }] } }])
   })
 
+  // Review of #1248's follow-up: a step said by its point instead of a name holding a secret keeps Match's look, and
+  // nothing Verify saw writes a secret the engine did not hide (a removed step's made value).
+  it('keeps Match\'s look for a tap said by its point, and no secret Verify saw', () => {
+    const copyTap = { type: 'tapOn', selector: { label: 'Copy alice' } } as const
+    const point = { type: 'tapPoint', at: [0.5, 0.5] } as const
+    const captured = {
+      launchAdded: false, secrets: {},
+      steps: [
+        { raw: {}, step: { type: 'inputText', text: 'alice' } },
+        { raw: {}, step: copyTap, unnamed: point, observed: { appear: [{ text: 'Copied', role: 'text' }, { id: 'presence', text: '5 online' }] } },
+      ],
+    }
+    const observed = { appear: [{ text: 'Copied', role: 'text' }, { id: 'presence', text: '3 online' }, { text: 'Hi alice', role: 'text' }] }
+    const result = { name: 'f', status: 'passed', durationMs: 1, steps: [{ index: 0, name: 's', status: 'passed', durationMs: 1, observed }] }
+    const state = { ...initialState, captured, name: 'f', made: { 0: 'SECRET' }, removed: [0], verify: { status: 'passed', done: 1, live: [], result } } as unknown as CaptureState
+    expect(exportedFlow(state, null)?.steps).toEqual([{ ...point, expect: { appear: [{ text: 'Copied', role: 'text' }] } }])
+    // Where Match did not watch the touch, what Verify saw is written alone: still without the secret.
+    const unwatched = { ...captured, steps: [captured.steps[0]!, { ...captured.steps[1]!, observed: undefined }] }
+    expect(exportedFlow({ ...state, captured: unwatched } as CaptureState, null)?.steps)
+      .toEqual([{ ...point, expect: { appear: [{ text: 'Copied', role: 'text' }, { id: 'presence', text: '3 online' }] } }])
+  })
+
+  // CodeRabbit on #1253: the launch a secret in its arguments left out is replaced by a plain one, not lost.
+  it('still starts the app when the launch it began with is left out for a secret', () => {
+    const captured = {
+      launchAdded: false, secrets: { SECRET: 'tok-9' },
+      steps: [
+        { raw: {}, step: { type: 'launchApp', options: { env: { direction: 'tok-9' } } } },
+        { raw: {}, step: { type: 'tapOn', selector: { id: 'ok' } } },
+      ],
+    }
+    const state = { ...initialState, captured, name: 'f' } as unknown as CaptureState
+    expect(flowOf(state, 'com.app')?.steps).toEqual([{ type: 'clearState' }, { type: 'launchApp' }, { type: 'tapOn', selector: { id: 'ok' } }])
+  })
+
   it('writes nothing from a Verify of other steps, or with no Verify', () => {
     expect(withEffects(flow as never, verified([undefined, seen]))).toBe(flow)
     expect(withEffects(flow as never, undefined)).toBe(flow)

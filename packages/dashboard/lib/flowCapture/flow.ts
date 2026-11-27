@@ -1,6 +1,6 @@
 import {
-  agreedEffect, flowSteps, flowToYaml, selectorHoldsSecret, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Selector, type Step,
-  type StepExpect,
+  agreedEffect, flowSteps, flowToYaml, mentionsSecret, secretPieces, selectorHoldsSecret, withoutSecretNames, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Selector, type Step,
+  type EffectAnchor, type StepExpect,
 } from '@tapflowio/flow-runner/browser'
 import type { CaptureState } from './machine'
 
@@ -17,13 +17,17 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
   }
   const hidden = secretValues(state)
   const shows = (sel: Selector) => !holdsSecret(sel, hidden)
+  let launchWithheld = false
   // One pass over the captured steps, by their own indices: what is removed and what is expected are both keyed by them.
   const steps = captured.steps
     .flatMap((s, i): CapturedStep[] => {
       if (removed.includes(i)) return []
       const name = made[i]
       // Its value goes where a password's does: verified with in the dialog, never written to the file.
-      const step = name !== undefined && s.step?.type === 'inputText' ? asSecret(s, name) : s
+      // Then said without a name holding a secret (#1248's follow-up): a value made a secret here can be one Match
+      // named a tap by. Unchanged steps stay the same objects, which `withEffects` pairs Match's look by.
+      const step = withoutSecretNames(name !== undefined && s.step?.type === 'inputText' ? asSecret(s, name) : s, hidden)
+      if (s.step?.type === 'launchApp' && step.step === null) launchWithheld = true
       const checks = (expected[i] ?? []).filter(shows).map((selector): CapturedStep => ({ raw: s.raw, step: { type: 'assertVisible', selector } }))
       return [step, ...checks]
     })
@@ -36,7 +40,11 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
     const to = renamed[name] ?? name
     if (used.has(to)) secrets[to] = value
   }
-  return { ...captured, steps, secrets }
+  // A launch left out for a secret in its arguments may be the one the flow started with: then it gets the plain launch
+  // `flowSteps` adds, never a flow that clears the app and touches it unlaunched (CodeRabbit, #1253). A launch the person
+  // removed is left as it was.
+  const lead = steps.flatMap((s) => (s.step ? [s.step] : [])).find((s) => s.type !== 'clearState')
+  return { ...captured, steps, secrets, launchAdded: captured.launchAdded || (launchWithheld && lead?.type !== 'launchApp') }
 }
 
 /** Every value the file must not hold (1b-3c): the passwords, and the text of every step made a secret — removed ones
@@ -46,7 +54,8 @@ export function secretValues(state: Pick<CaptureState, 'captured' | 'made'>): st
     const s = state.captured?.steps[Number(i)]
     return s?.step?.type === 'inputText' ? [s.step.text] : []
   })
-  return [...Object.values(state.captured?.secrets ?? {}), ...made]
+  // The rule MCP's capture keeps too (flow-runner `capture/secrets.ts`).
+  return secretPieces([...Object.values(state.captured?.secrets ?? {}), ...made])
 }
 
 /** Whether an expected element's selector holds one of `values`: it is left out of the file, whenever the secret was
@@ -72,7 +81,10 @@ export function secretRename(edited: CapturedFlow, current: string, to: string):
 /** The flow file's content. `appId` is the build's bundle id: the flow clears and runs that app, and only that app. */
 export function flowOf(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'expected' | 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> | null {
   const edited = editedCapture(state)
-  if (!edited) return null
+  return edited ? flowFrom(edited, state, appId) : null
+}
+
+function flowFrom(edited: CapturedFlow, state: Pick<CaptureState, 'name' | 'tags'>, appId: string | null): Omit<Flow, 'file'> {
   const tags = state.tags.split(',').map((t) => t.trim()).filter(Boolean)
   return {
     name: state.name.trim() || 'Captured flow',
@@ -112,8 +124,28 @@ export function withEffects(flow: Omit<Flow, 'file'>, verified: FlowResult | und
 
 /** The flow Export shows and writes: Edit's flow with what Verify and Match both saw beside each touch. */
 export function exportedFlow(state: Pick<CaptureState, 'captured' | 'removed' | 'renamed' | 'made' | 'expected' | 'name' | 'tags' | 'verify'>, appId: string | null): Omit<Flow, 'file'> | null {
-  const flow = flowOf(state, appId)
-  return flow ? withEffects(flow, state.verify?.result, state.captured?.steps) : null
+  const edited = editedCapture(state)
+  if (!edited) return null
+  // Match's look is paired by the very steps the flow was made from: a step said by its point instead of a name holding
+  // a secret is a new object, and against the captured ones it would have lost Match's look (review of #1248's follow-up).
+  const flow = withEffects(flowFrom(edited, state, appId), state.verify?.result, edited.steps)
+  // The exit for what Verify saw: its engine hides only the secrets this flow types, not a removed step's made value nor
+  // a piece of one, which the file must not hold either.
+  const hidden = secretValues(state)
+  if (hidden.length === 0) return flow
+  const shown = (a: EffectAnchor) => ![a.id, a.text].some((v) => v !== undefined && mentionsSecret(v, hidden))
+  return { ...flow, steps: flow.steps.map((step) => ('expect' in step && step.expect ? withExpect(step, keptExpect(step.expect, shown)) : step)) }
+}
+
+function keptExpect(e: StepExpect, shown: (a: EffectAnchor) => boolean): StepExpect | undefined {
+  const appear = e.appear?.filter(shown) ?? []
+  const gone = e.gone?.filter(shown) ?? []
+  return appear.length || gone.length ? { ...(appear.length ? { appear } : {}), ...(gone.length ? { gone } : {}) } : undefined
+}
+
+function withExpect(step: Step & { expect?: StepExpect }, expect: StepExpect | undefined): Step {
+  const { expect: _was, ...rest } = step
+  return (expect ? { ...rest, expect } : rest) as Step
 }
 
 export function yamlOf(flow: Omit<Flow, 'file'>): string {

@@ -9,7 +9,7 @@ export type { MatchContext, CapturedStep, CapturedFlow, SkipReason, FragileReaso
 export { screenDiff, screenCells, withoutAreas, diffAreas, statusBarRect, turnRect, sameShape, SCREEN_DIFF_THRESHOLD, type ScreenCells } from './compare.js'
 export type { Pixels, Rect as ScreenRect } from './compare.js'
 export { expectedFor } from './expected.js'
-export { mentionsSecret, secretPieces, selectorHoldsSecret, stepHoldsSecret } from './secrets.js'
+export { mentionsSecret, secretPieces, selectorHoldsSecret, stepHoldsSecret, withoutSecretNames } from './secrets.js'
 export type { ExpectedVerdict, ExpectRefusal, ExpectWarning } from './expected.js'
 export { flowToYaml } from './yaml.js'
 export { selectorFor } from '../suggest.js'
