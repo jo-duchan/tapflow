@@ -426,7 +426,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         'get_testing_guide; when done, call disconnect_device so the device is free for others.',
       inputSchema: {
         sessionId: z.string().describe('Session ID from list_devices'),
-        capture: z.boolean().optional().describe('Record your actions to save as a flow'),
+        capture: z.boolean().optional().describe('true records your actions for a flow; false ends the capture'),
       },
     },
     async ({ sessionId, capture: open }) => {
@@ -458,6 +458,18 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
             ? 'Touches by coordinates are named by what they hit; on iOS, only in an app started after this (launch_app with arguments, or a fresh install).'
             : `This device's touches cannot be observed${why ? ` (${why})` : ' (an older relay or agent)'}: a tap by coordinates is named by the tree you read before it, or kept as a point.`
           return ok(JSON.stringify({ connected: true, sessionId, watchUrl, capture: { open: true, observing, note } }))
+        }
+        // `capture: false` ends the open capture: what it held (typed text included) goes, and run_flow types again — an
+        // edited flow is replayed this way (CodeRabbit, #1258). Never while a Verify of it runs.
+        if (open === false) {
+          const c = currentCapture()
+          if (c?.verifying) return err('connect_device: the capture is being verified — wait for capture_flow to answer, then end it')
+          if (c) {
+            capture = null
+            clearTimeout(dropTimer)
+            await client.observe(c.sessionId, false).catch(() => false)
+          }
+          return ok(JSON.stringify({ connected: true, sessionId, watchUrl, capture: { open: false, ended: c !== null } }))
         }
         // Back on the capture's device: it is held again, so the hour after a release starts over at the next.
         if (currentCapture()?.sessionId === sessionId) {

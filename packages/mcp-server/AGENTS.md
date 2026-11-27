@@ -68,7 +68,8 @@ before** it saw focused, each tree read, a `run_flow` as one block of the agent'
   Backspace, arrows…) — an allowlist, because `Numpad1` or a layout's punctuation would slip past a list of letters
   and digits. The values live in this process's
   memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
-  or with the process.
+  on `connect_device` with `capture: false` (how an agent ends it to replay an edited flow, which `run_flow` refuses
+  to type in while a capture is open), or with the process.
 - **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its
   platform. It refuses rather than verify what it cannot reset: no build launched while capturing (every flow begins
   with a launch), or a build whose bundle id the relay cannot give. `viewport` is the capture's screen, read when it

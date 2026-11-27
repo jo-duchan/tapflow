@@ -163,6 +163,37 @@ describe('MCP Flow Capture', () => {
     expect(step.alreadyShown).toBeUndefined()
   })
 
+  // CodeRabbit on #1258: an edited flow that types is replayed with run_flow, which refuses to type while a capture is
+  // open, so the agent needs a way to end one; omitting `capture` still keeps it.
+  it('ends the open capture on capture: false, so run_flow types again, and keeps it when capture is omitted', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    const flow = 'name: t\nsteps:\n  - inputText: hi\n'
+    await h.call('connect_device', { sessionId: 's1' })
+    expect(String((await h.json('run_flow', { sessionId: 's1', flow })).body['failureMessage'])).toContain('type_text')
+    const { body: ended } = await h.json('connect_device', { sessionId: 's1', capture: false })
+    expect(ended['capture']).toEqual({ open: false, ended: true })
+    expect(h.client.observe).toHaveBeenLastCalledWith('s1', false)
+    expect((await h.call('list_captured_steps')).isError).toBe(true)
+    await h.json('run_flow', { sessionId: 's1', flow })
+    expect(h.client.typeText).toHaveBeenCalledWith('s1', 'hi')
+  })
+
+  it('does not end a capture while its Verify runs', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    let answer!: () => void
+    h.client.lookupBuild.mockImplementationOnce(() => new Promise((r) => { answer = () => r({ kind: 'found', bundleId: 'com.app', platform: 'ios' }) }) as never)
+    const verifying = h.call('capture_flow', { sessionId: 's1', name: 'l' })
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    expect((await h.call('connect_device', { sessionId: 's1', capture: false })).isError).toBe(true)
+    answer()
+    await verifying
+    expect((await h.call('list_captured_steps')).isError).toBeFalsy()
+  })
+
   it('says where typing went: no focused field, a field with no id, or nothing when the read failed', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })
