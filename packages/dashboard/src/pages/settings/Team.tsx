@@ -340,7 +340,12 @@ export function TeamSettings() {
                   <TableCell className="text-muted-foreground text-sm">{m.email}</TableCell>
                   <TableCell>
                     <Select value={m.role} onValueChange={(r) => handleRoleChange(m.id, r)}>
-                      <SelectTrigger className="h-7 w-28"><SelectValue /></SelectTrigger>
+                      <SelectTrigger
+                        className="h-7 w-28"
+                        aria-label={m.display_name?.trim()
+                          ? `Role for ${m.display_name.trim()} (${m.email})`
+                          : `Role for ${m.email}`}
+                      ><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Admin">Admin</SelectItem>
                         <SelectItem value="Developer">Developer</SelectItem>
