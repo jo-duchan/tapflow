@@ -324,6 +324,40 @@ describe('MCP Flow Capture', () => {
     expect((await h.call('connect_device', { sessionId: 's2', capture: true })).isError).toBeFalsy()
   })
 
+  it('keeps typed text it could not confirm as a secret, so a name holding it is not written (CodeRabbit, #1248)', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    h.show([field({ secure: true })])
+    h.client.typeText.mockRejectedValueOnce(new Error('Could not confirm the input reached the device'))
+    expect((await h.call('type_text', { sessionId: 's1', text: 'tok-4826' })).isError).toBe(true)
+    const copy: UIElement = { ...LOGIN, label: 'Copy tok-4826', identifier: 'copy-tok-4826' }
+    h.show([copy])
+    await h.call('tap', { sessionId: 's1', element: { id: 'copy-tok-4826' } })
+    const { res } = await h.json('list_captured_steps')
+    expect(res.content[0]!.text).not.toContain('tok-4826')
+  })
+
+  it('opens no capture that a Verify started while it was opening (CodeRabbit, #1248)', async () => {
+    const h = harness()
+    let observed!: () => void
+    h.client.observe.mockImplementationOnce(() => new Promise<boolean>((r) => { observed = () => r(true) }))
+    const opening = h.call('connect_device', { sessionId: 's1', capture: true })
+    await vi.waitFor(() => expect(observed).toBeDefined())
+    // A second connect_device opens its capture, and its Verify starts, while the first is still opening.
+    await h.call('connect_device', { sessionId: 's2', capture: true })
+    await h.call('launch_app', { sessionId: 's2', buildId: 7 })
+    await h.call('tap', { sessionId: 's2', element: { id: 'login' } })
+    let answer!: () => void
+    h.client.lookupBuild.mockImplementationOnce(() => new Promise((r) => { answer = () => r({ kind: 'found', bundleId: 'com.app', platform: 'ios' }) }) as never)
+    const verifying = h.call('capture_flow', { sessionId: 's2', name: 'l' })
+    await vi.waitFor(() => expect(answer).toBeDefined())
+    observed()
+    expect((await opening).isError).toBe(true)
+    expect((await h.call('capture_flow', { sessionId: 's2', name: 'l' })).isError).toBe(true)
+    answer()
+    expect(JSON.parse((await verifying).content[0]!.text!)['verified']).toBe(true)
+  })
+
   it('takes a run_flow\'s build as the capture\'s only when the block launched it', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })

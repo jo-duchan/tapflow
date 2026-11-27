@@ -170,7 +170,20 @@ describe('agentSteps', () => {
     const r = agentFlow(steps, { name: 'pin' })
     if (!r.ok) throw new Error(JSON.stringify(r.refusals))
     expect(r.flow.yaml).not.toContain('4826')
-    expect(r.flow.notes).toContain('Left out, a run_flow step holding a typed secret: #3, #4')
+    expect(r.flow.notes).toContain('Left out, a step holding a typed secret: #3, #4')
+  })
+
+  it('finds a secret with a quote or a backslash in it, as typed, in a run_flow step (CodeRabbit, #1248)', () => {
+    for (const value of ['p"ass', 'a\\b']) {
+      const steps = agentSteps(capture([
+        { kind: 'type', at: 1, text: value, field: { secure: true } },
+        { kind: 'flow', at: 2, block: 1, passed: 2, source: { hash: 'h' }, steps: [
+          { type: 'scroll', direction: 'down', until: { label: `Hi ${value}` } },
+          { type: 'tapOn', selector: { id: 'login' } },
+        ] },
+      ]))
+      expect(steps.slice(1).map((s) => s.step?.type ?? null)).toEqual([null, 'tapOn'])
+    }
   })
 
   it('offers a tap the app did not respond to for leaving out', () => {

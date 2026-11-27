@@ -433,9 +433,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       try {
         const { watchUrl } = await client.connectDevice(sessionId)
         if (open) {
-          // A recorder replacing one mid-Verify would let a second capture_flow reset and replay beside it (CodeRabbit,
-          // #1248).
-          // On any device: a new capture drops the one being verified, and could start a second Verify beside it.
+          // On any device: a recorder replacing the one being verified would let a second capture_flow reset and replay
+          // beside it (CodeRabbit, #1248).
           if (verifyingOn !== undefined) {
             return err(`connect_device: a capture is being verified on ${verifyingOn} — wait for capture_flow to answer, then open a new one`)
           }
@@ -447,6 +446,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           let observing = false
           let why: string | undefined
           try { observing = await client.observe(sessionId, true) } catch (e) { why = (e as Error).message }
+          // Again with no await before the assignment: a second connect_device and a capture_flow on its recorder may
+          // have run during the ones above.
+          if (verifyingOn !== undefined) {
+            return err(`connect_device: a capture is being verified on ${verifyingOn} — wait for capture_flow to answer, then open a new one`)
+          }
           capture = new AgentCaptureRecorder(sessionId, platform, observing)
           // The screen the capture's points are made on, and so the one its flow is written for, whatever Verify runs on.
           capture.viewport = viewportOf(await client.chrome(sessionId, 2_000).catch(() => null))
@@ -1016,8 +1020,9 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
             field = focused.length === 1 ? { ...(focused[0]!.secure !== undefined ? { secure: focused[0]!.secure } : {}), ...(focused[0]!.identifier ? { identifier: focused[0]!.identifier } : {}) } : null
           } catch { field = undefined }
           const at = Date.now()
-          await client.typeText(sessionId, text)
-          rec.add({ kind: 'type', at, text, ...(field !== undefined ? { field } : {}) })
+          // Kept when the ack fails too: the text may have reached the field, and a secret not kept is one a later
+          // name holding it would write (CodeRabbit, #1248).
+          try { await client.typeText(sessionId, text) } finally { rec.add({ kind: 'type', at, text, ...(field !== undefined ? { field } : {}) }) }
           // Not echoed: what is typed while capturing may be a password, and a result stays in the model's context.
           return ok(JSON.stringify({ typed: true, length: [...text].length }))
         }
