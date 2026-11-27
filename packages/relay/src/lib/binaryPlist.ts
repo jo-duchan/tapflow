@@ -7,8 +7,9 @@
  * never followed, so a reference cycle or deep nesting in a crafted file has nothing to recurse into.
  *
  * The input is an upload, so it is hostile: every offset and length is checked against the buffer
- * before it is read, and anything inconsistent returns null rather than throwing. Cost is bounded too:
- * the file is capped at MAX_PLIST_BYTES, each string object is decoded once however many entries name
+ * before it is read, and anything inconsistent in what it reads returns null for the whole file, rather
+ * than throwing or returning the entries that were readable. Cost is bounded too: the file is capped at
+ * MAX_PLIST_BYTES, each string object is decoded once however many entries name
  * it, and the bytes decoded in all may not exceed the object area. Objects in a real file do not
  * overlap, so they fit; a crafted file whose objects overlap or share their bytes would otherwise make
  * the work, and the memory it keeps, grow with the square of its size.
@@ -41,8 +42,8 @@ function readUint(buf: Buffer, at: number, width: number): number {
  * it per entry makes the cost the product of two sizes instead of their sum.
  */
 type Layout = {
-  buf: Buffer; offsets: number[]; tableAt: number; decoded: Map<number, string | null>
-  /** Bytes still allowed to be decoded; below zero means the file overlaps itself and is refused. */
+  buf: Buffer; offsets: number[]; tableAt: number; decoded: Map<number, Read>
+  /** Bytes still allowed to be decoded; running out means the file overlaps itself and is refused. */
   budget: number
 }
 
@@ -66,8 +67,17 @@ function countAndPayload(buf: Buffer, at: number): { count: number; payload: num
   return { count, payload: at + 2 + width }
 }
 
-/** The string object `ref` names, or null when it is not a string or does not fit. */
-function readString(layout: Layout, ref: number): string | null {
+/**
+ * A ref that names no object, a string whose header or length does not fit, or bytes past the budget.
+ * Any one of these makes the whole file unreadable, as CoreFoundation treats it, rather than leaving
+ * out the entry it sits in and returning the rest: a corrupted file must not yield a bundle ID.
+ */
+const MALFORMED = Symbol('malformed')
+
+/** A string, null for an object that is validly not a string (a bool, an array), or MALFORMED. */
+type Read = string | null | typeof MALFORMED
+
+function readString(layout: Layout, ref: number): Read {
   const known = layout.decoded.get(ref)
   if (known !== undefined) return known
   const value = decodeString(layout, ref)
@@ -75,19 +85,19 @@ function readString(layout: Layout, ref: number): string | null {
   return value
 }
 
-function decodeString(layout: Layout, ref: number): string | null {
+function decodeString(layout: Layout, ref: number): Read {
   const { buf } = layout
   const at = objectStart(layout, ref)
-  if (at < 0) return null
+  if (at < 0) return MALFORMED
   const kind = buf[at] >> 4
   if (kind !== 0x5 && kind !== 0x6) return null
   const header = countAndPayload(buf, at)
-  if (!header) return null
+  if (!header) return MALFORMED
   const bytes = kind === 0x5 ? header.count : header.count * 2
   const end = header.payload + bytes
-  if (end > layout.tableAt) return null
+  if (end > layout.tableAt) return MALFORMED
   layout.budget -= bytes
-  if (layout.budget < 0) return null
+  if (layout.budget < 0) return MALFORMED
   if (kind === 0x5) return buf.toString('latin1', header.payload, end)
   // UTF-16 big-endian; Node decodes only little-endian, so swap a copy.
   return Buffer.from(buf.subarray(header.payload, end)).swap16().toString('utf16le')
@@ -127,10 +137,12 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
   const result: Record<string, string> = Object.create(null) as Record<string, string>
   for (let i = 0; i < count; i++) {
     const key = readString(layout, readUint(buf, payload + i * refSize, refSize))
+    if (key === MALFORMED) return null
     // The first of a repeated key wins, as CoreFoundation reads it. Xcode never writes one.
     if (key === null || key in result) continue
     const value = readString(layout, readUint(buf, payload + (count + i) * refSize, refSize))
+    if (value === MALFORMED) return null
     if (value !== null) result[key] = value
   }
-  return layout.budget < 0 ? null : result
+  return result
 }

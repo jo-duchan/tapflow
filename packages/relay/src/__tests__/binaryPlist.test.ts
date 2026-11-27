@@ -147,26 +147,33 @@ describe('parseBinaryPlist', () => {
     expect(parseBinaryPlist(copy)).toBeNull()
   })
 
-  it('leaves out a string that runs into the offset table', () => {
+  it('returns null when a value ref names no object', () => {
+    const copy = Buffer.from(SMALL)
+    const t = trailerOf(copy)
+    const dictAt = t.offsets[0]
+    // 0xD9: nine entries, refs 1 byte wide; the first value ref follows the nine key refs.
+    expect(copy[dictAt]).toBe(0xd9)
+    copy[dictAt + 1 + 9] = t.offsets.length
+    expect(parseBinaryPlist(copy)).toBeNull()
+  })
+
+  it('returns null when a string runs into the offset table', () => {
     const copy = Buffer.from(LARGE)
     const t = trailerOf(copy)
     const lastAt = Math.max(...t.offsets)
     // The object written last is Key230's value, 'value-230' (0x59: ASCII, 9 bytes), which ends where the table starts.
     expect([copy[lastAt], copy.toString('latin1', lastAt + 1, lastAt + 10), lastAt + 10]).toEqual([0x59, 'value-230', t.tableAt])
     copy[lastAt] = 0x5a
-    const parsed = parseBinaryPlist(copy)
-    expect(parsed!['Key229']).toBe('value-229')
-    expect(parsed!['Key230']).toBeUndefined()
+    // The other 300 entries are intact; a corrupted file still yields nothing, not the readable rest.
+    expect(parseBinaryPlist(copy)).toBeNull()
   })
 
-  it('leaves out a string whose length is not written as an integer object', () => {
+  it('returns null when a string\'s length is not written as an integer object', () => {
     const copy = Buffer.from(SMALL)
     const at = copy.indexOf(Buffer.from('CFBundleShortVersionString', 'latin1')) - 3
     expect([copy[at], copy[at + 1], copy[at + 2]]).toEqual([0x5f, 0x10, 26])
     copy[at + 1] = 0x50
-    const parsed = parseBinaryPlist(copy)
-    expect(parsed!['CFBundleIdentifier']).toBe('com.example.apple-samplecode.Food-Truck')
-    expect(parsed!['CFBundleShortVersionString']).toBeUndefined()
+    expect(parseBinaryPlist(copy)).toBeNull()
   })
 
   it('returns null for every truncation of a plist', () => {
