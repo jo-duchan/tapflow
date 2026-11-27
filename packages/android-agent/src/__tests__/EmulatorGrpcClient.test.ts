@@ -298,6 +298,26 @@ describe('EmulatorGrpcClient — input readiness and deadline', () => {
       await expect(up).resolves.toBeUndefined()
     })
 
+    // L6a: a machine tap's up waits for its hit in the queue, and a down sent meanwhile goes after it.
+    it('holds the queue until a gate settles, keeping a later down behind the held up', async () => {
+      const { calls, client } = pending()
+      let open!: () => void
+      client.holdUntil(new Promise<void>((r) => { open = r }))
+      const up = client.touchUp(0, 10, 10)
+      const down = client.touchDown(0, 20, 20)
+      await flush()
+      expect(calls).toHaveLength(0)
+      open()
+      await flush()
+      expect(calls.map((c) => c.event.touches[0]!.pressure)).toEqual([0])
+      calls[0]!.cb(null)
+      await up
+      await flush()
+      expect(calls.map((c) => c.event.touches[0]!.pressure)).toEqual([0, 1])
+      calls[1]!.cb(null)
+      await down
+    })
+
     it('still sends the up when the down failed, and reports each on its own', async () => {
       const { calls, client } = pending()
       const down = client.touchDown(0, 10, 10)

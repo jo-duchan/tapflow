@@ -399,6 +399,8 @@ interface PointerControl {
   touchUp(pointerId: number, x?: number, y?: number): void | Promise<void>
   /** Lift the touch as cancelled, so the app does not take it for a tap — or with an up where the backend cannot. */
   touchCancel(pointerId: number, x?: number, y?: number): void | Promise<void>
+  /** Holds what is sent next until `gate` settles (gRPC only: scrcpy writes at once and has no queue). */
+  holdUntil?(gate: Promise<unknown>): void
   pinchStart(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchMove(x1: number, y1: number, x2: number, y2: number): void | Promise<void>
   pinchEnd(): void | Promise<void>
@@ -3385,17 +3387,30 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const closed = this.closeGesture(state, 'touch')
         const watch = this.touchWatches.get(state.deviceId)
+        // A machine's tap (the relay's mark) observed on the gRPC channel: its up waits in the channel's queue for its
+        // down's hit, which it otherwise always beats (`TouchWatch.heldUp`). A person's tap is never held.
+        const owner = closed.via === 'channel' ? closed.owner : undefined
+        const held = owner?.holdUntil && (msg as { machine?: unknown }).machine === true ? watch?.heldUp() : undefined
         if (closed.via === 'none') watch?.cancel()
-        else watch?.up(msg.sessionId, requestId)
+        else watch?.up(msg.sessionId, requestId, held)
         const seq = state.bootSeq
         const { x: upX, y: upY } = state.lastTouchPx
         // terminal of a tap/swipe → ack the gesture, on what the dispatch actually reported
-        void (async () => this.ackInput(state,
-          closed.via === 'none' ? closed.outcome
+        void (async () => {
+          const outcome = closed.via === 'none' ? closed.outcome
             : closed.via === 'helper' ? await closed.owner.touchEnd()
-            : await this.dispatchTo(closed.owner, () => closed.owner.touchUp(0, upX, upY)),
-          seq, requestId,
-        ))().catch((e) => logger.error('input:touch:end ack failed:', e))
+            : await this.dispatchTo(closed.owner, () => {
+              // In the same turn as the up, so a down sent while it waits queues behind it.
+              if (held) closed.owner.holdUntil?.(held)
+              return closed.owner.touchUp(0, upX, upY)
+            })
+          // A held up can outlive its channel (a stream restart replaces the client mid-wait): the pointer stays down on
+          // the emulator, which outlives the client, so the channel that serves now lets it go (design review). An up
+          // the old channel did deliver makes this a second, unmatched up, which is harmless (as in `closeGesture`).
+          const now = held && owner ? this.pointerControl(state) : null
+          if (now && now !== owner) this.fire(now.touchUp(0, upX, upY))
+          await this.ackInput(state, outcome, seq, requestId)
+        })().catch((e) => logger.error('input:touch:end ack failed:', e))
         break
       }
       // A client leaving mid-gesture (#1115). Closed through `closeGesture` like an end — the record goes now, before

@@ -328,7 +328,7 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   that to an agent naming `capture-observe` (a device picked up running gets no boot), counts it in `observed` on that
   holder's own boots, sends it again when the agent re-registers, and sends `off` when the holder leaves, its socket
   closes, or the session is joined by anyone but that MCP holder (the same person back as a dashboard included), since
-  app accessibility stays on the device. It remembers the `requestId`s of the touches that holder sent
+  app accessibility stays on the device. An AI holder's `input:touch:end` is forwarded marked `machine` (`RelayedTouchEnd`), added after the parse so no browser can set it: an Android agent observing touches holds such a tap's up until its down was read. It remembers the `requestId`s of the touches that holder sent
   (`Session.observe`, the newest 64) and passes each one's `capture:touched`/`capture:landed` back to it as
   `capture:observation`, and nothing else: a touch another holder sent, or one sent before arming, is passed to nobody.
   An arming ends with its holder's socket: a client that reconnects and joins again must arm again, and until it does

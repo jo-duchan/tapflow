@@ -2862,6 +2862,49 @@ describe('AndroidAgent', () => {
         expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
       })
 
+      // An instant machine tap's up always beat its down's hit, so its report was always dropped (L6a E2E): the relay
+      // marks a machine's end, and its up waits in the channel's queue for the hit. A person's is never held.
+      it('holds a machine tap\'s up in the channel\'s queue for its hit, and never a person\'s', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        vi.spyOn(adb, 'hitTest').mockReturnValue(new Promise(() => {}))
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        const control = getState().scrcpySession!.control as unknown as { holdUntil?: (g: Promise<unknown>) => void; touchUp: (...a: unknown[]) => unknown }
+        const order: string[] = []
+        control.holdUntil = vi.fn(() => { order.push('hold') })
+        const up = vi.spyOn(control, 'touchUp').mockImplementation(() => { order.push('up') })
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-person' })
+        await vi.waitFor(() => expect(up).toHaveBeenCalledTimes(1))
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-machine', machine: true })
+        await vi.waitFor(() => expect(up).toHaveBeenCalledTimes(2))
+        expect(order).toEqual(['up', 'hold', 'up'])
+      })
+
+      // Design review: a stream restart while a held up waits replaces the channel, and the old one's up fails, but the
+      // pointer stays down on the emulator, which outlives the client: the channel that serves now lets it go.
+      it('lets the pointer go on the channel that serves now when a held up failed on a replaced one', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        vi.spyOn(adb, 'hitTest').mockReturnValue(new Promise(() => {}))
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        const state = getState() as unknown as { scrcpySession: { control: unknown } }
+        const old = state.scrcpySession.control as { holdUntil?: (g: Promise<unknown>) => void; touchUp: (...a: unknown[]) => unknown }
+        old.holdUntil = vi.fn()
+        let fail!: (e: Error) => void
+        vi.spyOn(old, 'touchUp').mockImplementation(() => new Promise<void>((_r, reject) => { fail = reject }))
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-restart', machine: true })
+        await vi.waitFor(() => expect(fail).toBeDefined())
+        const fresh = { isReady: () => true, touchUp: vi.fn() }
+        state.scrcpySession = { ...state.scrcpySession, control: fresh }
+        fail(new Error('client closed'))
+        await vi.waitFor(() => expect(fresh.touchUp).toHaveBeenCalledTimes(1))
+      })
+
       // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
       it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
         const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages

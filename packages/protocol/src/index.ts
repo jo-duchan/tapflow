@@ -2639,6 +2639,15 @@ export interface InputTouchEnd {
 }
 
 /**
+ * An `input:touch:end` as the relay forwards it to the agent: `machine` when the session's holder declared an AI
+ * `clientKind` (MCP, the flow runner), whose tap is down and up back to back. Never from a browser — its schema does not
+ * declare the field, so the parse strips it, and the relay adds it after. An Android agent observing touches holds such
+ * a tap's up until its down's hit is read, which an instant tap otherwise always beats; a person's tap is never held, so
+ * its timing (a fast double tap) is what the app sees. An older relay sends none and an older agent ignores it.
+ */
+export type RelayedTouchEnd = InputTouchEnd & { machine?: true }
+
+/**
  * Lift the open touch **without completing it**: the app sees its touch cancelled, not a tap (#1115) — nor a long press,
  * if the cancel arrives before the app recognised one; a long press the app already acted on cannot be undone.
  * Sent by a client leaving a session mid-gesture, followed by an `input:touch:end` — an agent that knows this message

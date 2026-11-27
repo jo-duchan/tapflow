@@ -43,6 +43,9 @@ const OFFSET_SAMPLES = 16
 const KEEP_ALIVE_MS = 30_000
 /** After the verdict window, before the frames are read: a frame completing at its edge is in the dump. */
 const SETTLE_MS = 50
+/** How long a machine's tap's up may wait for its down's hit (`heldUp`), from the down: well under the 400 ms long-press
+ *  timeout, so a tap held on a slow device stays a tap. A bound, not an ordering: within it the hit is read first. */
+const HOLD_UP_MAX_MS = 250
 
 interface Gesture {
   downAt: number
@@ -55,6 +58,8 @@ interface Gesture {
   /** The down and the latest moves, for the release's speed. */
   moves: Array<{ x: number; y: number; at: number }>
   hit: Promise<{ answer: string; writtenAt: number } | null>
+  /** Set when the up was held for the hit (`heldUp`): settles once the up is let go, and `upAt` is set then. */
+  released?: Promise<void>
   /** The clock offset this gesture is judged by, fixed as its hit came in (`noteOffset`): the report and the landing
    *  read the same one. */
   offsetNs?: number
@@ -143,7 +148,22 @@ export class TouchWatch {
     while (g.moves.length > 2 && g.moves[1]!.at <= at - FLING_WINDOW_MS) g.moves.shift()
   }
 
-  up(sessionId: string, requestId: string): void {
+  /**
+   * A machine's tap's up waits for this before it is sent (the relay marks the end, `RelayedTouchEnd`): its down's hit
+   * answered, or `HOLD_UP_MAX_MS` from the down. An instant tap's up otherwise always beats its hit, and a hit read after
+   * the up may be of the screen the tap made, so its report was always dropped. Undefined — no wait — for a gesture
+   * that moved (holding a flick's up reads as the finger stopping, and the fling is lost), or with no gesture open.
+   * Never rejects. Pass it to `up` so the report judges by when the up was let go.
+   */
+  heldUp(): Promise<void> | undefined {
+    const g = this.current
+    if (!g || this.stopped || g.moved > TAP_SLOP) return undefined
+    const left = HOLD_UP_MAX_MS - (this.now() - g.downAt)
+    if (left <= 0) return undefined
+    return Promise.race([g.hit.then(() => {}, () => {}), this.sleep(left)])
+  }
+
+  up(sessionId: string, requestId: string, held?: Promise<void>): void {
     const g = this.current
     this.current = null
     if (!g || this.stopped) return
@@ -152,7 +172,11 @@ export class TouchWatch {
     const first = g.moves[0], end = g.moves.at(-1)
     const span = first && end ? Math.max(g.upAt - first.at, 1) : 0
     const fling = !tap && span > 0 && Math.hypot(end!.x - first!.x, end!.y - first!.y) / (span / 1000) >= FLING_SPEED
-    this.last = { tap, fling, upAt: g.upAt, x: g.x, y: g.y, tapCount: tap ? g.tapCount : 0 }
+    const last = { tap, fling, upAt: g.upAt, x: g.x, y: g.y, tapCount: tap ? g.tapCount : 0 }
+    this.last = last
+    // The up reached the app when it was let go, not when the end arrived: the report and the landing judge the hit,
+    // and the frames, by that (design review of the held up: judged by the arrival, every held tap was still dropped).
+    if (held) g.released = held.then(() => { g.upAt = this.now(); last.upAt = g.upAt })
     // One at a time, in the order the touches ended: a touch's `seq` is its place among them.
     this.tail = this.tail.then(() => this.report(sessionId, requestId, g, !tap)).catch(() => {})
     // Not behind that line: a landing needs only the hit, and the report before it can wait 0.85 s for frames.
@@ -166,7 +190,7 @@ export class TouchWatch {
    * as another app's, a home one as another app's too, and a leading `other` is how Capture finds the app.
    */
   private async land(landings: NonNullable<TouchWatchDeps['landings']>, sessionId: string, requestId: string, g: Gesture): Promise<void> {
-    const [res, home] = await Promise.all([g.hit, landings.home(this.serial).catch(() => null)])
+    const [res, home] = await Promise.all([g.hit, landings.home(this.serial).catch(() => null), g.released])
     const hit = parseHit(res?.answer)
     if (this.stopped || !res || !hit || !g.pkg || !home || g.offsetNs === undefined) return
     // The report's own offset for this gesture, so a hit it would drop as late places nothing either.
@@ -204,6 +228,7 @@ export class TouchWatch {
   }
 
   private async report(sessionId: string, requestId: string, g: Gesture, moved: boolean): Promise<void> {
+    await g.released
     const res = await g.hit
     const hit = parseHit(res?.answer)
     if (this.stopped) return
