@@ -3,7 +3,7 @@ export type { Flow, Step, Selector, ScrollDirection, KeyModifier, Viewport } fro
 export type { StepExpect, EffectAnchor } from './effect.js'
 export { EffectWatch, agreedEffect } from './effect.js'
 export { holdStill, HOLD_FRAME_MS, HOLD_WOBBLE, MAX_HOLD_MS } from './hold.js'
-export { runFlow, waitForStableScreen, missingSecret, missingSecretMessage, matchSelector, activityLabel, refusedFlow } from './engine.js'
+export { runFlow, firstPointStep, viewportOf, waitForStableScreen, missingSecret, missingSecretMessage, matchSelector, activityLabel, refusedFlow } from './engine.js'
 export type { FlowDriver, FlowResult, StepResult, EngineOptions, SelectorSuggestion, PinchFingers } from './engine.js'
 export { unavailableButton, unavailableButtonMessage } from './platformCheck.js'
 export type { UnavailableButton } from './platformCheck.js'

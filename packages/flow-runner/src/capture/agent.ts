@@ -1,8 +1,10 @@
 import type { UIElement } from '@tapflowio/agent-core'
 import type { TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { matchSelector } from '../selector.js'
-import { isSecretName, type Selector, type Step } from '../schema.js'
-import { expectedFor, mentionsSecret, type ExpectWarning } from './expected.js'
+import { firstPointStep } from '../engine.js'
+import { isSecretName, type Selector, type Step, type Viewport } from '../schema.js'
+import { expectedFor, type ExpectWarning } from './expected.js'
+import { mentionsSecret, secretPieces, selectorHoldsSecret, stepHoldsSecret } from './secrets.js'
 import { centre, hitTest, recordedSelector, target, toFlowSteps, flowSteps, type CapturedStep, type FragileReason } from './match.js'
 import { LONG_PRESS_MS, type Point, type RawStep } from './segment.js'
 import { flowToYaml } from './yaml.js'
@@ -79,7 +81,8 @@ export interface AgentStep extends CapturedStep {
   /** A tap the app did not respond to (Manual's rule): offered to be left out, never left out by itself. */
   noResponse?: true
   landed?: TouchLanding
-  /** A name for it held a secret's value, so it was not used: named by the next way, or left a point. */
+  /** A name for it held a secret's value, so it was not used: named by the next way, or left a point. A step with no
+   *  other way to be named (a `run_flow`'s) is left out (`step: null`). */
   withheld?: true
 }
 
@@ -126,9 +129,8 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
   const actions = [...capture.actions].sort((a, b) => a.at - b.at)
   // What was typed as a secret: an element showing it is never offered to expect, or named by it, or the value would be
   // written. Each piece between a Tab or a Return too, since those may have typed into two fields (CodeRabbit, #1244).
-  const secrets = actions.flatMap((a) => (a.kind === 'type' && !writable(a) ? [a.text, ...a.text.split(/[\t\n\r]/)] : []))
-    .filter((v) => v.length > 0)
-  const leaks = (s: Selector): boolean => [s.text, s.id, s.label, s.role].some((v) => v !== undefined && mentionsSecret(v, secrets))
+  const secrets = secretPieces(actions.flatMap((a) => (a.kind === 'type' && !writable(a) ? [a.text] : [])))
+  const leaks = (s: Selector): boolean => selectorHoldsSecret(s, secrets)
   for (const [i, a] of actions.entries()) {
     const nextAt = actions[i + 1]?.at ?? Infinity
     const before = treeBetween(capture.trees, previousAt, a.at)
@@ -214,13 +216,16 @@ export function agentSteps(capture: AgentCapture): AgentStep[] {
         break
       case 'openUrl': out.push({ raw: raw(a.at), step: { type: 'openUrl', url: a.url }, origin: 'agent', ...common }); break
       case 'flow':
+        // A step holding a typed secret is left out by the check below: it has no other way to be named.
         a.steps.forEach((step, k) => out.push({
           raw: raw(a.at), step, origin: 'agent-step', block: a.block, ...(k >= a.passed ? { failed: true as const } : {}),
         }))
         break
     }
   }
-  return out
+  // The exit: whatever made it, no step leaves holding a typed secret. Each case above names around one where it can;
+  // this is for the step none of them thought of (CodeRabbit, #1248).
+  return out.map((s) => (s.step && stepHoldsSecret(s.step, secrets) ? { ...s, step: null, withheld: true as const } : s))
 }
 
 /** What the agent decided about its steps (`capture_flow`): numbers are `agentSteps`' indexes from 1, as listed. */
@@ -251,6 +256,11 @@ export interface AgentFlow {
   secrets: Record<string, string>
   /** What a person reviewing the file should know; also the comment's body. */
   notes: string[]
+  /** For each of `steps`, the number of the listed step it came from (an expectation, its step's); `null` for one the
+   *  export added (the app's clear-state and launch). How a Verify's failed step is told to the agent in its numbers. */
+  origins: Array<number | null>
+  /** Written only when a step touches a point. */
+  viewport?: Viewport
 }
 
 /** Steps that do something, beyond starting the app. */
@@ -267,7 +277,7 @@ const MANY_DROPPED = 3
  * Refused: a step number out of the list, a step past where its `run_flow` failed, an expectation not offered, and a flow
  * that does nothing but start the app.
  */
-export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: { appId?: string } = {}): { ok: true; flow: AgentFlow } | { ok: false; refusals: JudgementRefusal[] } {
+export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: { appId?: string; viewport?: Viewport } = {}): { ok: true; flow: AgentFlow } | { ok: false; refusals: JudgementRefusal[] } {
   const refusals: JudgementRefusal[] = []
   const n = steps.length
   const inList = (k: number) => Number.isInteger(k) && k >= 1 && k <= n
@@ -314,7 +324,15 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   if (taken.length) return { ok: false, refusals: taken }
   const withExpects = captured.steps.flatMap((s, i) => [s, ...(expectAfter.get(chosen[i]!.k) ?? [])
     .map((selector): CapturedStep => ({ raw: s.raw, step: { type: 'assertVisible', selector } }))])
+  const withExpectsFrom = captured.steps.flatMap((_, i) => [chosen[i]!.k, ...(expectAfter.get(chosen[i]!.k) ?? []).map(() => chosen[i]!.k)])
   const flowStepsOut = flowSteps({ ...captured, steps: withExpects }, opts)
+  // `flowSteps` drops the steps that say nothing and adds the clear-state and launch right after a leading clear-state,
+  // or first: so the added ones are the gap between what was said and what came out.
+  const saidFrom = withExpectsFrom.filter((_, i) => withExpects[i]!.step !== null)
+  const added = Array<null>(flowStepsOut.length - saidFrom.length).fill(null)
+  const origins = withExpects.find((s) => s.step !== null)?.step?.type === 'clearState'
+    ? [saidFrom[0]!, ...added, ...saidFrom.slice(1)]
+    : [...added, ...saidFrom]
   if (!flowStepsOut.some((s) => ACTING.has(s.type))) return { ok: false, refusals: [{ reason: 'nothing-done' }] }
 
   const notes: string[] = []
@@ -331,8 +349,11 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const fragile = chosen.flatMap((c, i) => (captured.steps[i]!.fragile && captured.steps[i]!.step?.type !== 'scroll' ? [`${label(c.k)} ${captured.steps[i]!.fragile}`] : []))
   if (fragile.length) notes.push(`Fragile: ${fragile.join(', ')}`)
   const mismatched = chosen.filter((c) => (c.s as AgentStep).mismatch).map((c) => label(c.k))
-  const withheld = chosen.filter((c) => (c.s as AgentStep).withheld).map((c) => label(c.k))
-  if (withheld.length) notes.push(`Not named by an element whose name holds a typed secret: ${withheld.join(', ')}`)
+  const withheld = chosen.filter((c) => (c.s as AgentStep).withheld)
+  const renamed = withheld.filter((c) => c.s.step !== null).map((c) => label(c.k))
+  const hidden = withheld.filter((c) => c.s.step === null).map((c) => label(c.k))
+  if (renamed.length) notes.push(`Not named by an element whose name holds a typed secret: ${renamed.join(', ')}`)
+  if (hidden.length) notes.push(`Left out, a step holding a typed secret: ${hidden.join(', ')}`)
   if (mismatched.length) notes.push(`The touch was seen to hit another element than the agent named: ${mismatched.join(', ')}`)
   const blocks = [...new Set(chosen.flatMap((c) => ((c.s as AgentStep).origin === 'agent-step' ? [(c.s as AgentStep).block!] : [])))]
   if (blocks.length) notes.push(`Written by the agent (run_flow), not observed: ${blocks.length} block${blocks.length === 1 ? '' : 's'}`)
@@ -342,6 +363,8 @@ export function agentFlow(steps: readonly AgentStep[], j: AgentJudgement, opts: 
   const acting = steps.filter((s) => s.step && ACTING.has(s.step.type)).length
   if (dropped.size >= MANY_DROPPED || (acting > 0 && dropped.size * 2 >= acting)) notes.push(`Warning: ${dropped.size} of ${n} steps left out`)
   const header = [`Captured from an AI agent's session over MCP${j.attempt ? `, verified on try ${j.attempt}` : ''}: ${n} steps recorded.`, ...notes]
-  const yaml = flowToYaml({ name: j.name, ...(opts.appId ? { appId: opts.appId } : {}), steps: flowStepsOut }, { comment: header.join('\n') })
-  return { ok: true, flow: { steps: flowStepsOut, yaml, secrets, notes } }
+  // The screen the points were made on, only where a step touches one: a selector finds its element on any screen.
+  const viewport = opts.viewport && firstPointStep({ steps: flowStepsOut }) >= 0 ? { viewport: opts.viewport } : {}
+  const yaml = flowToYaml({ name: j.name, ...(opts.appId ? { appId: opts.appId } : {}), ...viewport, steps: flowStepsOut }, { comment: header.join('\n') })
+  return { ok: true, flow: { steps: flowStepsOut, yaml, secrets, notes, origins, ...viewport } }
 }

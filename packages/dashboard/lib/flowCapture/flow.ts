@@ -1,5 +1,5 @@
 import {
-  agreedEffect, flowSteps, flowToYaml, mentionsSecret, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Selector, type Step,
+  agreedEffect, flowSteps, flowToYaml, selectorHoldsSecret, type CapturedFlow, type CapturedStep, type Flow, type FlowResult, type Selector, type Step,
   type StepExpect,
 } from '@tapflowio/flow-runner/browser'
 import type { CaptureState } from './machine'
@@ -52,7 +52,8 @@ export function secretValues(state: Pick<CaptureState, 'captured' | 'made'>): st
 /** Whether an expected element's selector holds one of `values`: it is left out of the file, whenever the secret was
  *  made — before or after the element was picked. */
 export function holdsSecret(sel: Selector, values: readonly string[]): boolean {
-  return mentionsSecret(sel.label ?? '', values) || mentionsSecret(sel.id ?? '', values)
+  // Every string of it, a bare one and a role too: the rule MCP's capture keeps (flow-runner `capture/secrets.ts`).
+  return selectorHoldsSecret(sel, values)
 }
 
 /** A typed step made the secret `name` (1b-3c): what Edit draws and what the file gets. */

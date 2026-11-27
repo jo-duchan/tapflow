@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  BootRefusalReason, BrowserToRelay, ChromePayload, DeviceSummary, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
+  BootRefusalReason, BrowserToRelay, CaptureObservation, ChromePayload, DeviceSummary, RunResetReport, PosturesPayload, InputErrorReason, LaunchApplied, LaunchOptions, ReachResult, ReachTarget, SessionTerminatedReason, UIElement,
 } from '@tapflowio/protocol'
 import { AdmissionRefusedError, DeviceLacksError, EnvironmentStepError, TransientQueryError, markEnvironmentFailure, authHeader, fetchWithToken, fixedToken, lookupBuild, reachRequest, readReachResults, tokenRefusal, keyModifierBits, holdStill, MAX_HOLD_MS, type BuildLookup, type KeyModifier, type TokenSource } from '@tapflowio/flow-runner'
 
@@ -346,6 +346,9 @@ const BOOT_DEADLINE_MS = 180_000
  * how a guard stops being written.
  */
 const INSTALL_DEADLINE_MS = 120_000
+
+/** A run reset's wait: the agent's own budget (60 s) and a reinstall's longest step, as the dashboard's dialog waits. */
+const RUN_RESET_DEADLINE_MS = 150_000
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -811,6 +814,9 @@ export class TapflowClient {
     // already been told "timed out" with no cause. A `waiters.length > 0` guard here would drop exactly that
     // one, which is why a test holds its absence.
     if (msg['type'] === 'error' && typeof msg['sessionId'] !== 'string') this.noteAddressSkew()
+    if (msg['type'] === 'capture:observation' && typeof msg['sessionId'] === 'string' && typeof msg['requestId'] === 'string') {
+      for (const listener of this.observationListeners) listener(msg as unknown as CaptureObservation)
+    }
     if (msg['type'] === 'input:done') {
       const sid = msg['sessionId']
       const id = msg['requestId']
@@ -833,6 +839,59 @@ export class TapflowClient {
       throw new Error(`Not connected to relay${this.closeDetail()}`)
     }
     this.ws.send(JSON.stringify(msg))
+    for (const listener of this.sendListeners) listener(msg)
+  }
+
+  private readonly sendListeners = new Set<(msg: BrowserToRelay) => void>()
+  private readonly observationListeners = new Set<(msg: CaptureObservation) => void>()
+
+  /**
+   * Told of every message as it leaves, after it left: how MCP Flow Capture (L6a) learns the `requestId` of a touch an
+   * element tap or its own Verify sent, which `tap` and the engine keep inside. A listener must not throw or send.
+   */
+  onSend(listener: (msg: BrowserToRelay) => void): () => void {
+    this.sendListeners.add(listener)
+    return () => { this.sendListeners.delete(listener) }
+  }
+
+  /** Told of each `capture:observation` the relay passes on: what the agent saw of a touch this client sent. */
+  onObservation(listener: (msg: CaptureObservation) => void): () => void {
+    this.observationListeners.add(listener)
+    return () => { this.observationListeners.delete(listener) }
+  }
+
+  /**
+   * Turn record-time touch observation on or off for the session's device (`capture:observe`, L6a). Resolves whether
+   * the device's agent takes it; `false` too for a relay that predates it, which would drop the request unanswered.
+   */
+  async observe(sessionId: string, on: boolean): Promise<boolean> {
+    if (!(await this.relayFeatures()).includes('capture-observe')) return false
+    const requestId = randomUUID()
+    this.send({ type: 'capture:observe', sessionId, requestId, payload: { on } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'capture:observe-done' || m['type'] === 'capture:observe-error') && m['requestId'] === requestId,
+      5_000,
+      sessionId,
+    )
+    if (msg['type'] === 'capture:observe-error') throw this.failed(sessionId, (msg['message'] as string) ?? 'Observation was refused')
+    return msg['observing'] === true
+  }
+
+  /**
+   * Reset the session's device as `tapflow flow run` resets one before a run (#1139): `apps` as freshly installed, then
+   * the device-wide items, the network and the turn. `undefined` when the agent does not take it.
+   */
+  async runReset(sessionId: string, apps: string[]): Promise<RunResetReport | undefined> {
+    const requestId = randomUUID()
+    this.send({ type: 'device:run-reset', sessionId, requestId, payload: { apps } })
+    const msg = await this.waitFor(
+      (m) => (m['type'] === 'device:run-reset-done' || m['type'] === 'device:run-reset-error') && m['requestId'] === requestId,
+      RUN_RESET_DEADLINE_MS,
+      sessionId,
+    )
+    if (msg['type'] === 'device:run-reset-done') return msg['report'] as RunResetReport
+    if (msg['reason'] === 'unsupported') return undefined
+    throw this.failed(sessionId, (msg['message'] as string) ?? 'The device could not be reset')
   }
 
   /** True once the socket open now has closed or been replaced: a gesture that waits between frames must not send the
@@ -1551,7 +1610,7 @@ export class TapflowClient {
   }
 
   /** The tree with the app's interface turn beside it, when the agent sent one (`UiTreeResponse.interfaceTurn`). */
-  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn }> {
+  async queryUITreeWithTurn(sessionId: string, signal?: AbortSignal): Promise<{ elements: UIElement[]; interfaceTurn?: InterfaceTurn; aspect?: number }> {
     const httpBase = this.relayUrl.replace(/^wss?/, (p) => (p === 'wss' ? 'https' : 'http'))
     const url = new URL(`/api/v1/sessions/${sessionId}/ui-tree`, httpBase)
     let res: Response
@@ -1594,7 +1653,13 @@ export class TapflowClient {
       throw new EnvironmentStepError(`UI tree query failed: ${cause.message}`, { cause })
     }
     const interfaceTurn = interfaceTurnOf((body as { interfaceTurn?: unknown }).interfaceTurn)
-    return interfaceTurn === undefined ? { elements: body.elements } : { elements: body.elements, interfaceTurn }
+    // The screen's height ÷ width the tree was read on (#1210), for Flow Capture's scroll rule.
+    const aspect = (body as { aspect?: unknown }).aspect
+    return {
+      elements: body.elements,
+      ...(interfaceTurn !== undefined ? { interfaceTurn } : {}),
+      ...(typeof aspect === 'number' && Number.isFinite(aspect) && aspect > 0 ? { aspect } : {}),
+    }
   }
 
   /**

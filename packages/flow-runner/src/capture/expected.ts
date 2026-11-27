@@ -2,6 +2,7 @@ import type { UIElement } from '@tapflowio/agent-core'
 import { lastingId, showsTyping, tellsTime } from '../effect.js'
 import { matchSelector } from '../selector.js'
 import type { Selector } from '../schema.js'
+import { mentionsSecret } from './secrets.js'
 
 /**
  * What a person can expect a touch to bring (1b-3c): an element they pick on the screen after it, written into the flow
@@ -43,7 +44,3 @@ export function expectedFor(e: UIElement, ctx: { secrets: readonly string[]; bef
   return { selector, warnings }
 }
 
-/** Whether `text` holds any of the secrets' values. */
-export function mentionsSecret(text: string, secrets: readonly string[]): boolean {
-  return secrets.some((s) => s.length > 0 && text.includes(s))
-}
