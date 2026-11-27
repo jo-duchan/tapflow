@@ -12,6 +12,7 @@ import type { NetworkMessageHandler } from '@/hooks/useNetworkControl';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
 import type { AppLogFeed } from '@/lib/appLogs';
 import { DeepLinkDialog } from './DeepLinkDialog';
+import { useDeepLinkDialog } from '@/hooks/useDeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
@@ -113,7 +114,7 @@ export function IOSViewer({
 
   const { recordState, recordCanvasRef, setComposeFrame, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
 
-  const [deepLinkOpen, setDeepLinkOpen] = useState(false);
+  const { open: deepLinkOpen, setOpen: setDeepLinkOpen, openFrom: openDeepLinkFrom, restoreFocus: restoreDeepLinkFocus } = useDeepLinkDialog();
   const [isLandscape, setIsLandscape] = useState(false);
   // A turn shown ahead of the device's own report, and how long to wait for that report.
   const [pendingTurn, setPendingTurn] = useState<{ target: Turn; deadline: number } | null>(null);
@@ -375,7 +376,7 @@ export function IOSViewer({
       if (e.metaKey) {
         const el = document.activeElement
         if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
-          if (!e.shiftKey && e.code === 'KeyK') { e.preventDefault(); setDeepLinkOpen(true); return }
+          if (!e.shiftKey && e.code === 'KeyK') { e.preventDefault(); openDeepLinkFrom(el); return }
           if (!e.shiftKey && e.code === 'KeyS') { e.preventDefault(); handleScreenshot(); return }
           if (e.shiftKey && e.code === 'KeyY') { e.preventDefault(); handleRecordToggle(); return }
           // A held chord repeats, and each repeat would be another turn.
@@ -403,7 +404,7 @@ export function IOSViewer({
     const onBlur = () => { if (!captureOpen && isOptionHeld.current) endPinch() }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', onBlur)
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur) }
-  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending, pointerMarks])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, onKbdToggle, swKeyboardPending, pointerMarks, openDeepLinkFrom])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -645,11 +646,11 @@ export function IOSViewer({
     >
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
 
-      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
+      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} onCloseAutoFocus={restoreDeepLinkFocus} openUrl={openUrl} />
 
       <SimulatorToolbar
         joined={joined}
-        onDeepLink={() => setDeepLinkOpen(true)}
+        onDeepLink={(event) => openDeepLinkFrom(event.currentTarget)}
         onScreenshot={handleScreenshot}
         onRecordToggle={handleRecordToggle}
         recordState={recordState}

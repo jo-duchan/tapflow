@@ -15,6 +15,7 @@ import type { NetworkMessageHandler } from '@/hooks/useNetworkControl';
 import { SimulatorInfoCard } from './shared/SimulatorInfoCard';
 import type { AppLogFeed } from '@/lib/appLogs';
 import { DeepLinkDialog } from './DeepLinkDialog';
+import { useDeepLinkDialog } from '@/hooks/useDeepLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { AndroidButton, PosturesPayload } from '@/lib/types'
@@ -105,7 +106,7 @@ export function AndroidViewer({
 
   const { recordState, recordCanvasRef, setComposeFrame, startClientRecording, stopClientRecording } = useClientRecording({ sessionId, buildId, onRecordingUploaded });
 
-  const [deepLinkOpen, setDeepLinkOpen] = useState(false);
+  const { open: deepLinkOpen, setOpen: setDeepLinkOpen, openFrom: openDeepLinkFrom, restoreFocus: restoreDeepLinkFocus } = useDeepLinkDialog();
   // Rotation intent is owned locally (iOS IOSViewer pattern). It only drives CSS shell
   // rotation for portrait-locked apps; rotation-capable apps follow the actual stream.
   const [userWantsLandscape, setUserWantsLandscape] = useState(false);
@@ -332,7 +333,7 @@ export function AndroidViewer({
       if (e.metaKey) {
         const el = document.activeElement
         if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
-          if (!e.shiftKey && e.code === 'KeyK') { e.preventDefault(); setDeepLinkOpen(true); return }
+          if (!e.shiftKey && e.code === 'KeyK') { e.preventDefault(); openDeepLinkFrom(el); return }
           if (!e.shiftKey && e.code === 'KeyS') { e.preventDefault(); handleScreenshot(); return }
           if (e.shiftKey && e.code === 'KeyY') { e.preventDefault(); handleRecordToggle(); return }
           // A held chord repeats, and each repeat would be another turn.
@@ -366,7 +367,7 @@ export function AndroidViewer({
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, pointerMarks])
+  }, [captureOpen, keyboardActive, clipboardSupported, send, sessionId, handleScreenshot, handleRecordToggle, handleRotate, pointerMarks, openDeepLinkFrom])
 
   useEffect(() => {
     if (!keyboardActive) return
@@ -568,11 +569,11 @@ export function AndroidViewer({
       className="flex items-start justify-center gap-16"
     >
       <canvas ref={recordCanvasRef} style={{ display: 'none' }} />
-      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} openUrl={openUrl} />
+      <DeepLinkDialog open={deepLinkOpen} onOpenChange={setDeepLinkOpen} onCloseAutoFocus={restoreDeepLinkFocus} openUrl={openUrl} />
 
       <SimulatorToolbar
         joined={joined}
-        onDeepLink={() => setDeepLinkOpen(true)}
+        onDeepLink={(event) => openDeepLinkFrom(event.currentTarget)}
         onScreenshot={handleScreenshot}
         onRecordToggle={handleRecordToggle}
         recordState={recordState}

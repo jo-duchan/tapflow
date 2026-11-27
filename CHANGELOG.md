@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Closing Open Deeplink returns focus to the toolbar button or the control focused before Cmd+K.
 - **The Android agent's log explains a UI tree read that failed.** A read the relay answered with a 502, as when a Flow Capture Match slowed to about 15 seconds a step, left no reason in either log. The agent now logs the error of a read that failed, why a read through its field server fell back, and which request the field server did not answer before it was restarted.
 - Team member role selectors now have accessible names that identify the member, including when display names are blank or duplicated.
 - Shutdown requests with a valid envelope and malformed payload now receive an error reply, preserving a supplied request ID and allowing lifecycle requests without one.

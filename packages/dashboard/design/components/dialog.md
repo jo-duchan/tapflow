@@ -106,7 +106,8 @@ the panel.
 - When a form is replaced by its result, keep the panel and the title; swap the body only.
 - **Open it from a `DialogTrigger`, or return focus yourself.** Radix puts focus back on the trigger when the
   dialog closes. Opened from a plain `onClick`, a shortcut or on mount there is no trigger, so focus drops to the page unless the call site
-  passes `onCloseAutoFocus` (Password reset link does). Two dialogs do neither today (tracked in #979).
+  passes `onCloseAutoFocus` (Password reset link does). Open deeplink returns focus to the toolbar button or to
+  the control focused before ⌘K. Performance Mode Notice still needs a focus destination (tracked in #979).
 
 ## Dialog vs AlertDialog
 
