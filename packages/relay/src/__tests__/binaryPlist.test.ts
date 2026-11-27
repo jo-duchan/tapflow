@@ -85,6 +85,20 @@ describe('parseBinaryPlist', () => {
     }
   })
 
+  it('returns null for another plist format behind the same prefix', () => {
+    // bplist15 and bplist16 are later, different encodings; this reads only bplist00.
+    const copy = Buffer.from(SMALL)
+    copy.write('bplist15', 0, 'latin1')
+    expect(parseBinaryPlist(copy)).toBeNull()
+  })
+
+  it('returns null when an object offset points into the header', () => {
+    const copy = Buffer.from(SMALL)
+    const t = trailerOf(copy)
+    copy.writeUIntBE(0, t.tableAt + 1 * t.offsetSize, t.offsetSize)
+    expect(parseBinaryPlist(copy)).toBeNull()
+  })
+
   it('returns null when an object offset points into the offset table', () => {
     const copy = Buffer.from(SMALL)
     const t = trailerOf(copy)

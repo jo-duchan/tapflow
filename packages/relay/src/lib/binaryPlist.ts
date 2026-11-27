@@ -76,7 +76,7 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
   const topObject = readUint(buf, trailer + 16, 8)
   const tableAt = readUint(buf, trailer + 24, 8)
   if (offsetSize < 1 || offsetSize > 8 || refSize < 1 || refSize > 8) return null
-  if (numObjects < 1 || topObject < 0 || topObject >= numObjects || tableAt < MAGIC.length) return null
+  if (numObjects < 1 || topObject < 0 || topObject >= numObjects) return null
   // The offset table sits between the objects and the trailer; this also bounds numObjects by the file size.
   if (numObjects > (trailer - tableAt) / offsetSize) return null
 
