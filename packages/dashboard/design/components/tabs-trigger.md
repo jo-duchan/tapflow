@@ -72,7 +72,7 @@ At this tap / After this tap).
 | QA session side panel — Comments / Recordings | List `w-full`, each trigger `flex-1 gap-1.5` with a 14px icon before the label; panels 12px under the list (`mt-3`) | Two equal halves of a 312px list, inset 4px (`px-1`) inside the 320px panel |
 | Flow Runs — All / CI / Local | None. No panels: the tabs filter the list below | A source filter in the toolbar, beside 32px controls (the status Select and the search box) |
 | Flow Capture's Edit — At this tap / After this tap | `line`. Left-aligned to the picture, 16px above it; After disabled on a step with no screen after it | A picture's width follows the device and its turn, so a centred switch would sit nowhere in particular; every step keeps the tabs so the picture keeps one size |
-| Mac resources — 1h / 6h / 24h / 7d | None. No panels: the tabs set the chart's range | A range picker beside the Mac's name. The list has no name, so a screen reader hears "1h" with nothing saying it is a time range (tracked in #979) |
+| Mac resources — 1h / 6h / 24h / 7d | None. No panels: the tabs set the chart's range | A range picker beside the Mac's name. The tab list is named `Time range`. |
 
 Two of the four are filters, not tabs over panels. They look and behave the same; Radix still gives them
 `role="tab"` and arrow-key movement.

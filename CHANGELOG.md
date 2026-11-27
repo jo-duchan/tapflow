@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Mac Resources history tabs now have the accessible name "Time range".
 - **An AI agent's coordinate taps on Android are named by what they hit when it captures a flow.** Tapping by coordinates with MCP Flow Capture on an Android emulator, the tap was always named from the screen read before it, or kept as a point, because the agent's tap ended before the emulator could say what it touched. The Android agent now waits for that answer before lifting an agent's tap, for at most a quarter of a second. Taps made by a person, drags and flings are not changed. Needs the relay and the Android agent from this release.
 - Closing Open Deeplink returns focus to the toolbar button or the control focused before Cmd+K.
 - **The Android agent's log explains a UI tree read that failed.** A read the relay answered with a 502, as when a Flow Capture Match slowed to about 15 seconds a step, left no reason in either log. The agent now logs the error of a read that failed, why a read through its field server fell back, and which request the field server did not answer before it was restarted.

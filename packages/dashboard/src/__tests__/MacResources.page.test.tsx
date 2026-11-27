@@ -133,6 +133,11 @@ const agent = (agentName: string, resources?: AgentResources): SessionInfo => ({
   agentName, platform: 'ios', capabilities: [], admission: { booting: false, overloaded: false, memoryRefuses: [] }, devices: [], resources,
 })
 
+it('names the resource history tabs Time range', async () => {
+  await mount()
+  expect(screen.getByRole('tablist', { name: 'Time range' })).toBeInTheDocument()
+})
+
 describe('the history refreshes without the chart going blank', () => {
   it('polls on the cadence chosen for each range', () => {
     // The relay writes a row a minute, so polling faster re-fetches identical data; the long ranges
