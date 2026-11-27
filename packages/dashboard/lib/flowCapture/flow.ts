@@ -17,6 +17,7 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
   }
   const hidden = secretValues(state)
   const shows = (sel: Selector) => !holdsSecret(sel, hidden)
+  let launchWithheld = false
   // One pass over the captured steps, by their own indices: what is removed and what is expected are both keyed by them.
   const steps = captured.steps
     .flatMap((s, i): CapturedStep[] => {
@@ -26,6 +27,7 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
       // Then said without a name holding a secret (#1248's follow-up): a value made a secret here can be one Match
       // named a tap by. Unchanged steps stay the same objects, which `withEffects` pairs Match's look by.
       const step = withoutSecretNames(name !== undefined && s.step?.type === 'inputText' ? asSecret(s, name) : s, hidden)
+      if (s.step?.type === 'launchApp' && step.step === null) launchWithheld = true
       const checks = (expected[i] ?? []).filter(shows).map((selector): CapturedStep => ({ raw: s.raw, step: { type: 'assertVisible', selector } }))
       return [step, ...checks]
     })
@@ -38,7 +40,11 @@ export function editedCapture(state: Pick<CaptureState, 'captured' | 'removed' |
     const to = renamed[name] ?? name
     if (used.has(to)) secrets[to] = value
   }
-  return { ...captured, steps, secrets }
+  // A launch left out for a secret in its arguments may be the one the flow started with: then it gets the plain launch
+  // `flowSteps` adds, never a flow that clears the app and touches it unlaunched (CodeRabbit, #1253). A launch the person
+  // removed is left as it was.
+  const lead = steps.flatMap((s) => (s.step ? [s.step] : [])).find((s) => s.type !== 'clearState')
+  return { ...captured, steps, secrets, launchAdded: captured.launchAdded || (launchWithheld && lead?.type !== 'launchApp') }
 }
 
 /** Every value the file must not hold (1b-3c): the passwords, and the text of every step made a secret — removed ones

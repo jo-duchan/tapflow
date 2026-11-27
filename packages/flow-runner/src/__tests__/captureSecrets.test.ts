@@ -29,6 +29,9 @@ describe('capture secrets', () => {
     expect(stepHoldsSecret({ type: 'scroll', direction: 'down', until: { role: 'button', id: 'next' } }, o)).toBe(false)
     expect(selectorHoldsSecret({ role: 'button', label: 'Go' }, o)).toBe(true)
     expect(stepHoldsSecret({ type: 'openUrl', url: 'app://home' }, o)).toBe(true)
+    // CodeRabbit on #1253: a launch's env and arguments are maps, whose keys can be any of those words.
+    expect(stepHoldsSecret({ type: 'launchApp', options: { env: { direction: 'tok-9' }, arguments: { type: 'tok-9' } } }, ['tok-9'])).toBe(true)
+    expect(stepHoldsSecret({ type: 'launchApp' }, o)).toBe(false)
   })
 
   it('never reads a step\'s type, or the name an inputSecret is given', () => {

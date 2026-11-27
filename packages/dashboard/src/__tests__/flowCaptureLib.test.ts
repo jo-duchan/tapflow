@@ -292,6 +292,19 @@ describe('what Verify saw, in the exported flow', () => {
       .toEqual([{ ...point, expect: { appear: [{ text: 'Copied', role: 'text' }, { id: 'presence', text: '3 online' }] } }])
   })
 
+  // CodeRabbit on #1253: the launch a secret in its arguments left out is replaced by a plain one, not lost.
+  it('still starts the app when the launch it began with is left out for a secret', () => {
+    const captured = {
+      launchAdded: false, secrets: { SECRET: 'tok-9' },
+      steps: [
+        { raw: {}, step: { type: 'launchApp', options: { env: { direction: 'tok-9' } } } },
+        { raw: {}, step: { type: 'tapOn', selector: { id: 'ok' } } },
+      ],
+    }
+    const state = { ...initialState, captured, name: 'f' } as unknown as CaptureState
+    expect(flowOf(state, 'com.app')?.steps).toEqual([{ type: 'clearState' }, { type: 'launchApp' }, { type: 'tapOn', selector: { id: 'ok' } }])
+  })
+
   it('writes nothing from a Verify of other steps, or with no Verify', () => {
     expect(withEffects(flow as never, verified([undefined, seen]))).toBe(flow)
     expect(withEffects(flow as never, undefined)).toBe(flow)

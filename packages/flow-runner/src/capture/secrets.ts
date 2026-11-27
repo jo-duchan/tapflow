@@ -34,20 +34,22 @@ export function selectorHoldsSecret(sel: Selector, secrets: readonly string[]): 
  * follow-up). An `inputSecret`'s name is the point of it.
  */
 const UNTYPED = new Set<Step['type']>(['inputSecret', 'pressKey', 'pressButton', 'imeAction', 'setOrientation', 'setPosture', 'clearState'])
-/** The same kind of word inside a step: a step's `type`, an element's `role` (button, cell), a scroll's `direction`. */
+/** The same kind of word inside a step: a step's `type`, an element's `role` (button, cell), a scroll's `direction`.
+ *  Never inside a launch's options, whose `env` and `arguments` are maps a name like these can key (CodeRabbit, #1253). */
 const VOCABULARY = new Set(['type', 'role', 'direction'])
 
 /** Whether a step would write a secret's value: any string in it that could hold typed text, nested ones included
  *  (`scroll.until`, `pinch.on`, an `expect`'s anchors, a launch's arguments). */
 export function stepHoldsSecret(step: Step, secrets: readonly string[]): boolean {
+  if (step.type === 'launchApp') return holds(step.options, secrets, new Set())
   return !UNTYPED.has(step.type) && holds(step, secrets)
 }
 
-function holds(value: unknown, secrets: readonly string[]): boolean {
+function holds(value: unknown, secrets: readonly string[], skip: ReadonlySet<string> = VOCABULARY): boolean {
   if (typeof value === 'string') return mentionsSecret(value, secrets)
-  if (Array.isArray(value)) return value.some((v) => holds(v, secrets))
+  if (Array.isArray(value)) return value.some((v) => holds(v, secrets, skip))
   if (value !== null && typeof value === 'object') {
-    return Object.entries(value).some(([k, v]) => !VOCABULARY.has(k) && holds(v, secrets))
+    return Object.entries(value).some(([k, v]) => !skip.has(k) && holds(v, secrets, skip))
   }
   return false
 }
