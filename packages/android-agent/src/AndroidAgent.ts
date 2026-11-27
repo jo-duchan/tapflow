@@ -3350,16 +3350,20 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const p = msg.payload as InputTouchStart['payload']
         const { x, y } = this.fromFrame(state, p.x, p.y, p.space)
         const g = this.openGesture(state, 'touch')
+        let sent: void | Promise<void> = undefined
         if (g?.via === 'helper') {
           g.owner.touchStart(x, y)
         } else if (g?.via === 'channel') {
           const { px, py } = this.toDevicePx(state, x, y)
           state.lastTouchPx = { x: px, y: py }
-          this.fire(g.owner.touchDown(0, px, py))
+          sent = g.owner.touchDown(0, px, py)
+          this.fire(sent)
         }
-        // After the down is sent: what it hit is asked off the touch's path. Not on the adb fallback (`helper`), which
-        // plays the whole gesture once its end arrives, so the down's time is not when the app saw it.
-        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
+        // After the down is sent: what it hit is asked off the touch's path, once the down has reached the device — a
+        // down queued behind a held up (`TouchWatch.heldUp`) would otherwise be asked about the screen before that up.
+        // Not on the adb fallback (`helper`), which plays the whole gesture once its end arrives, so the down's time is
+        // not when the app saw it.
+        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y }, sent || undefined)
         break
       }
       case 'input:touch:move': {

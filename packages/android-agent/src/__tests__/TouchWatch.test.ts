@@ -111,6 +111,18 @@ describe('TouchWatch', () => {
     expect(plain.landed).toEqual([])
   })
 
+  // CodeRabbit on #1256: a down queued behind a held up must be asked about once it has gone, not when it was queued,
+  // or its hit reads the screen before that up.
+  it('asks what a queued down hit only once the down has gone', async () => {
+    const { watch, deps } = rig()
+    let go!: () => void
+    watch.down(0.2, 0.15, { x: 0.2, y: 0.15 }, new Promise<void>((r) => { go = r }))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(deps.hit).not.toHaveBeenCalled()
+    go()
+    await vi.waitFor(() => expect(deps.hit).toHaveBeenCalledTimes(1))
+  })
+
   // The bound opens the gate; a hit that answers after it read a screen the up may already have changed.
   it('drops a held tap whose hit answered only after the bound let its up go', async () => {
     const later = (advance: (ms: number) => void) => (ms: number) => new Promise<void>((r) => setTimeout(() => { advance(ms); r() }, 0))

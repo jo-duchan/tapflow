@@ -109,15 +109,19 @@ export class TouchWatch {
     this.keepAlive.unref?.()
   }
 
-  down(x: number, y: number, point: { x: number; y: number }): void {
+  /** `sent`: the down's own dispatch, where the channel queues it (gRPC); the hit is asked once it has gone, so it reads
+   *  the screen the down lands on even behind a held up. A channel that writes at once passes none. */
+  down(x: number, y: number, point: { x: number; y: number }, sent?: Promise<unknown>): void {
     if (this.stopped) return
     const downAt = this.now()
     const last = this.last
     const repeat = last?.tap && downAt - last.upAt <= DOUBLE_TAP_MS && Math.hypot(x - last.x, y - last.y) <= DOUBLE_TAP_SLOP
     const g: Gesture = {
       downAt, x, y, point, moved: 0, moves: [{ x, y, at: downAt }],
-      // Asked after the down was sent, never on its path; queued with the device's other UiAutomation requests.
-      hit: this.deps.hit(this.serial, x, y).catch(() => null).then((res) => { this.noteOffset(g, res); return res }),
+      // Asked after the down was sent, never on its path; queued with the device's other UiAutomation requests. A failed
+      // dispatch still asks: the report's own rules judge what the hit says.
+      hit: (sent ? sent.then(() => {}, () => {}).then(() => this.deps.hit(this.serial, x, y)) : this.deps.hit(this.serial, x, y))
+        .catch(() => null).then((res) => { this.noteOffset(g, res); return res }),
       tapCount: repeat ? last.tapCount + 1 : 1,
       pkg: this.appPackage(),
       ...(last?.tap ? { previousTapUpAt: last.upAt } : {}),

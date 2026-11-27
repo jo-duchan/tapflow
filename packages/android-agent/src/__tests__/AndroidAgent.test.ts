@@ -2883,6 +2883,23 @@ describe('AndroidAgent', () => {
         expect(order).toEqual(['up', 'hold', 'up'])
       })
 
+      // CodeRabbit on #1256: a channel that queues its down (gRPC) has the hit asked once the down went.
+      it('asks what a queued down hit once the channel has sent it', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        const control = getState().scrcpySession!.control as unknown as { touchDown: (...a: unknown[]) => unknown }
+        let sent!: () => void
+        vi.spyOn(control, 'touchDown').mockImplementation(() => new Promise<void>((r) => { sent = r }))
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        await new Promise((r) => setTimeout(r, 0))
+        expect(hit).not.toHaveBeenCalled()
+        sent()
+        await vi.waitFor(() => expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75))
+      })
+
       // Design review: a stream restart while a held up waits replaces the channel, and the old one's up fails, but the
       // pointer stays down on the emulator, which outlives the client: the channel that serves now lets it go.
       it('lets the pointer go on the channel that serves now when a held up failed on a replaced one', async () => {
