@@ -77,14 +77,15 @@ iOS build format: `.app.zip` **or** `.tar.gz`/`.tgz` (EAS `eas build` simulator 
   - **browser → agent: the parse product (`msg`).** Here the stripping is the point: a key a viewer appended from devtools is gone before any agent sees it.
 
   **A refused browser request is answered, not just dropped.** The envelope is judged separately from
-  the payload, so a frame whose `sessionId` and `requestId` are good carries everything a reply needs —
-  and `refuseMalformed` sends the error type that request's own waiter reads, with `reason: 'malformed'`
+  the payload, so a frame with a valid sessionId and its required or optional requestId can be answered.
+  `refuseMalformed` sends the error type that request's own waiter reads, with `reason: 'malformed'`
   on the input pair. Without it this door would have converted an answered failure into silence: a
   malformed `open-url` used to reach the agent, whose guard answered, and `IOSAgent.ts` names this
   validation as what takes that over. The cost is worst on the inputs, because `awaitInputAck` reports
-  silence from a never-acked session as **success** (#457). The thirteen answerable requests,
-  `ANSWERABLE` in the protocol and the replies in `refuseMalformed` are held to one derived set by
-  `scripts/__tests__/correlatedRequestsGated.test.mjs`.
+  silence from a never-acked session as **success** (#457). `ANSWERABLE` and `refuseMalformed` are held
+  to the derived required-correlator set plus optional lifecycle shutdown by
+  `scripts/__tests__/correlatedRequestsGated.test.mjs`. A malformed shutdown echoes a supplied ID and
+  omits it when absent; an invalid supplied ID remains an unanswerable envelope.
 
   Agent payloads are **deliberately not validated**, and the reason is not a deferral. `AgentRegister.platform` is `string`, open so a third-party platform can register through `AgentRegistry.register()` (OCP), while `ChromePayload` is a closed two-member union — so a platform this repo promises to support has no valid `session:chrome` variant, and refusing one would cost it bezel and buttons for the life of the session. The eight messages the relay *consumes* (`agent:register`, `agent:devices`, `agent:resources`, the screenshot and ui-tree replies, `ui:field:response`) are validated, with a `.default()` for every field the relay used to read through a `??`.
 - **Clipboard bridge** (`clipboard:*`): browser→agent `clipboard:read` (`payload.press`: `'copy' | 'cut'` presses that chord on the device first) and `clipboard:write` (`payload.text`, `payload.pasteAfter`); agent→browser `clipboard:data` / `clipboard:write-done` / `clipboard:error`, correlated by `requestId`. Unlike the other agent→browser replies these are **bound to the session's own `agentSocket`** — their payload lands on the viewer's host OS clipboard, so a second agent must not be able to address someone else's session. An undeliverable request answers `clipboard:error` immediately rather than letting the caller's deadline expire. Agents advertise `capabilities: ['clipboard']` in `agent:register`; the relay echoes them on `session:joined` so a viewer can tell a capable agent from one that predates the feature instead of inferring it from silence.
@@ -250,6 +251,17 @@ Device prefs and favourites (`api/devicePrefs.ts`, migration 021) are laid over 
 `withDevicePrefs`, keyed by `SessionInfo.agentKey` (`agentId ?? agentName`) and the device id. **Nothing is removed
 from the listing**: an MCP client and the lease read the same one, and a hidden device must stay usable to them.
 
+### App log routing (#153)
+
+`app:log` is accepted only from the session's own agent socket and is sent only to its current holder. It is not
+cached or sent through `forwardToWatchers`: app logs belong to the active QA holder, and an unrelated agent must not
+be able to address another session's viewer with them. **A chunk is forwarded only for the launch the relay last
+sent** (`appLogLaunches`), and only while the holder that sent it still holds the session: an install, a
+clear-state, a shutdown or the session's end forgets the launch, and a stream that outlives its holder reaches
+nobody. Each `app:log.launchId` is that launch's request id, which the viewer also uses to discard late chunks from
+an earlier launch. Above `APP_LOG_BACKPRESSURE_BYTES` buffered on the holder's socket a chunk is dropped, with a
+warning at most once a second: the log shares that socket with the video.
+
 ### Flow Capture's record (`capture/`, #1125)
 
 The relay keeps, in memory, every input a person's dashboard sent to the agent — the parse product, stamped with the
@@ -309,7 +321,26 @@ ids it has pictures of; each is read with `GET …/capture/snapshot/thumbnails/:
   anything on the Mac to answer: iOS reads from inside the app (ios-agent AGENTS.md, "App observer"), Android through a
   server on the device. A gate was drawn for an iOS read through the XCUITest runner (110–360 MB), which never shipped,
   and it left every typed step unread and every touch unobserved on a busy Mac. The boot carries `observed` (the person
-  is recorded, no other check), which the iOS agent turns touch observation and app accessibility on by.
+  is recorded, or an MCP holder armed it — below; no other check), which the iOS agent turns touch observation and app
+  accessibility on by.
+- **An MCP client observes its own touches without a capture here** (L6a, `capture:observe`). MCP Flow Capture keeps its
+  record in the MCP server, so `CaptureStore`'s rules are untouched: an `mcp` holder arms observation, the relay forwards
+  that to an agent naming `capture-observe` (a device picked up running gets no boot), counts it in `observed` on that
+  holder's own boots, sends it again when the agent re-registers, and sends `off` when the holder leaves, its socket
+  closes, or the session is joined by anyone but that MCP holder (the same person back as a dashboard included), since
+  app accessibility stays on the device. It remembers the `requestId`s of the touches that holder sent
+  (`Session.observe`, the newest 64) and passes each one's `capture:touched`/`capture:landed` back to it as
+  `capture:observation`, and nothing else: a touch another holder sent, or one sent before arming, is passed to nobody.
+  An arming ends with its holder's socket: a client that reconnects and joins again must arm again, and until it does
+  nothing is passed back. A boot sets observation by the `observed` it was sent, so an MCP holder's word while it runs (an
+  `off` from a holder that left or never armed, an `on` sent after it) is put right once at that boot's own `device:ready`
+  (`bootArmed`: the boot's `requestId`, what it was sent, and the last `capture:observe` sent since; set where the boot
+  goes to the agent, so an earlier boot's late ready or a refused boot cannot stand in for it). A person's boot that waited at the gate and goes out under an MCP holder carries that holder's arming. A person's observation is
+  left as their boot decided: judging it at the ready by whether they record would turn it off under a Verify's pause,
+  with nothing to turn it back on. A client checks the relay's
+  `capture-observe` feature as well as the agent's capability: an older relay drops the request unanswered while still
+  passing the capability through. None of it is kept. An observation carries no typed value (an input is named by its identifier only), so this does
+  not reopen what the cookie-only capture routes keep from a PAT.
 - **Another person taking a device resets its keyboard language** (#1134). A device keeps the language a tester
   switched to, so the next person's keys would type in it. `SessionManager` keeps `lastPersonUser` — a signed-in
   person, never an AI client, `anon` or `unidentified:*`, so coming back from one's own MCP or flow run is not someone
@@ -328,6 +359,11 @@ What `tapflow flow run` did, for the dashboard's runs page (A3). The CLI writes 
 - **A run is live while its runner's socket is open.** The flow runner does not reconnect, so the close handler ends its running runs (`holder-lost`). The client id is matched in two key forms, `<userId>:<client>` and `anon:<client>`, because the handshake does not read a PAT on loopback and a runner on the relay's own Mac holds its sessions anonymously. A relay restart closes sockets without that handler; reads and the daily purge close what is left after a minute of quiet. No timer exists for it.
 - **The watch link opens the session the runner holds now**, never a stored one: session ids outlive runs, so a stored id would open whoever took the device next.
 - A run with a build expires with the build; a run with none expires after 7 days.
+- **Why a flow has no screenshot is written where the relay refuses one** (`screenshot_note`, migration 024): `too-large`
+  (413), `not-image` (415), `storage-full` (507), so the page says it whatever the runner's version; `not-taken` comes
+  from the report's `screenshotMissed`. Only while no screenshot is stored, never by the report's upsert (a retried
+  report would clear a refusal), and cleared by a stored one. A note call of the runner's own was not used: an older
+  relay answers an unknown `/api/` POST with `index.html` and 200.
 - **A flow the runner did not replay is a `skipped` row with a `skip_reason`** (`app-mismatch`, `tag-filter`; migration 017), its reason in words in `failure_message`. The table's CHECK ties the two together — a reason only with a skip, and a skip only with one — and a skipped flow takes no screenshot. The list counts it as `flowsSkipped`.
 
 ### Flow run videos (`/api/v1/runs/:id/flows/:idx/video`)
@@ -385,8 +421,18 @@ JWT 시크릿은 `getJwtSecret()`으로 **처음 쓸 때** 만든다. `RelayServ
   total), cookie-only and owner-only (404 to anyone else), gone with the capture's seal, its trim and the person turning
   capturing off, never on disk, in a log or forwarded. **A touch only when the keyboard reads place it off the soft
   keyboard**, the last read asked for before its end that could say and the first one asked for after: that screen shows what was just typed, a password's last
-  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`,
-  iOS with the app not in front) is no picture, not a guess. A key inside a typed run keeps
+  character included, which is the value #1140 keeps out of the record. No read to say (an agent without `keyboard-state`) is
+  no picture, not a guess. A touch the agent says went down on the home screen (`capture:landed` `home`, #1214) is off
+  the keyboard before any read is asked: the home screen has none of its own (Spotlight's is another process, `other`; a
+  SpringBoard field sits in an alert, `alert`), and both those stay with the reads. Without a landing, two exceptions,
+  both decided for a person who turned capturing on (it is off until they
+  do) and whose pictures stay in memory, theirs alone: a touch iOS made with the app under test off the screen (the last
+  read `shown: null, onHome: true` — the home screen or another app, which the runner cannot read a keyboard on) is kept,
+  as a QA Session's recording and screenshots keep that screen unmasked, when the read after it has the keyboard down or the
+  app still off the screen (the last read can predate the app coming up, the touch already on a field it focused, and
+  iOS answers a bare `shown: null` for an app inactive with its keyboard up); and a touch only unsaying reads came before (an
+  app still starting) is off the keyboard when the read after it has the keyboard down, since a key leaves it up. Why a
+  picture was refused (`keyboard`, `typed`) goes to the dialog in the snapshot (`thumbnailRefusals`). A key inside a typed run keeps
   none either: its screen shows the run so far. Nor does an input begun within 2 s of a typed character unless every
   field read of that run says the field is not secure: a password field can still show the last character (1.5 s on
   Android).

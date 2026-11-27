@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState, type Dispatch, type RefObject } from 'react'
-import { ChevronRight, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
+import { useEffect, useId, useRef, useState, type Dispatch, type KeyboardEvent, type Ref, type RefObject } from 'react'
+import { ChevronRight, Download, ImageOff, Keyboard, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react'
 import {
   askedValues, capturedStepLabel, defaultRange, expectedFor, matchSelector, rangeWarnings, rawStepLabel, stepsBeforeRange, type CapturedStep, type Flow,
   type RawStep, type ScreenRect, type Selector, type StepExpect,
@@ -27,8 +27,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { markOf } from '@/lib/flowCapture/marks'
-import type { WatchMarks } from '@/lib/watchActions'
-import { SwipeStroke, TapMarks } from '@/components/watch/TapMarks'
+import type { MachineTouch } from '@/lib/touchMarks'
+import { TouchMarksLayer } from '@/components/touch/TouchMarksLayer'
 import { TraceStep } from '@/components/TraceStep'
 import { typedOnScreenKeyboard, type AfterTouch } from '@/lib/flowCapture/runner'
 
@@ -77,11 +77,13 @@ function Notice({ title, children }: { title: string; children?: React.ReactNode
 
 // ── Range ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf }: {
+export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, onCancel, continueRef, thumbnailOf, noPictureWhy }: {
   state: CaptureState
   platform: string
   /** Where the screen a step began on can be read (1b-3b), or `null` when the relay holds no picture of it. */
   thumbnailOf?: (step: RawStep) => string | null
+  /** Why a step has no picture, or `null` to say nothing (a relay that keeps none). */
+  noPictureWhy?: (step: RawStep) => string | null
   dispatch: Dispatch<CaptureEvent>
   bundleId: string | null
   onContinue: () => void
@@ -119,7 +121,8 @@ export function RangeScreen({ state, dispatch, bundleId, platform, onContinue, o
             onClick={() => dispatch({ type: 'set-range', range: { start: range.start, end: range.end - 1 } })}>{copy.dropLast}</Button>
         </span>
       </div>
-      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} onChange={(next) => dispatch({ type: 'set-range', range: next })} />
+      <RangeStrip steps={steps} range={range} thumbnailOf={thumbnailOf} noPictureWhy={noPictureWhy} onChange={(next) => dispatch({ type: 'set-range', range: next })}
+        putBack={state.putBack} onReplay={(index) => dispatch({ type: 'replay-dropped', index })} onDropAgain={(index) => dispatch({ type: 'drop-again', index })} />
       <div className="grid gap-4 sm:grid-cols-2">
         {/* `content-start`: the Tags column is a row taller with its hint, and a stretched grid shares that out. */}
         <div className="grid content-start gap-2">
@@ -196,6 +199,15 @@ const SHIFT = EDGE + 8
 const FRAME_Y = 12
 const INNER_Y = 10
 const ROW_H = FRAME_Y + INNER_Y + TILE_H + INNER_Y + FRAME_Y
+/** The row of Put back / Leave out buttons under the tiles (#1170): there only while a step in the strip has one, and it
+ *  stays once a step is put back, so the strip does not jump. A 28 px button `BUTTON_DROP` under the tile: 10 px under
+ *  the step's name, the tile's 8 px bottom padding and that, where the user asked for at least the gap between the
+ *  number and the picture (2026-11-23); the rest is room under the button. */
+const BUTTON_ROW = 36
+/** How far under its tile a button sits. A tile's focus ring (#1227) is drawn 2 px inside the tile, 2 px wide: inside the
+ *  frame's padding, 4 px clear of the tile's number, picture and name, and so 4 px clear of the button too — it overlaps
+ *  nothing (user, 2026-11-23). */
+const BUTTON_DROP = 2
 /** Shared by the tiles, the frame and the handles, so they move as one. Off under reduced motion. */
 const SLIDE = 'duration-200 ease-out motion-reduce:transition-none'
 
@@ -209,10 +221,14 @@ const frameRight = (r: Range) => frameLeft(r) + (r.end - r.start) * STRIDE - GAP
  * The range as a frame over the steps, with a handle at each end — a video editor's trim. A step taken in or left out
  * slides into or out of the frame. Each handle is a slider for the keyboard, one step per arrow.
  */
-function RangeStrip({ steps, range, onChange, thumbnailOf }: {
+function RangeStrip({ steps, range, onChange, thumbnailOf, noPictureWhy, putBack = {}, onReplay, onDropAgain }: {
   steps: RawStep[]
   range: Range
+  putBack?: Record<number, unknown>
+  onReplay?: (index: number) => void
+  onDropAgain?: (index: number) => void
   thumbnailOf?: (step: RawStep) => string | null
+  noPictureWhy?: (step: RawStep) => string | null
   onChange: (range: Range) => void
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
@@ -223,6 +239,14 @@ function RangeStrip({ steps, range, onChange, thumbnailOf }: {
    *  the press that starts a drag, which is when the name is most wanted. */
   const [named, setNamed] = useState<Edge | null>(null)
   const total = steps.length
+  const buttons = steps.some((s) => s.dropped) || Object.keys(putBack).length > 0
+  /** The tile the strip's one tab stop is on (#1227, roving tabindex): the range's first to begin with, then the last one
+   *  focused, so leaving the strip and coming back resumes there. */
+  const [active, setActive] = useState(() => Math.min(range.start, Math.max(0, total - 1)))
+  const tiles = useRef<Array<HTMLLIElement | null>>([])
+  const tileKeys: Record<string, (i: number) => number> = {
+    ArrowLeft: (i) => i - 1, ArrowRight: (i) => i + 1, Home: () => 0, End: () => total - 1,
+  }
 
   // Opened on a range that starts further in, the strip starts there. Only once: after that the strip is where the
   // person put it. A ref callback, not an effect: an effect on opening alone would need its dependencies suppressed,
@@ -320,7 +344,7 @@ function RangeStrip({ steps, range, onChange, thumbnailOf }: {
     // the page under the dialog, which showed the device through the overlay.
     <TooltipProvider delayDuration={300}>
       <div ref={attachScroller} className="overflow-x-auto overscroll-x-contain">
-        <div ref={row} className="relative" style={{ width: frameRight({ start: 0, end: total }) + PAD_X, height: ROW_H }}>
+        <div ref={row} className="relative" style={{ width: frameRight({ start: 0, end: total }) + PAD_X, height: ROW_H + (buttons ? BUTTON_ROW : 0) }}>
           <div
             aria-hidden
             className={cn('absolute rounded-xl bg-foreground transition-[left,width]', SLIDE)}
@@ -328,13 +352,49 @@ function RangeStrip({ steps, range, onChange, thumbnailOf }: {
           >
             <div className="absolute rounded-md bg-muted" style={{ left: EDGE, right: EDGE, top: INNER_Y, bottom: INNER_Y }} />
           </div>
-          <ol aria-label={copy.rangeStrip}>
-            {steps.map((s, i) => (
-              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} />
-            ))}
-          </ol>
+          {/* The handles first: the strip's way in by keyboard, then its tiles, then the buttons under them (#1227). They are
+              placed absolutely, so the order moves nothing on screen. */}
           {handle('start')}
           {handle('end')}
+          <ol aria-label={copy.rangeStrip}>
+            {steps.map((s, i) => (
+              <RangeTile key={i} step={s} index={i} inRange={i >= range.start && i < range.end} left={tileLeft(i, range)} picture={thumbnailOf?.(s) ?? null} noPictureWhy={noPictureWhy?.(s) ?? null}
+                buttons={buttons} putBack={i in putBack} tabbable={i === active}
+                ref={(el) => { tiles.current[i] = el }}
+                onFocus={() => setActive(i)}
+                onKeyDown={(e) => {
+                  const to = tileKeys[e.key]
+                  if (!to) return
+                  e.preventDefault()
+                  const next = Math.max(0, Math.min(total - 1, to(i)))
+                  setActive(next)
+                  tiles.current[next]?.focus()
+                }} />
+            ))}
+          </ol>
+          {/* Outside the list, so the buttons are tabbed to after the strip as one stop, in step order, and no tile holds a
+              control of its own. Each is placed under its tile and slides with it; its name says which step. */}
+          {buttons && steps.map((s, i) => (s.dropped || i in putBack) && (
+            <div
+              key={i}
+              data-under={i}
+              data-row="buttons"
+              className={cn('absolute px-2 transition-[left,opacity]', SLIDE, !(i >= range.start && i < range.end) && 'opacity-50')}
+              style={{ left: tileLeft(i, range), top: FRAME_Y + INNER_Y + TILE_H + BUTTON_DROP, width: TILE }}
+            >
+              {/* One button in one place either way, so focus stays on it as it turns from Put back into Leave out. Never
+                  wider than the tile, and never wrapped: the tile is 80 px inside (user, 2026-11-23). */}
+              <Button
+                variant="outline"
+                className="h-7 w-full min-w-0 max-w-full whitespace-nowrap px-2 text-xs"
+                aria-label={i in putBack ? copy.leaveOutTile(i + 1) : copy.putBackTile(i + 1)}
+                onClick={() => (i in putBack ? onDropAgain?.(i) : onReplay?.(i))}
+              >
+                {/* Words only: with an icon the label left no room for the button's own padding (user, 2026-11-23). */}
+                {i in putBack ? copy.leaveOut : copy.putBack}
+              </Button>
+            </div>
+          ))}
         </div>
       </div>
     </TooltipProvider>
@@ -346,26 +406,53 @@ function RangeStrip({ steps, range, onChange, thumbnailOf }: {
 const typedOnSoftKeyboard = (step: RawStep): boolean =>
   step.kind === 'keyboardKey' || (step.kind === 'text' && step.messages.some((m) => m.msg.type === 'input:touch:end'))
 
-/** A name cut short in the tile is shown whole on hover. The list item already holds it whole for a screen reader. */
-function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; index: number; inRange: boolean; left: number; picture: string | null }) {
+/** A name cut short in the tile is shown whole on hover, and on focus (#1227). The list item already holds it whole for a
+ *  screen reader. */
+function RangeTile({ step, index, inRange, left, picture, noPictureWhy, buttons, putBack, tabbable, ref, onFocus, onKeyDown }: {
+  step: RawStep; index: number; inRange: boolean; left: number; picture: string | null; noPictureWhy: string | null
+  buttons: boolean; putBack: boolean; tabbable: boolean; ref: Ref<HTMLLIElement>
+  onFocus: () => void; onKeyDown: (e: KeyboardEvent<HTMLLIElement>) => void
+}) {
   // A tap left out before the replay is drawn as one outside the range, and says why.
   const label = step.dropped ? `${rawStepLabel(step)} — ${copy.droppedTile[step.dropped]}` : rawStepLabel(step)
+  // The keyboard tile already says what it is.
+  const why = !picture && !typedOnSoftKeyboard(step) && step.kind !== 'install' ? noPictureWhy : null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <li
-          className={cn('absolute flex flex-col gap-1 p-2 text-xs transition-[left,opacity]', SLIDE, (!inRange || step.dropped) && 'opacity-50')}
+          ref={ref}
+          tabIndex={tabbable ? 0 : -1}
+          onFocus={onFocus}
+          onKeyDown={onKeyDown}
+          className={cn(
+            'absolute flex flex-col rounded-md p-2 text-xs transition-[left]',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-ring',
+            SLIDE,
+          )}
           style={{ left, top: FRAME_Y + INNER_Y, width: TILE, height: TILE_H }}
         >
+          {/* Dimmed inside, so a focused tile's ring is not: one outside the range, or a step left out (its button, under
+              the tile, is how it comes back, and is dimmed only with the range). */}
+          <div className={cn('flex flex-col gap-1 transition-opacity', SLIDE, !inRange && step.dropped ? 'opacity-25' : (!inRange || step.dropped) && 'opacity-50')}>
           {/* A tap left out says so in the tile, not only in the tooltip its cut-short name has (CodeRabbit on #1167). */}
           <span className="flex h-4 items-center justify-between gap-1 leading-4">
             <span className="text-muted-foreground">#{index + 1}</span>
             {step.dropped && <span className="truncate text-[11px] font-medium text-warning-foreground">{copy.droppedShort}</span>}
+            {putBack && <span className="truncate text-[11px] font-medium text-muted-foreground">{copy.putBackShort}</span>}
           </span>{' '}
           {/* The screen the step began on (1b-3b). Decorative: the item's own text names the step. A key on the soft
               keyboard has none by design — that screen shows what was just typed, a password's last character too — and
               says so, rather than looking like a picture that failed to load. */}
-          {picture
+          {/* An install's picture is of the moment its button was pressed, which says nothing of the step: what it is, as
+              the watch page's activity list draws an install. */}
+          {step.kind === 'install'
+            ? (
+              <span data-install className="flex h-[166px] w-full shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                <Download aria-hidden className="size-5" />
+              </span>
+            )
+            : picture
             ? <img src={picture} alt="" draggable={false} className="h-[166px] w-full shrink-0 rounded-md border bg-background object-contain" />
             : typedOnSoftKeyboard(step)
               ? (
@@ -374,11 +461,23 @@ function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; ind
                   {copy.keyboardTile}
                 </span>
               )
-              : <span aria-hidden className="h-[166px] w-full shrink-0 rounded-md border bg-background" />}
+              // No picture: why, in the tooltip and the item's text, where a cramped tile has no room to say it.
+              : (
+                <span data-no-picture={why ? '' : undefined} className="flex h-[166px] w-full shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                  {why && <ImageOff aria-hidden className="size-5" />}
+                </span>
+              )}
           <span className="truncate font-mono text-[11px] leading-[11px]">{label}</span>
+          </div>
+          {why && <span className="sr-only">{why}</span>}
         </li>
       </TooltipTrigger>
-      <TooltipContent side="bottom" className="font-mono">{label}</TooltipContent>
+      {/* Below the frame: past the button row when there is one, so it never covers a Put back button, and past the
+          frame's lower edge (#1227). */}
+      <TooltipContent side="bottom" sideOffset={(buttons ? BUTTON_ROW : 0) + INNER_Y + 4}>
+        <span className="block font-mono">{label}</span>
+        {why && <span className="block text-muted-foreground">{why}</span>}
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -386,7 +485,7 @@ function RangeTile({ step, index, inRange, left, picture }: { step: RawStep; ind
 // ── Match ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The device as the viewer draws it, copied each frame: one decoder, two pictures. */
-function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; marks: WatchMarks }) {
+function DeviceMirror({ tap, label, touch }: { tap: CaptureTap; label: string; touch: MachineTouch | null }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     let frame = 0
@@ -412,7 +511,7 @@ function DeviceMirror({ tap, label, marks }: { tap: CaptureTap; label: string; m
   return (
     <div className="relative max-h-full self-start">
       <canvas ref={canvas} role="img" aria-label={label} className="block max-h-[var(--picture-max,60vh)] w-auto max-w-full rounded-lg border bg-muted" />
-      <TapMarks marks={marks} place={(x, y) => ({ left: x, top: y })} />
+      <TouchMarksLayer tone="machine" touch={touch} place={(x, y) => ({ left: x, top: y })} />
     </div>
   )
 }
@@ -435,10 +534,10 @@ function Busy() {
   return <LoaderCircle aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" />
 }
 
-export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf }: {
+export function MatchScreen({ state, tap, touch, onStop, onRestart, onTakeWhatMatched, onBackToRange, onContinueAnyway, stopRef, onContinueToEdit, onKeep, thumbnailOf, onPutBackAndMatch }: {
   state: CaptureState
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   onStop: () => void
   onRestart: () => void
   onTakeWhatMatched: () => void
@@ -448,19 +547,21 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
   onContinueToEdit: () => void
   onKeep: (step: number, kept: boolean) => void
   thumbnailOf: (step: RawStep) => string | null
+  /** Put the named steps left out before the replay back, and match again from the range's start (#1170). */
+  onPutBackAndMatch: (indices: number[]) => void
 }) {
   if (state.diverged) {
-    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} continueRef={stopRef} />
+    return <DivergedView state={state} onTakeWhatMatched={onTakeWhatMatched} onBackToRange={onBackToRange} onContinueAnyway={onContinueAnyway} onPutBackAndMatch={onPutBackAndMatch} continueRef={stopRef} />
   }
   if (state.review) {
-    return <ReviewView state={state} review={state.review} tap={tap} marks={marks} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
+    return <ReviewView state={state} review={state.review} tap={tap} touch={touch} onRestart={onRestart} onContinue={onContinueToEdit} onKeep={onKeep} thumbnailOf={thumbnailOf} continueRef={stopRef} />
   }
   const { done, total } = state.progress
   const stopped = state.error !== null
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
       <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} /></div>
+        <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[1]} touch={touch} /></div>
         <div className="flex min-h-0 flex-col gap-3">
           <p role="status" className="flex items-center gap-2 text-sm font-medium">
             {!stopped && <Busy />}
@@ -490,11 +591,11 @@ export function MatchScreen({ state, tap, marks, onStop, onRestart, onTakeWhatMa
  * focusing one shows the screen it was tapped on in place of the device, since `#14 tapOn "Order#1215"` alone does not
  * say which screen that was. Rows stay as they are when checked: the choice can change until Continue.
  */
-function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, thumbnailOf, continueRef }: {
+function ReviewView({ state, review, tap, touch, onRestart, onContinue, onKeep, thumbnailOf, continueRef }: {
   state: CaptureState
   review: Review
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   onRestart: () => void
   onContinue: () => void
   onKeep: (step: number, kept: boolean) => void
@@ -517,7 +618,7 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
         <div className="flex min-h-0 flex-col items-center gap-2">
           {picture
             ? <><StepPicture src={picture} step={review.matched[picked.index]!} fill /><p className="text-xs text-muted-foreground">{replayed ? copy.reviewPictureReplayed(picked.step + 1) : copy.reviewPicture(picked.step + 1)}</p></>
-            : <DeviceMirror tap={tap} label={copy.steps[1]} marks={marks} />}
+            : <DeviceMirror tap={tap} label={copy.steps[1]} touch={touch} />}
         </div>
         {/* 4 px in on every side: the column scrolls, and a focus ring on its edge would be cut. */}
         <div className="flex min-h-0 flex-col overflow-y-auto p-1">
@@ -563,11 +664,12 @@ function ReviewView({ state, review, tap, marks, onRestart, onContinue, onKeep, 
  * by. The buttons keep their places and their emphasis whatever happened, since people press them from habit: going on is
  * the primary, where Continue is on the other steps, and Verify still catches a flow that went on past a real difference.
  */
-function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, continueRef }: {
+function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnyway, onPutBackAndMatch, continueRef }: {
   state: CaptureState
   onTakeWhatMatched: () => void
   onBackToRange: () => void
   onContinueAnyway: () => void
+  onPutBackAndMatch: (indices: number[]) => void
   continueRef: RefObject<HTMLButtonElement | null>
 }) {
   const d = state.diverged!
@@ -578,8 +680,9 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
   const dropped: number[] = []
   for (let i = state.range.start; i < d.index; i++) if (state.steps[i]?.dropped) dropped.push(i)
   const stepOf = (index: number) => index - state.range.start + 1
+  // What was left out, apart from the rest: its own button puts it back (#1170, user: one group, spaced from the next).
+  const droppedFact = dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null
   const facts = [
-    dropped.length > 0 ? copy.divergedDropped(spanOf(dropped), dropped.length, dropped.every((i) => state.steps[i]!.dropped === state.steps[dropped[0]!]!.dropped) ? state.steps[dropped[0]!]!.dropped ?? null : null) : null,
     before.length > 0 ? copy.divergedBefore(spanOf(before), before.length, startMoves) : null,
     done > 0 ? copy.divergedMatched(done) : null,
     d.carried ? copy.divergedCarried(d.carried.count, d.carried.from === d.index ? null : stepOf(d.carried.from)) : null,
@@ -606,9 +709,20 @@ function DivergedView({ state, onTakeWhatMatched, onBackToRange, onContinueAnywa
               ? copy.divergedMostly(stepOf(d.index), state.progress.total)
               : copy.divergedPlaces(stepOf(d.index), state.progress.total, boxes.length)}
           </p>
-          {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
-          {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
-          <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
+          {droppedFact && (
+            <div className="flex flex-col items-start gap-2 pb-3">
+              <p className="text-sm text-muted-foreground">{droppedFact}</p>
+              <Button variant="outline" size="sm" onClick={() => onPutBackAndMatch(dropped)}>
+                <RotateCcw aria-hidden className="size-3.5" />
+                {copy.putBackAndMatch}
+              </Button>
+            </div>
+          )}
+          <div className="flex flex-col gap-1">
+            {facts && <p className="text-sm text-muted-foreground">{facts}</p>}
+            {d.mostly && <p className="text-sm text-muted-foreground">{copy.divergedMostlyWhy}</p>}
+            <p className="text-sm text-muted-foreground">{d.mostly ? copy.divergedGoOnStep : copy.divergedGoOnAreas}</p>
+          </div>
         </div>
       </div>
       <Footer>
@@ -812,7 +926,11 @@ function EditRow({
     change()
     requestAnimationFrame(() => details.current?.querySelector<HTMLElement>('input, button')?.focus())
   }
-  const reason = step.skipped ? copy.skipReasons[step.skipped] : step.fragile ? copy.fragileReasons[step.fragile] : step.auto ? copy.autoReason : null
+  // A step left out says only why; any other says each thing to check, its own fragile reason first (#1178).
+  const reasons = step.skipped
+    ? [copy.skipReasons[step.skipped]]
+    : [step.fragile ? copy.fragileReasons[step.fragile] : null, step.notCompared ? copy.notComparedReason : null, !step.fragile && step.auto ? copy.autoReason : null]
+        .filter((r): r is string => r !== null)
   return (
     // Figma 394:1041 (List Item): 12 px in on the left, 8 px elsewhere; the head row centred on the 28 px buttons; the
     // reason 8 px under it with 4 px below.
@@ -831,7 +949,7 @@ function EditRow({
         </button>
         {!canExpect && expected.filter((sel) => !leftOut(sel)).length > 0 && <Badge variant="outline" className="shrink-0">{copy.expectedCount(expected.filter((sel) => !leftOut(sel)).length)}</Badge>}
         {byPosition(step) && <Badge variant="outline" className="shrink-0 border-dashed text-muted-foreground" title={copy.byPositionHint}>{copy.byPosition}</Badge>}
-        {step.fragile && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
+        {!step.skipped && (step.fragile || step.notCompared) && <Badge variant="outline" className="shrink-0">{copy.fragile}</Badge>}
         {step.auto && <Badge variant="outline" className="shrink-0">{copy.auto}</Badge>}
         {step.skipped && <Badge variant="outline" className="shrink-0">{copy.skipped}</Badge>}
         {(secretName || typed) && (
@@ -855,7 +973,7 @@ function EditRow({
             </Button>
           )}
       </div>
-      {reason && <p className="pb-1 pt-2 text-xs text-muted-foreground">{reason}</p>}
+      {reasons.map((r, i) => <p key={i} className="pb-1 pt-2 text-xs text-muted-foreground">{r}</p>)}
       {canExpect && (
         <div className="relative z-10 mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
           <span className="mr-1 text-xs text-muted-foreground">{copy.expected}</span>
@@ -931,8 +1049,8 @@ function SecretName({ from, current, onRename, renameCheck }: {
 }
 
 /**
- * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's: a tap is
- * a ring, a swipe the same stroke (`SwipeStroke`).
+ * A step's replay picture, with where the person touched drawn on it, as the MCP watch view draws an agent's touch
+ * (`TouchMarksLayer`): the frame just before the finger lifted — a pressed dot, or a swipe's (or a pinch's two) whole lines.
  */
 /** `fill`: drawn at the device's height, as the live device is beside it — a recorded picture (1b-3b) is 160 px wide,
  *  and at its own size it shrank the device to a thumbnail when Match's review showed one (P2c). */
@@ -942,7 +1060,6 @@ function StepPicture({ src, step, fill = false }: { src: string; step: CapturedS
   // squeezed, its width capped and its height not (CodeRabbit, #1171).
   const [upright, setUpright] = useState(true)
   const filled = fill && upright
-  const pct = (n: number) => `${n * 100}%`
   return (
     // The border on the frame, not the image, as on the screen after a tap: on the image it came out of the height cap,
     // and the two pictures of one step differed by its width when the tabs were switched.
@@ -950,15 +1067,7 @@ function StepPicture({ src, step, fill = false }: { src: string; step: CapturedS
     <div className={cn('relative max-h-full rounded-lg border', fill ? 'self-center' : 'self-start')}>
       <img src={src} alt={capturedStepLabel(step)} onLoad={(e) => setUpright(e.currentTarget.naturalHeight >= e.currentTarget.naturalWidth)}
         className={cn('block w-auto max-w-full rounded-md', filled ? 'h-[var(--picture-max,60vh)] bg-muted' : fill ? 'h-auto max-h-[var(--picture-max,60vh)]' : 'max-h-[var(--picture-tap,var(--picture-max,60vh))]')} />
-      {mark && (
-        <svg aria-hidden="true" data-testid="step-mark" className="pointer-events-none absolute inset-0 size-full overflow-visible">
-          {mark.kind === 'swipe' ? (
-            <SwipeStroke from={{ left: mark.from[0], top: mark.from[1] }} to={{ left: mark.to[0], top: mark.to[1] }} />
-          ) : (
-            <circle cx={pct(mark.x)} cy={pct(mark.y)} r={11} fill={MARK_BLUE} fillOpacity={0.3} stroke={MARK_BLUE} strokeWidth={2} />
-          )}
-        </svg>
-      )}
+      {mark && <TouchMarksLayer tone="machine" still={mark} place={(x, y) => ({ left: x, top: y })} />}
     </div>
   )
 }
@@ -1048,9 +1157,6 @@ function AfterPicture({ step, after, before, secrets, shown, expected, onAdd }: 
   )
 }
 
-/** The blue the MCP watch view's marks are drawn in (`TapMarks`). */
-const MARK_BLUE = 'rgb(59 130 246)'
-
 /** The flow's YAML, highlighted, with line numbers and a copy button: the shared CodeBlock, as Flow Runs and MCP's
  *  capture page will show a flow. */
 function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: boolean; contentRef?: RefObject<HTMLPreElement | null> }) {
@@ -1074,10 +1180,10 @@ function YamlField({ yaml, fill = false, contentRef }: { yaml: string; fill?: bo
 
 // ── Verify ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function VerifyScreen({ state, tap, marks, total, onExport, onBack, primaryRef }: {
+export function VerifyScreen({ state, tap, touch, total, onExport, onBack, primaryRef }: {
   state: CaptureState
   tap: CaptureTap
-  marks: WatchMarks
+  touch: MachineTouch | null
   /** The flow's steps, which the run counts through; known before its result is. */
   total: number
   onExport: () => void
@@ -1091,7 +1197,7 @@ export function VerifyScreen({ state, tap, marks, total, onExport, onBack, prima
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
     <div className="grid min-h-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} marks={marks} /></div>
+      <div className="flex min-h-0 justify-center"><DeviceMirror tap={tap} label={copy.steps[3]} touch={touch} /></div>
       <div className="flex min-h-0 flex-col gap-3">
         <h3 className="text-sm font-medium">{copy.verifyHeading}</h3>
         <p className="text-sm text-muted-foreground">{copy.verifyHelp}</p>

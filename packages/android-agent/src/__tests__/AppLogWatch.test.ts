@@ -1,0 +1,167 @@
+import { EventEmitter } from 'events'
+import type { ChildProcess } from 'child_process'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { APP_LOG_WATCH_EXIT_POLL_MS, APP_LOG_WATCH_NAME_RETRY_MS, APP_LOG_WATCH_RESTART_MIN_MS, AppLogWatch, type AppLogWatchDeps, type AppLogWatchItem } from '../AppLogWatch.js'
+
+const PKG = 'com.example.app'
+const line = (pid: number, text: string, tag = 'Tag') => `I(${String(pid).padStart(5)}) ${text}  (${tag})\n`
+
+function fakeChild() {
+  const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+  return Object.assign(new EventEmitter(), { stdout, exitCode: null, killed: false, kill: vi.fn() }) as unknown as ChildProcess & { stdout: EventEmitter }
+}
+
+function setup(over: Partial<AppLogWatchDeps> = {}, previousRun: number | null = null) {
+  const children: Array<ReturnType<typeof fakeChild>> = []
+  const procs: Array<{ pid: number; name: string }> = []
+  const deps: AppLogWatchDeps = {
+    spawn: vi.fn(() => { const c = fakeChild(); children.push(c); return c }) as unknown as AppLogWatchDeps['spawn'],
+    adbPath: () => 'adb',
+    uid: vi.fn(async () => 10193),
+    processes: vi.fn(async () => procs.map((p) => ({ ...p }))),
+    deviceTime: vi.fn(async () => '11-24 20:00:00.000'),
+    ...over,
+  }
+  const items: AppLogWatchItem[] = []
+  const watch = new AppLogWatch('emulator-5594', PKG, (item) => { items.push(structuredClone(item)); return true }, vi.fn(), deps, Date.now, previousRun)
+  const shown = () => items.map((i) => (i.kind === 'run' ? `[${i.event} ${i.pid}]` : i.text)).join('')
+  const settle = () => vi.advanceTimersByTimeAsync(0)
+  return { deps, children, procs, items, watch, shown, settle }
+}
+
+describe('Android app log watch', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('streams the uid from now, with each line\'s pid', async () => {
+    const { deps, watch } = setup()
+    await watch.start()
+    expect(deps.spawn).toHaveBeenCalledWith('adb', ['-s', 'emulator-5594', 'logcat', '--uid=10193', '-T', '11-24 20:00:00.000', '-v', 'process'], { stdio: ['ignore', 'pipe', 'ignore'] })
+    watch.stop()
+  })
+
+  it('marks runs of the main process only, and sends each message as raw text', async () => {
+    const { children, procs, shown, settle, watch } = setup()
+    await watch.start()
+    const out = children[0]!.stdout
+    procs.push({ pid: 5344, name: PKG }, { pid: 5350, name: `${PKG}:remote` })
+    out.emit('data', '--------- beginning of main\n' + line(5344, 'hello') + line(5350, 'from remote') + line(5344, 'FATAL EXCEPTION: main', 'AndroidRuntime'))
+    await settle()
+    procs.length = 0
+    procs.push({ pid: 5407, name: PKG })
+    out.emit('data', line(5407, 'again'))
+    await settle()
+    expect(shown()).toBe(
+      '--------- beginning of main\n[started 5344]hello\nfrom remote\nFATAL EXCEPTION: main\n[exited 5344][started 5407]again\n',
+    )
+    watch.stop()
+  })
+
+  it('asks again while a starting process is not yet called by its own name, then marks its run', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    await watch.start()
+    vi.mocked(deps.processes)
+      .mockResolvedValueOnce([{ pid: 77, name: 'zygote64' }])
+      .mockResolvedValueOnce([{ pid: 77, name: 'com.google.android.configupdater' }])
+      .mockResolvedValue([{ pid: 77, name: PKG }])
+    children[0]!.stdout.emit('data', line(77, 'Late-enabling -Xcheck:jni'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_NAME_RETRY_MS * 2)
+    expect(shown()).toBe('[started 77]Late-enabling -Xcheck:jni\n')
+    watch.stop()
+  })
+
+  it('keeps a message that has two spaces and parentheses of its own', async () => {
+    const { children, procs, shown, settle, watch } = setup()
+    procs.push({ pid: 1, name: PKG })
+    await watch.start()
+    children[0]!.stdout.emit('data', line(1, 'status  (ok) done'))
+    await settle()
+    expect(shown()).toBe('[running 1]status  (ok) done\n')
+    watch.stop()
+  })
+
+  it('says exited when the poll no longer lists the run\'s process', async () => {
+    const { children, procs, shown, settle, watch } = setup()
+    await watch.start()
+    procs.push({ pid: 9, name: PKG })
+    children[0]!.stdout.emit('data', line(9, 'up'))
+    await settle()
+    procs.length = 0
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_EXIT_POLL_MS)
+    expect(shown()).toBe('[started 9]up\n[exited 9]')
+    watch.stop()
+  })
+
+  it('refuses a package that is not installed or shares its uid, as the Launch stream does', async () => {
+    const { deps, watch } = setup({ uid: vi.fn(async () => null) })
+    await watch.start()
+    expect(deps.spawn).not.toHaveBeenCalled()
+    watch.stop()
+  })
+
+  it('asks for the uid again when adb did not answer, rather than giving up for the session', async () => {
+    const { deps, watch } = setup({ uid: vi.fn().mockResolvedValueOnce(null).mockResolvedValue(10193) })
+    await watch.start()
+    expect(deps.spawn).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_RESTART_MIN_MS)
+    expect(deps.spawn).toHaveBeenCalledTimes(1)
+    watch.stop()
+  })
+
+  it('does not end a run that started while a poll was out', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    vi.mocked(deps.processes).mockResolvedValueOnce([{ pid: 9, name: PKG }])
+    await watch.start()
+    let release!: (value: Array<{ pid: number; name: string }>) => void
+    vi.mocked(deps.processes)
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+      .mockResolvedValue([{ pid: 10, name: PKG }])
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_EXIT_POLL_MS)
+    children[0]!.stdout.emit('data', line(10, 'new'))
+    await settle()
+    release([])
+    await settle()
+    expect(shown()).toBe('[running 9][exited 9][started 10]new\n')
+    watch.stop()
+  })
+
+  it('keeps the run when it could not ask the device, which is not the app exiting', async () => {
+    const { deps, watch } = setup({}, 55)
+    vi.mocked(deps.processes).mockRejectedValueOnce(new Error('adb timed out'))
+    await watch.start()
+    expect(watch.stop()).toBe(55)
+  })
+
+  it('asks again about a pid it could not ask about, rather than taking it for a side process', async () => {
+    const { children, deps, shown, settle, watch } = setup()
+    await watch.start()
+    vi.mocked(deps.processes).mockRejectedValueOnce(new Error('adb timed out')).mockResolvedValue([{ pid: 77, name: PKG }])
+    children[0]!.stdout.emit('data', line(77, 'first'))
+    await settle()
+    children[0]!.stdout.emit('data', line(77, 'second'))
+    await settle()
+    expect(shown()).toBe('first\n[started 77]second\n')
+    watch.stop()
+  })
+
+  it('raised again after a boot or an install, ends the run the last stream left', async () => {
+    const { shown, watch } = setup({}, 55)
+    await watch.start()
+    expect(shown()).toBe('[exited 55]')
+    watch.stop()
+  })
+
+  it('raises the stream again when logcat ends under it', async () => {
+    const { children, deps, watch } = setup()
+    await watch.start()
+    children[0]!.emit('close', 1)
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_RESTART_MIN_MS)
+    expect(deps.spawn).toHaveBeenCalledTimes(2)
+    watch.stop()
+    children[1]!.emit('close', null)
+    await vi.advanceTimersByTimeAsync(APP_LOG_WATCH_RESTART_MIN_MS * 4)
+    expect(deps.spawn).toHaveBeenCalledTimes(2)
+    expect(children[1]!.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+})

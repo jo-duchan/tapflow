@@ -538,13 +538,17 @@ export interface AgentRegistered {
   /** What this relay accepts from an agent beyond the messages every relay does. Optional: an older relay omits
    *  it, and an agent reads the absence as "send only what every relay understands". The relay → agent half of
    *  the skew markers (protocol AGENTS.md, #662); `capabilities` is agent → relay, `AgentsListed.features` is
-   *  relay → browser. */
+   *  relay → browser. Agents that know `app-logs` use the app log forward message for live QA output. */
   features?: RelayAgentFeature[]
 }
 
 /** Values of `AgentRegistered.features`. An agent meeting one it does not know ignores it.
- *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`. */
-export type RelayAgentFeature = 'device-updates'
+ *  `'device-updates'`: the relay takes `agent:devices` and answers `agent:devices-applied`.
+ *  `'touch-landings'`: the relay takes `capture:landed` (#1214).
+ *  `'app-logs'`: the relay takes `app:log` and forwards it to the session's holder (#1132).
+ *  `'app-log-watch'`: the relay sends `app:logs:watch` / `app:logs:unwatch` and takes `app:log` with a `watchId` and
+ *  `app:log:run`, so the app's output is shown however it was opened, not only after a Launch. */
+export type RelayAgentFeature = 'device-updates' | 'touch-landings' | 'app-logs' | 'app-log-watch'
 
 /** The relay's answer to `agent:devices`: the sessions it made for devices that appeared, and the ones it removed
  *  for devices that left. Not correlated: the agent sends at most one list at a time per socket, and a list lost
@@ -683,8 +687,8 @@ export interface ScreenshotRequest {
    * produced in `ScreenshotDone.format`.
    *
    * That asymmetry is not slack, it is the platform contract: `DeviceAgent.screenshot()` takes no
-   * format argument at all, so no agent has ever been asked to honour this — iOS happens to
-   * (`simctl io … --type`), Android cannot (`screencap -p` produces PNG and takes no format), and a
+   * format argument at all, so honouring it is each agent's own — iOS does (`simctl io … --type`),
+   * Android converts `screencap -p`'s PNG with `sips` (an older Android agent answers PNG), and a
    * third-party platform registered through `AgentRegistry.register()` is free to produce whatever
    * it can. Required here only because every in-repo sender supplies one; absence would have to mean
    * "no preference", which is what `'png'` already means.
@@ -796,6 +800,57 @@ export interface DeviceRunResetError extends SessionScoped {
 export type DeviceRunResetReply = DeviceRunResetDone | DeviceRunResetError
 export type DeviceRunResetReplyBody<T = DeviceRunResetReply> = T extends unknown ? Omit<T, 'sessionId' | 'requestId'> : never
 
+/**
+ * Turn record-time touch observation on or off for the session's device, without a boot (MCP Flow Capture, L6a). The
+ * boot's `observed` arms it for a person Flow Capture records; an MCP client capturing its own steps arms it with this,
+ * since a device it picks up may be running already and get no boot. Browser → relay → agent, unchanged: only the
+ * session's holder, and only an `mcp` one, and forwarded only to an agent naming `capture-observe`. The relay also
+ * originates it — `on` again when the agent comes back, `off` when the holder goes — since app accessibility stays on
+ * the device. The agent does not answer it; the relay answers the client (`capture:observe-done`).
+ *
+ * One interface for both legs, with `requestId` required, unlike `device:shutdown` (protocol AGENTS.md: a request the
+ * relay originates rules out a required correlator). Here no reply exists on the agent leg at all, so the id the relay
+ * mints for its own on and off is read by nobody and cannot be mistaken for anyone's answer; the client leg is the
+ * correlated one.
+ */
+export interface CaptureObserve {
+  type: 'capture:observe'
+  sessionId: string
+  requestId: string
+  payload: { on: boolean }
+}
+
+/** Relay → the client that sent `capture:observe`: `observing` is whether the device's agent takes it. `false` is not
+ *  a refusal: the capture goes on, and its coordinate touches are named by nothing but their points. */
+export interface CaptureObserveDone {
+  type: 'capture:observe-done'
+  sessionId: string
+  requestId: string
+  observing: boolean
+}
+
+/** Refused: the session is not there, its agent is away, the sender does not hold it or holds it as something other
+ *  than an MCP client, or the request was malformed. An `off` from the holder is still kept when its agent is away. */
+export interface CaptureObserveError extends SessionScoped {
+  type: 'capture:observe-error'
+  message: string
+  requestId: string
+}
+
+/**
+ * Relay → the MCP client that armed observation: what the agent observed for a touch **that client sent**
+ * (`requestId` is its own `input:touch:end`'s or `input:pinch:end`'s). The relay keeps none of it: a touch another
+ * holder sent, or one sent while the client was away, is never passed on. Exactly one of `touched` and `landed`, as the
+ * agent sent them (`CaptureTouched`, `CaptureLanded`); neither carries what was typed.
+ */
+export interface CaptureObservation {
+  type: 'capture:observation'
+  sessionId: string
+  requestId: string
+  touched?: TouchObservation
+  landed?: TouchLanding
+}
+
 export type RelayToAgent =
   | AgentRegistered
   | AgentDevicesApplied
@@ -812,6 +867,9 @@ export type RelayToAgent =
   | UiKeyboardRequest
   | DeviceKeyboardSet
   | DeviceRunReset
+  | CaptureObserve
+  | AppLogsWatch
+  | AppLogsUnwatch
 
 export type SessionTerminatedReason = 'agent-disconnected'
 
@@ -1001,6 +1059,48 @@ export interface DeviceReady {
  */
 export interface SessionScoped {
   sessionId: string
+}
+
+/** Raw text emitted by the active app's native log stream. Chunks are ordered, but relay backpressure may drop
+ *  them, so joining `text` values does not guarantee a complete stream. Carries exactly one owner: the `app:launch`
+ *  that started a per-launch stream (an agent without `app-log-watch`), or the watch that streams the app for the
+ *  session (`AppLogsWatch`). */
+export interface AppLog {
+  type: 'app:log'
+  sessionId: string
+  /** The app:launch request that owns this stream. Lets a viewer discard late chunks from an older app. */
+  launchId?: string
+  /** The `app:logs:watch` that owns this stream. Exactly one of the two is set (the relay's door checks it). */
+  watchId?: string
+  text: string
+}
+
+/** relay → agent: stream this app's output for the session, whichever way it is opened (a Launch, the home screen, a
+ *  relaunch after a crash), until `app:logs:unwatch`. The agent keeps it as wanted state and raises the stream again
+ *  after a boot, an install or a run reset. Sent again with the same values, it changes nothing. */
+export interface AppLogsWatch {
+  type: 'app:logs:watch'
+  sessionId: string
+  watchId: string
+  bundleId: string
+}
+
+/** relay → agent: stop the watch named. One naming another watch is ignored. */
+export interface AppLogsUnwatch {
+  type: 'app:logs:unwatch'
+  sessionId: string
+  watchId: string
+}
+
+/** agent → relay → holder: a run boundary in a watch's stream, in order with its `app:log` text. `started`: a new
+ *  process of the app; `running`: one already up when the stream began (a reconnect), not a start; `exited`: that
+ *  process is gone. An `exited` always comes before the next run's `started`. */
+export interface AppLogRun {
+  type: 'app:log:run'
+  sessionId: string
+  watchId: string
+  event: 'started' | 'running' | 'exited'
+  pid: number
 }
 
 export interface AppInstallError extends SessionScoped {
@@ -1409,8 +1509,10 @@ export interface AgentsListed {
 
 /** Values of `AgentsListed.features`. A client meeting one it does not know ignores it.
  *  `'launch-options'`: `app:launch` carries `arguments` and `env` through. An older relay's validator strips both and
- *  still answers `app:launch-done`, so a client checks this before sending either. */
-export type RelayFeature = 'device-lease' | 'launch-options'
+ *  still answers `app:launch-done`, so a client checks this before sending either.
+ *  `'capture-observe'`: the relay takes `capture:observe` (L6a). An older one drops it unanswered while still passing an
+ *  agent's `capture-observe` capability through, so a client needs both before it sends one. */
+export type RelayFeature = 'device-lease' | 'launch-options' | 'capture-observe'
 
 export interface SessionJoined {
   type: 'session:joined'
@@ -1592,12 +1694,18 @@ export interface WatchEnded {
  * happens after it joins.
  */
 export type WatchActionKind =
-  | { kind: 'tap'; x: number; y: number }
-  | { kind: 'swipe'; from: [number, number]; to: [number, number] }
+  /** `holdMs`: how long the finger stayed down, so a long press is drawn held (absent from an older relay). */
+  | { kind: 'tap'; x: number; y: number; holdMs?: number; space?: PointSpace }
+  /** `durationMs`: from the press to the lift. `space` as on the input — `'frame'` from a body-mode holder. */
+  | { kind: 'swipe'; from: [number, number]; to: [number, number]; durationMs?: number; space?: PointSpace }
   | { kind: 'key'; key: string }
   | { kind: 'button'; button: string }
   | { kind: 'type'; chars: number }
-  | { kind: 'pinch' }
+  /**
+   * A pinch's two fingers, where they went down and where they last were, as the swipe's ends. **Absent from an older
+   * relay**: then there is nothing to draw, only the row — the fields are additive, and missing means exactly that.
+   */
+  | { kind: 'pinch'; from?: [[number, number], [number, number]]; to?: [[number, number], [number, number]]; durationMs?: number; space?: PointSpace }
   | { kind: 'launch' }
   | { kind: 'install' }
   | { kind: 'clear-state' }
@@ -1683,6 +1791,9 @@ export type RelayToBrowser =
   | WatchHolderLeft
   | WatchEnded
   | WatchAction
+  | CaptureObserveDone
+  | CaptureObserveError
+  | CaptureObservation
 
 export interface DeviceBooting {
   type: 'device:booting'
@@ -1810,6 +1921,8 @@ export interface ClipboardWriteDone {
  *  `device:ready` stays optional for a different reason — see the note above the declarations. */
 export type AgentToBrowser =
   | RelayOrAgentToBrowser
+  | AppLog
+  | AppLogRun
   | DeviceBooting
   | DeviceShutdownDone
   | AppLaunchDone
@@ -1945,6 +2058,13 @@ export interface UiTreeResponse {
    * client did before this field.
    */
   interfaceTurn?: 0 | 90 | 180 | 270
+  /**
+   * The height ÷ width, in pixels, of the space the elements' frames are fractions of: what the agent normalised them
+   * by (Android: the dump's root, or the screen under a floating dialog; iOS: the app's window). A frame's own shape is
+   * its width and height times this — a list 0.3 wide and 0.5 tall is wider than tall in landscape (#1196).
+   * **Absent means no information** (an older agent): a client then assumes a phone held upright.
+   */
+  aspect?: number
 }
 
 /** Request-scoped, for the same reasons as `ScreenshotError`. */
@@ -2016,9 +2136,10 @@ export interface UiKeyboardResponse {
 }
 
 /**
- * What one touch-down hit, seen from inside the app while a person was recorded (record-time observation, the `.work`
- * plan's P1): the agent pairs the app observer's report with the gesture it delivered and names it by that gesture's
- * `requestId` (its `input:touch:end`'s). Facts only — what Capture makes of them is flow-runner's.
+ * What one touch-down hit while a person was recorded (record-time observation): on iOS the app observer reports it from
+ * inside the app; on Android the agent reads it from outside (the accessibility tree at the point, the app's frames;
+ * android-agent AGENTS.md). Named by the gesture's `requestId` (its `input:touch:end`'s). Facts only — what Capture
+ * makes of them is flow-runner's. Only touches on the app under test are reported.
  */
 export interface TouchObservation {
   /** Where the touch went down, normalised, in the device's portrait space (the touch path's). */
@@ -2032,14 +2153,15 @@ export interface TouchObservation {
    *  subtitle). Absent when the app built none there (app accessibility off, a touch mid-scroll). */
   element?: ObservedElement
   button?: ObservedElement
-  /** iOS's own count for a quick repeat at one spot (`UITouch.tapCount`): 2 for a double tap's second touch. */
+  /** The platform's count for a quick repeat at one spot — iOS's `UITouch.tapCount`, Android's double-tap timeout
+   *  counted by the agent: 2 for a double tap's second touch. Android leaves it out on a drag. */
   tapCount?: number
   /**
    * Whether the app acted on this touch: a control it listens to fired, an action was sent, a list selected a row, or
    * a gesture of the app's own was recognised, from the touch-down until shortly after the lift. Absent is unknown —
-   * never "no": an older agent, a touch on a `surface`, a drag, a view that handles touches itself, React Native, or a
-   * verdict that could not be reached in time. Arrives later than the rest, as a second `capture:touched` for the same
-   * gesture.
+   * never "no": an older agent, a touch on a `surface`, a drag, on iOS a view that handles touches itself or React
+   * Native, or a verdict that could not be reached in time (Android's own unknowns: android-agent AGENTS.md). On iOS it
+   * arrives later than the rest, as a second `capture:touched` for the same gesture; Android sends one report with it.
    */
   acted?: boolean
   /**
@@ -2054,6 +2176,7 @@ export interface TouchObservation {
 export interface ObservedElement {
   identifier?: string
   label?: string
+  /** `UIAccessibilityTraits` on iOS; Android sets only the button bit (1), where the UI tree's role is `button`. */
   traits: number
   /** A text input: named by its identifier only. */
   input?: boolean
@@ -2071,6 +2194,43 @@ export interface CaptureTouched {
   observation: TouchObservation
 }
 
+/**
+ * Where a recorded touch went down (#1214): a fact the agent saw as the finger went down, not a reading of the screen
+ * after it. Flow Capture used to infer it from keyboard reads, their timing and the app's touch count; a landing settles
+ * the step it is about, and a step without one is judged as before.
+ *
+ * - `app`: the app under test, the soft keyboard over it and a sheet it shows in its own window (iOS draws a share
+ *   sheet's touches in the host, measured).
+ * - `home`: the launcher's own surface — iOS SpringBoard's home screen window (pages, Today view, dock, an icon's
+ *   menu, editing, App Library), and Spotlight (`id` `com.apple.Spotlight`); Android the home package.
+ * - `system`: a system surface over whatever is in front — iOS SpringBoard's status bar, Notification Center, Control
+ *   Center or a banner; Android a window that is not an application's (status bar, shade).
+ * - `alert`: a prompt over the app — iOS SpringBoard's alert window while the app is in front (a permission alert);
+ *   Android the permission controller.
+ * - `other`: another app, named by `id` when known.
+ *
+ * Measured on iOS 26.5 and 27.0 (iOS reads the window UIKit delivered the touch to, from its dispatch log) and
+ * Android 16; the plan is in the issue. The set is closed: a member added later needs its own relay feature,
+ * since an older relay's validator drops a message carrying a value it does not know.
+ */
+export type TouchLandedOn = 'app' | 'home' | 'system' | 'alert' | 'other'
+
+export interface TouchLanding {
+  on: TouchLandedOn
+  /** What took the touch: an iOS bundle id, an Android package. Absent for `app`, and where it could not be read. */
+  id?: string
+}
+
+/** Agent → relay: where the gesture `requestId` (its `input:touch:end`'s) went down, for every recorded touch, the
+ *  app's included, at most once. Sent only to a relay whose `agent:registered` named `'touch-landings'`, on a boot it
+ *  marked `observed` with `touchObservations`. A pinch lands where its first finger went down. */
+export interface CaptureLanded {
+  type: 'capture:landed'
+  sessionId: string
+  requestId: string
+  landed: TouchLanding
+}
+
 export type AgentToRelay =
   | AgentRegister
   | AgentDevices
@@ -2083,6 +2243,7 @@ export type AgentToRelay =
   | UiFieldResponse
   | UiKeyboardResponse
   | CaptureTouched
+  | CaptureLanded
 
 // ── stream socket → relay ────────────────────────────────────────────────────
 
@@ -2616,6 +2777,7 @@ export type BrowserToRelay =
   | AppClearState
   | DeviceKeyboardSet
   | DeviceRunReset
+  | CaptureObserve
   | OpenUrl
   | InputTouchStart
   | InputTouchMove

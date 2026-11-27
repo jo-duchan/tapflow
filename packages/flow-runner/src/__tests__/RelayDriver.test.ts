@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { PlatformError } from '@tapflowio/agent-core'
 import { RelayDriver } from '../RelayDriver.js'
+import { SocketFlowDriver } from '../SocketFlowDriver.js'
 import { runFlow } from '../engine.js'
 import { parseFlow } from '../schema.js'
 import { EnvironmentStepError, isEnvironmentStepFailure, TransientQueryError } from '../errors.js'
@@ -200,8 +201,40 @@ describe('RelayDriver — points turned by the app\'s interface turn', () => {
     await driver.pinch([[0.25, 0.1], [0.75, 0.1]], [[0.1, 0.1], [0.9, 0.1]], 500)
     expect(tap).toHaveBeenCalledWith('s1', 0.9, 0.25)
     expect(longPress).toHaveBeenCalledWith('s1', 0.9, 0.25, 1000)
-    expect(swipe).toHaveBeenCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300)
+    expect(swipe).toHaveBeenCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300, undefined)
+    await driver.swipe([0.25, 0.1], [0.5, 0.5], 300, 150)
+    expect(swipe).toHaveBeenLastCalledWith('s1', [0.9, 0.25], [0.5, 0.5], 300, 150)
     expect(pinch).toHaveBeenCalledWith('s1', [[0.9, 0.25], [0.9, 0.75]], [[0.9, 0.1], [0.9, 0.9]], 500)
+  })
+
+  // A run's video draws each touch where it was sent: the turned points, the same space a watcher's are in. The flow's
+  // own (unturned) points drew a landscape tap a quarter off (design review). Mutations: report before turning, drop
+  // the long press's hold, or report nothing.
+  it('tells each touch as it is sent, in the frame it is sent in', async () => {
+    const sent: unknown[] = []
+    const client = { queryUITreeWithTurn: tree(270), tap: vi.fn(async () => {}), longPress: vi.fn(async () => {}), swipe: vi.fn(async () => {}), pinch: vi.fn(async () => {}) }
+    const driver = new SocketFlowDriver(client as never, 's1', undefined, (t) => sent.push(t))
+    await driver.queryUITree()
+    await driver.tap(0.25, 0.1)
+    await driver.longPress(0.25, 0.1, 1000)
+    await driver.swipe([0.25, 0.1], [0.5, 0.5], 300)
+    await driver.pinch([[0.25, 0.1], [0.75, 0.1]], [[0.1, 0.1], [0.9, 0.1]], 500)
+    expect(sent).toEqual([
+      { kind: 'tap', point: [0.9, 0.25] },
+      { kind: 'tap', point: [0.9, 0.25], holdMs: 1000 },
+      { kind: 'swipe', from: [0.9, 0.25], to: [0.5, 0.5], durationMs: 300 },
+      { kind: 'pinch', from: [[0.9, 0.25], [0.9, 0.75]], to: [[0.9, 0.1], [0.9, 0.9]], durationMs: 500 },
+    ])
+  })
+
+  // A run's screenshots are asked for as JPEG: a large screen's PNG went past the relay's 5 MB cap (2026-11-22). The
+  // channel underneath (`SocketFlowDriver`, which Flow Capture and others use) asks as it always did. Mutation: drop
+  // the override, and the run asks for PNG again.
+  it('asks the relay for a JPEG screenshot', async () => {
+    const screenshot = vi.fn(async () => Buffer.from([0xff, 0xd8]))
+    const driver = driverWith({ screenshot })
+    await driver.screenshot()
+    expect(screenshot).toHaveBeenCalledWith('s1', undefined, 'jpeg')
   })
 
   it('sends points as they are when the tree carried no turn, or before any tree', async () => {

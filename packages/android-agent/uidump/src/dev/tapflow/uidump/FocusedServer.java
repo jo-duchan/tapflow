@@ -11,9 +11,10 @@ import java.io.PrintStream;
  *
  *   ... app_process /system/bin dev.tapflow.uidump.FocusedServer <nonce>
  *
- * It prints READY, then answers each line `<id> <read|set|ime> [base64 text]` with `<id> <json>`, the JSON Focused
+ * It prints READY, then answers each line `<id> <read|set|ime|reach|hit|dump|hold|release|ping> [base64 argument]` with `<id> <json>`, the JSON Focused
  * prints. Each request connects UiAutomation and releases it (Focused.handle), so between requests the app sees what it
- * sees today and a tree dump can connect. No socket: stdin and stdout are the adb shell's, so only the agent that
+ * sees today and a tree dump can connect — except between `hold` and `release`, while a person is recorded (P4), when
+ * one connection serves every request, the tree dump (`dump`) included. No socket: stdin and stdout are the adb shell's, so only the agent that
  * started it can talk to it, and the text to set — a password, maybe — is never in argv. It ends when stdin closes (the
  * agent went away) or after a minute with no request; the agent starts it again when it next needs it. The nonce is
  * only there for the agent to find this process again to kill it.
@@ -37,8 +38,12 @@ public final class FocusedServer {
     String line;
     while ((line = in.readLine()) != null) {
       last = System.currentTimeMillis();
+      Focused.receivedNs = System.nanoTime();
       String[] parts = line.trim().split(" ", 3);
       if (parts.length < 2) continue;
+      // Kept alive while a person is recorded, so a touch after a pause does not wait for app_process to start: answered
+      // without connecting, and it resets the idle exit like any request.
+      if ("ping".equals(parts[1])) { out.println(parts[0] + " {}"); continue; }
       String answer = Focused.handle(parts[1], parts.length > 2 ? parts[2] : null);
       out.println(parts[0] + " " + answer);
       last = System.currentTimeMillis();

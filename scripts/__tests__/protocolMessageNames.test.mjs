@@ -186,8 +186,12 @@ describe('protocol message interfaces', () => {
     // 98 with `device:run-reset` and its two replies (#1139).
     // 100 is where a touch lands (#1125): `UiReachRequest` and `UiReachResponse`, the relay asking an agent where a
     // touch meant for each element would land. 101 is `CaptureTouched` (record-time observation): an agent telling the
-    // relay what a recorded touch hit, seen from inside the app.
-    expect(messages.size).toBe(101)
+    // relay what a recorded touch hit, seen from inside the app. 102 is `CaptureLanded` (#1214): where a recorded touch
+    // went down, the app's or anywhere else. 103 is `AppLog` (#1132): an agent's app output, forwarded only to the
+    // session's holder. 106 adds the app log watch: `AppLogsWatch`, `AppLogsUnwatch` (relay → agent) and `AppLogRun`, a
+    // run boundary in a watch's stream. 110 with MCP Flow Capture's observation (L6a): `CaptureObserve` (browser →
+    // relay → agent), and the relay's `CaptureObserveDone`, `CaptureObserveError` and `CaptureObservation`.
+    expect(messages.size).toBe(110)
     // `InputKey` predates L1 and has always been named; it must be in here too.
     expect(messages.has('InputKey')).toBe(true)
   })
@@ -299,8 +303,9 @@ describe('protocol message interfaces', () => {
     }
     expect(offenders).toEqual([])
     // 12 with `watch:refused`. The other three `watch:*` replies are not failures and carry `sessionId` directly.
-    // 13 with `device:keyboard-set-error` (#1135), 14 with `device:run-reset-error` (#1139).
-    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(14)
+    // 13 with `device:keyboard-set-error` (#1135), 14 with `device:run-reset-error` (#1139), 15 with
+    // `capture:observe-error` (L6a).
+    expect([...messages].filter(([, m]) => m.extends === 'SessionScoped')).toHaveLength(15)
     // `error` is the ninth, as of L5d. Pinned by name rather than only by the count, because the count alone
     // would be satisfied by any new member and this is the one whose membership was argued.
     expect(messages.get('GenericError')).toMatchObject({ literal: 'error', extends: 'SessionScoped' })

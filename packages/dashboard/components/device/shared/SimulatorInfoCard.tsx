@@ -8,6 +8,8 @@ import { performanceMode } from '@/lib/decoders/pickDecoder';
 import { PerformanceModeNotice } from '@/components/perf/PerformanceModeNotice';
 import { shouldAutoShowPerfNotice, PERF_NOTICE_KEY } from '@/lib/perfNotice';
 import type { BootRefusalReason } from '@tapflowio/protocol';
+import { AppLogViewer } from './AppLogViewer';
+import type { AppLogFeed } from '@/lib/appLogs';
 
 // init wizard와 같은 프로파일 용어로 — 디코더 jargon(WebCodecs/WASM) 대신.
 const MODE_LABEL: Record<string, string | null> = {
@@ -19,6 +21,8 @@ const MODE_LABEL: Record<string, string | null> = {
 interface SimulatorInfoCardProps {
   joined: boolean;
   fps: number;
+  appLogFeed?: AppLogFeed;
+  appLogsSupported?: boolean;
   connected: boolean;
   deviceReady: boolean;
   bootError: string | null;
@@ -184,6 +188,12 @@ export function SimulatorInfoCard(props: SimulatorInfoCardProps) {
         <p className="rounded bg-muted px-2.5 py-[5px] text-[12px] text-muted-foreground leading-relaxed break-words">{statusText}</p>
       )}
       </div>
+
+      {/* Below the status line and outside it: that region announces each sentence, and a log would be read out line
+          by line. No handler ref, no viewer (a caller with no log feed). */}
+      {joined && props.appLogFeed && (
+        <AppLogViewer feed={props.appLogFeed} supported={props.appLogsSupported ?? false} />
+      )}
 
       {props.servicesOff && (
         <p className="text-[12px] text-muted-foreground leading-relaxed break-words">

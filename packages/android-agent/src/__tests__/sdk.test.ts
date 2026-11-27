@@ -122,3 +122,44 @@ describe('Android SDK resolution', () => {
     expect(() => getEmulatorPath()).toThrow(/ANDROID_HOME/)
   })
 })
+
+// #1100: on Windows the tools are `adb.exe` and `emulator.exe`, and the default SDK is
+// %LOCALAPPDATA%\Android\Sdk.
+describe('Android SDK resolution on Windows', () => {
+  beforeEach(() => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    vi.stubEnv('ADB_PATH', '')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\dev\\AppData\\Local')
+    vi.stubEnv('PATH', '')
+    vi.mocked(statSync).mockReset()
+    vi.mocked(accessSync).mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  const WIN_SDK = 'C:\\Users\\dev\\AppData\\Local\\Android\\Sdk'
+
+  it('finds adb.exe and emulator.exe in the default Windows SDK', () => {
+    onDisk(join(WIN_SDK, 'platform-tools', 'adb.exe'), join(WIN_SDK, 'emulator', 'emulator.exe'))
+
+    expect(getAdbPath()).toBe(join(WIN_SDK, 'platform-tools', 'adb.exe'))
+    expect(getEmulatorPath()).toBe(join(WIN_SDK, 'emulator', 'emulator.exe'))
+  })
+
+  it('does not take an extensionless file for the Windows binary', () => {
+    onDisk(join(WIN_SDK, 'platform-tools', 'adb'))
+
+    expect(() => getAdbPath()).toThrow(ValidationError)
+  })
+
+  it('gives a Windows example in the error', () => {
+    onDisk()
+
+    expect(() => getAdbPath()).toThrow(/setx ANDROID_HOME/)
+  })
+})

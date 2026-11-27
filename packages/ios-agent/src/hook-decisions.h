@@ -137,4 +137,27 @@ static inline int tf_fd_scan_bound(int haveLimit, unsigned long long soft, int *
   return trimmed ? TF_MAX_FD_SCAN : (int)want;
 }
 
+/**
+ * Whether the process runs from directly inside an app bundle (`…/Name.app/Executable`), asked before
+ * anything reads the bundle.
+ *
+ * **Every process in the simulator runs both gates, and most of them may not touch Objective-C there.**
+ * The library is delivered with `DYLD_INSERT_LIBRARIES` to every process, daemons included, and its
+ * constructors run before `main`, with no autorelease pool. `+[NSBundle mainBundle]` autoreleases;
+ * measured on iOS 26.5, `fileproviderd` and `GSSCred` abort on it (`autoreleaseNoPage` →
+ * `_objc_fatal`, inside the pool push itself), so a gate that read the bundle id first left both
+ * daemons crashing in a loop for as long as a target was named — 95 reports in one day — and
+ * WebKit's navigations, which wait on them, never finished: Safari and every web view stayed white.
+ * No daemon is the target of either gate, and none runs from an app bundle, so the path settles it
+ * with no Objective-C at all. An app extension (`.appex`) is not an app either.
+ */
+static inline int tf_exe_in_app_bundle_decision(const char *exe) {
+  if (exe == NULL) return 0;
+  const char *slash = strrchr(exe, '/');
+  if (slash == NULL || slash[1] == '\0') return 0;
+  // `x.app/`: at least one character before the extension, so a directory named `.app` is not one.
+  if (slash - exe < 5 || slash[-5] == '/') return 0;
+  return strncmp(slash - 4, ".app", 4) == 0;
+}
+
 #endif /* TAPFLOW_HOOK_DECISIONS_H */

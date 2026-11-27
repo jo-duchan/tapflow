@@ -221,7 +221,13 @@ function printFailure(result: FlowResult, flow: Flow, flowIndex: number, opts: F
     // from overwriting each other's evidence.
     const dir = opts.artifacts ?? path.join('.tapflow', 'artifacts')
     fs.mkdirSync(dir, { recursive: true })
-    const shot = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure.png`)
+    // Named by what the bytes are: a run asks the device for JPEG, and an older agent answers PNG.
+    const ext = result.failureScreenshot[0] === 0xff && result.failureScreenshot[1] === 0xd8 ? 'jpg' : 'png'
+    const base = path.join(dir, `${String(flowIndex + 1).padStart(2, '0')}-${flow.name.replace(/[^\w.-]+/g, '_')}-failure`)
+    const shot = `${base}.${ext}`
+    // The other extension's file is an earlier run's: left there, a CI step collecting the directory would carry it as
+    // this failure's evidence (CodeRabbit on #1208). The same name was always overwritten; two names are not.
+    fs.rmSync(`${base}.${ext === 'jpg' ? 'png' : 'jpg'}`, { force: true })
     fs.writeFileSync(shot, result.failureScreenshot)
     console.error(`${prefix}  screenshot: ${shot}`)
   }
@@ -264,6 +270,7 @@ function flowReport(result: FlowResult, device?: DeviceInfo): FlowReport {
     })),
     // A flow refused before a device was chosen ran on none.
     ...(device ? { device: { id: device.id, name: device.name, platform: device.platform } } : {}),
+    ...(result.screenshotMissed ? { screenshotMissed: true as const } : {}),
   }
 }
 
@@ -386,7 +393,7 @@ async function runParallel(run: ParallelRun, workerCount: number): Promise<Paral
         console.log(`${prefix}installing build ${opts.build}...`)
         await client.installApp(lease.sessionId, opts.build)
       }
-      const driver = new RelayDriver(client, lease.sessionId, opts.build)
+      const driver = new RelayDriver(client, lease.sessionId, opts.build, (t) => worker.tap?.touch(t))
       const engineOpts = {
         ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),
         ...(recorder ? { captureLastScreen: true } : {}),
@@ -753,7 +760,7 @@ export async function cmdFlowRun(files: string[], opts: FlowRunOptions): Promise
       await client.installApp(sessionId, opts.build)
     }
 
-    const driver = new RelayDriver(client, sessionId, opts.build)
+    const driver = new RelayDriver(client, sessionId, opts.build, (t) => video?.tap.touch(t))
     const relay = client
     const engineOpts = {
       ...(opts.timeout !== undefined ? { defaultTimeoutMs: Math.round(opts.timeout * 1000) } : {}),

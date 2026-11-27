@@ -13,7 +13,7 @@ import type { TapflowClient } from '../client.js'
 async function connect(): Promise<{ client: Client; tools: { name: string }[]; listBytes: number }> {
   const server = new McpServer({ name: 'tapflow', version: SERVER_VERSION }, { instructions: INSTRUCTIONS })
   // Only what the register wrapper calls before every tool; the guide tool touches nothing else.
-  registerTools(server, { reconnectIfRotated: async () => {}, releasedByReconnect: () => undefined } as unknown as TapflowClient)
+  registerTools(server, { reconnectIfClosed: async () => {}, releasedByReconnect: () => undefined } as unknown as TapflowClient)
   const [a, b] = InMemoryTransport.createLinkedPair()
   await server.connect(a)
   const client = new Client({ name: 'test', version: '0' })
@@ -45,7 +45,10 @@ describe('agent guide', () => {
     // Measured at 13.2 KB of tool list plus 1.7 KB of instructions when this was written; the margin is for a sentence, not a tool.
     // 15,491 bytes by the time the flow input steps came, 9 short. They added `tap`'s `holdMs` and three step names to
     // `run_flow` (15,625) instead of a `long_press` and a `pinch` tool, which would have cost 2.6 KB.
-    expect(listBytes + INSTRUCTIONS.length).toBeLessThanOrEqual(15_750)
+    // 15,719 when MCP Flow Capture (L6a) came, 31 short of two tools. Its tools stay listed in every session rather than
+    // appearing once a capture opens (`tools/list_changed`): as of 2026-11-26, Codex has that behind a flag that is off
+    // and Cursor does not act on it reliably, so a capture opened there would have nothing to call. They cost 1,533 bytes.
+    expect(listBytes + INSTRUCTIONS.length).toBeLessThanOrEqual(17_300)
   })
 
   it('returns the testing guide only when asked, and keeps it bounded', async () => {

@@ -564,6 +564,163 @@ describe('TapflowClient', () => {
   })
 
   describe('swipe', () => {
+    // `scroll { until }` through `run_flow` drags: held still at the end, wobbling, then lifted (flow-runner's holdStill).
+    it('passes a hold from run_flow\'s driver to the swipe', async () => {
+      const spy = vi.spyOn(client, 'swipe').mockResolvedValue(undefined)
+      await makeFlowDriver(client, 'sess-1').swipe([0.5, 0.7], [0.5, 0.3], 300, 150)
+      expect(spy).toHaveBeenCalledWith('sess-1', expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Number), 300, 150)
+      spy.mockRestore()
+    })
+
+    // CodeRabbit on #1190: a hold has no waiter for disconnectDevice to settle, so it must see the leave itself, and the
+    // finger it put down is lifted before the leave rather than left on the device.
+    it('a leave during the hold lifts the finger, sends nothing after the leave, and fails the swipe as left', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      client.disconnectDevice('sess-1')
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      // Flushed by a later request on the same socket rather than by sleeping.
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.indexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+      const after = types.slice(leave + 1)
+      expect(after.filter((t) => t === 'input:touch:move')).toEqual([])
+      expect(after.filter((t) => t === 'input:touch:end')).toHaveLength(1) // sess-2's tap
+    })
+
+    // The window between the last move and the lift: the swipe must not send an end of its own after the leave lifted it.
+    it('a leave after the last move sends no second end', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 1_600).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 1_500))
+      client.disconnectDevice('sess-1')
+      expect(await swipe).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const mine = relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])
+      expect(mine.filter((t) => t === 'input:touch:end')).toHaveLength(1)
+      expect(mine[mine.length - 1]).toBe('session:leave')
+    })
+
+    // CodeRabbit on #1190: a swipe stopped by a replaced socket clears only its own record, so a newer swipe's finger
+    // is still lifted by a leave.
+    it('a stale swipe does not clear a newer swipe\'s touch, so the leave still lifts it', async () => {
+      // Moves a second apart: the stale swipe sleeps through the drop and the reconnect, and wakes after the fresh one
+      // began — asserted, not assumed, so a slow reconnect fails here rather than passing for the wrong reason.
+      let staleSettled = false
+      const stale = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 8_000).catch((e: unknown) => e).finally(() => { staleSettled = true })
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      // The old socket's close lands first, so the reconnect below is not raced by it.
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const fresh = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.2, 40, 2_000).catch((e: unknown) => e)
+      expect(staleSettled).toBe(false)
+      expect(String(await stale)).toMatch(/could not confirm/i)
+      await new Promise((r) => setTimeout(r, 100))
+      client.disconnectDevice('sess-1')
+      expect(await fresh).toBeInstanceOf(SessionLeftError)
+      await client.tap('sess-2', 0.1, 0.1)
+      const types = relay.sentMessages().map((m) => m['type'])
+      const leave = types.lastIndexOf('session:leave')
+      expect(types.slice(leave - 2, leave)).toEqual(['input:touch:cancel', 'input:touch:end'])
+    })
+
+    // CodeRabbit on #1190: an old socket's close that lands after a reconnect must not drop the socket that replaced it.
+    it('an old socket closing after a reconnect leaves the new one in use', async () => {
+      const old = client['ws']!
+      await client.connect()
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      expect(client['ws']).not.toBeNull()
+      await expect(client.tap('sess-2', 0.1, 0.1)).resolves.toBeUndefined()
+    })
+
+    // CodeRabbit on #1190: the old socket's close settles only its own waiters; a tap waiting on the new one stays
+    // pending through it and settles on its own ack, delivered after the close.
+    it('an old socket closing after a reconnect leaves a request on the new one waiting for its ack', async () => {
+      relay.setInputAck('none')
+      const old = client['ws']!
+      await client.connect()
+      let settled = false
+      const tap = client.tap('sess-1', 0.1, 0.1).finally(() => { settled = true })
+      const end = await waitForMessage(relay, 'input:touch:end')
+      const closed = new Promise((r) => old.once('close', r))
+      old.close()
+      await closed
+      await new Promise((r) => setTimeout(r, 20))
+      expect(settled).toBe(false)
+      const started = Date.now()
+      relay.send({ type: 'input:done', sessionId: 'sess-1', requestId: end['requestId'] })
+      await expect(tap).resolves.toBeUndefined()
+      // Its ack settled it, not the deadline.
+      expect(Date.now() - started).toBeLessThan(500)
+    })
+
+    // CodeRabbit on #1222: a long press and a pinch wait between frames too, and another tool call can reconnect in the
+    // meantime (#1213). Their remaining frames must not go out on the replacement socket.
+    it('a long press whose socket was replaced while it held sends no end on the new one, and is unconfirmed', async () => {
+      const press = client.longPress('sess-1', 0.5, 0.5, 400).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const before = relay.sentMessages().length
+      expect(String(await press)).toMatch(/could not confirm the input reached the device: the relay connection dropped during the long press/i)
+      await client.tap('sess-2', 0.1, 0.1)
+      const after = relay.sentMessages().slice(before).filter((m) => m['sessionId'] === 'sess-1')
+      expect(after).toEqual([])
+    })
+
+    it('a pinch whose socket was replaced mid-way sends no further move or end on the new one, and is unconfirmed', async () => {
+      const pinch = client.pinch('sess-1', [[0.4, 0.5], [0.6, 0.5]], [[0.2, 0.5], [0.8, 0.5]], 800).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 50))
+      relay.lastClient().close()
+      await vi.waitFor(() => expect(client['ws']).toBeNull())
+      await client.connect()
+      const before = relay.sentMessages().length
+      expect(String(await pinch)).toMatch(/could not confirm the input reached the device: the relay connection dropped during the pinch/i)
+      await client.tap('sess-2', 0.1, 0.1)
+      const after = relay.sentMessages().slice(before).filter((m) => m['sessionId'] === 'sess-1')
+      expect(after).toEqual([])
+    })
+
+    it('a leave with no swipe open sends the leave alone', async () => {
+      client.disconnectDevice('sess-1')
+      await client.tap('sess-2', 0.1, 0.1)
+      // Exactly the leave: an assertion on what precedes it would pass on a leave that was never sent.
+      expect(relay.sentMessages().filter((m) => m['sessionId'] === 'sess-1').map((m) => m['type'])).toEqual(['session:leave'])
+    })
+
+    // CodeRabbit on #1190: frames already sent may have reached the device, so a drop mid-swipe is unconfirmed.
+    it('a drop during the hold fails the swipe as unconfirmed, not as a product failure', async () => {
+      const swipe = client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 2_000).catch((e: unknown) => e)
+      await new Promise((r) => setTimeout(r, 150))
+      relay.lastClient().close()
+      const err = await swipe as Error
+      expect(err.message).toMatch(/could not confirm/i)
+      expect(err.message).toMatch(/may have landed/i)
+      expect(err.message).toMatch(/do not repeat/i)
+    })
+
+    it('refuses a hold that is not a time, before sending anything', async () => {
+      const before = relay.sentMessages().length
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, Number.POSITIVE_INFINITY)).rejects.toThrow(/swipe hold/)
+      await expect(client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, -1)).rejects.toThrow(/swipe hold/)
+      expect(relay.sentMessages().length).toBe(before)
+    })
+
+    it('holds still at the end point before the lift when asked to', async () => {
+      await client.swipe('sess-1', 0.5, 0.7, 0.5, 0.3, 40, 100)
+      await waitForMessage(relay, 'input:touch:end')
+      const msgs = relay.sentMessages()
+      const end = msgs.findIndex((m) => m['type'] === 'input:touch:end')
+      // Ends on the end point before the lift; the cadence and the wobble are holdStill's own test (flow-runner).
+      const last = msgs[end - 1]!
+      expect(last['type']).toBe('input:touch:move')
+      expect(Math.abs((last['payload'] as { y: number }).y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
+    })
+
     it('sends touch:start, multiple touch:move, and touch:end', async () => {
       await client.swipe('sess-1', 0, 0, 100, 100, 80)
       await waitForMessage(relay, 'input:touch:end')
@@ -571,7 +728,17 @@ describe('TapflowClient', () => {
       expect(msgs[0]).toMatchObject({ type: 'input:touch:start', payload: { x: 0, y: 0 } })
       expect(msgs[msgs.length - 1]).toMatchObject({ type: 'input:touch:end', payload: { x: 100, y: 100 } })
       const moves = msgs.filter((m) => m['type'] === 'input:touch:move')
-      expect(moves.length).toBe(7) // STEPS - 1
+      expect(moves.length).toBe(8)
+      // Every agent lifts where the last move was: it must be the end, or the swipe stops an eighth short.
+      expect(moves[moves.length - 1]).toMatchObject({ payload: { x: 100, y: 100 } })
+    })
+
+    // Exactly the end, not 1 × the path: 0.6 + (0.5 − 0.6) × 1 is 0.5000000000000001.
+    it('ends its moves on the end point exactly', async () => {
+      await client.swipe('sess-1', 0.6, 0.8, 0.5, 0.2, 80)
+      await waitForMessage(relay, 'input:touch:end')
+      const moves = relay.sentMessages().filter((m) => m['type'] === 'input:touch:move')
+      expect(moves[moves.length - 1]!['payload']).toEqual({ x: 0.5, y: 0.2 })
     })
   })
 

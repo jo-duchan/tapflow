@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useReducer } from 'react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -7,6 +7,7 @@ import type { CapturedStep } from '@tapflowio/flow-runner/browser'
 import FlowCaptureDialog from '@/components/flow-capture/FlowCaptureDialog'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from '@/components/flow-capture/screens'
 import { initialState, reduce } from '@/lib/flowCapture/machine'
+import { copy } from '@/lib/flowCapture/copy'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
 import { withQuery } from './withQuery'
 
@@ -18,14 +19,15 @@ const tap: CaptureTap = {
   chrome: () => null, postures: () => ({ postures: [], currentId: null }), surface: () => null,
 }
 
-const entry = (at: number, msg: Record<string, unknown>): CaptureEntry => ({ at, kind: 'input', msg: { sessionId: 's1', ...msg } as never })
+type InputMsg = Extract<CaptureEntry, { kind: 'input' }>['msg']
+const entry = (at: number, msg: InputMsg): CaptureEntry => ({ at, kind: 'input', msg })
 const snapshot: CaptureSnapshot = {
   id: 'snap', takenAt: 0, thinned: false,
   entries: [
-    entry(0, { type: 'app:install', requestId: 'i', buildId: 7 }),
-    entry(100, { type: 'app:launch', requestId: 'l', buildId: 7 }),
-    entry(200, { type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
-    entry(280, { type: 'input:touch:end', requestId: 't' }),
+    entry(0, { sessionId: 's1', type: 'app:install', requestId: 'i', buildId: 7 }),
+    entry(100, { sessionId: 's1', type: 'app:launch', requestId: 'l', buildId: 7 }),
+    entry(200, { sessionId: 's1', type: 'input:touch:start', payload: { x: 0.4, y: 0.6 } }),
+    entry(280, { sessionId: 's1', type: 'input:touch:end', requestId: 't' }),
   ],
 }
 
@@ -242,6 +244,110 @@ describe('RangeScreen', () => {
     expect(screen.getAllByText('On-screen keyboard')).toHaveLength(2)
   })
 
+  // A tile with no picture says why, in its tooltip and its list item, with ImageOff where the picture would be. Not the
+  // keyboard tile, which says what it is already.
+  it('says why a step has no picture, and nothing of one that has or of a key on the soft keyboard', () => {
+    const pictured = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 4 }, name: 'login',
+      steps: [
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 't' },
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 'u' },
+        { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 'v' },
+        { ...base, kind: 'keyboardKey', point: [0.3, 0.8], thumbnailKey: 'k' },
+      ] as never,
+    })
+    const why: Record<string, string> = { u: copy.noPicture.keyboard, v: copy.noPicture.none }
+    const { container } = render(
+      <RangeScreen state={pictured} dispatch={vi.fn()} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }}
+        thumbnailOf={(step) => (step.thumbnailKey === 't' ? '/pic/t' : null)}
+        noPictureWhy={(step) => (step.thumbnailKey === 't' ? null : why[step.thumbnailKey!] ?? copy.noPicture.none)} />,
+    )
+    const tiles = [...container.querySelectorAll('ol[aria-label] > li')]
+    expect(tiles.map((t) => !!t.querySelector('[data-no-picture]'))).toEqual([false, true, true, false])
+    expect(tiles[1]!.textContent).toContain(copy.noPicture.keyboard)
+    expect(tiles[2]!.textContent).toContain(copy.noPicture.none)
+    expect(tiles[0]!.textContent).not.toContain('No picture')
+    expect(tiles[3]!.textContent).not.toContain('No picture')
+  })
+
+  // An install's picture is of the moment the button was pressed, which says nothing: the tile shows what the step is.
+  it('draws an install as an install, whatever picture it has', () => {
+    const pictured = reduce(initialState, {
+      type: 'loaded', range: { start: 1, end: 2 }, name: 'login',
+      steps: [{ ...base, kind: 'install', buildId: 2, thumbnailKey: 'i' }, { ...base, kind: 'tap', point: [0.5, 0.5], thumbnailKey: 't' }] as never,
+    })
+    const { container } = render(
+      <RangeScreen state={pictured} dispatch={vi.fn()} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }}
+        thumbnailOf={(step) => `/pic/${step.thumbnailKey}`} noPictureWhy={() => null} />,
+    )
+    const tiles = [...container.querySelectorAll('ol[aria-label] > li')]
+    expect(tiles[0]!.querySelector('img')).toBeNull()
+    expect(tiles[0]!.querySelector('[data-install]')).not.toBeNull()
+    expect(tiles[1]!.querySelector('img')).toHaveAttribute('src', '/pic/t')
+  })
+
+  // #1170: a step left out before the replay has a button under its tile to put it back, and to leave it out again.
+  describe('a step left out before the replay', () => {
+    const dropped = reduce(initialState, {
+      type: 'loaded', range: { start: 0, end: 3 }, name: 'f',
+      steps: [
+        { ...base, kind: 'tap', point: [0.5, 0.5] },
+        { ...base, kind: 'tap', point: [0.5, 0.5], dropped: 'retried' },
+        { ...base, kind: 'tap', point: [0.5, 0.5] },
+      ] as never,
+    })
+    const tileOf = (container: HTMLElement, n: number) => container.querySelectorAll('ol[aria-label] > li')[n] as HTMLElement
+
+    it('puts it back from a button under its tile, no wider than the tile', () => {
+      const dispatch = vi.fn()
+      const { container } = draw(dropped, dispatch)
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
+      // Under its tile (#1227 moved the buttons out of the tiles, to be tabbed to after the strip).
+      expect(button.closest<HTMLElement>('[data-under]')!.style.left).toBe(tileOf(container, 1).style.left)
+      expect(button.textContent).toBe('Put back')
+      // Never wider than the tile's inner width, never wrapped (user, 2026-11-23).
+      expect(button.className).toMatch(/\bw-full\b/)
+      expect(button.className).toMatch(/\bmin-w-0\b/)
+      expect(button.className).toMatch(/\bwhitespace-nowrap\b/)
+      fireEvent.click(button)
+      expect(dispatch).toHaveBeenCalledWith({ type: 'replay-dropped', index: 1 })
+      // Only the tile with something to put back has a button.
+      expect(container.querySelectorAll('[data-under]')).toHaveLength(1)
+    })
+
+    it('says it was put back, and leaves it out again from the same place', () => {
+      const dispatch = vi.fn()
+      const { container } = draw(reduce(dropped, { type: 'replay-dropped', index: 1 }), dispatch)
+      expect(tileOf(container, 1).textContent).toContain('Put back')
+      expect(tileOf(container, 1).textContent).not.toContain('Not replayed')
+      fireEvent.click(screen.getByRole('button', { name: 'Leave out #2 from the replay again' }))
+      expect(dispatch).toHaveBeenCalledWith({ type: 'drop-again', index: 1 })
+    })
+
+    // Pre-PR review: the user's "focus stays on the button", through the real reducer on one mounted strip.
+    it('keeps focus on the button as it turns from Put back into Leave out', () => {
+      function Strip() {
+        const [state, dispatch] = useReducer(reduce, dropped)
+        return <RangeScreen state={state} dispatch={dispatch} bundleId="com.example" platform="ios" onContinue={vi.fn()} onCancel={vi.fn()} continueRef={{ current: null }} />
+      }
+      render(<Strip />)
+      const button = screen.getByRole('button', { name: 'Put back #2 in the replay' })
+      button.focus()
+      fireEvent.click(button)
+      const turned = screen.getByRole('button', { name: 'Leave out #2 from the replay again' })
+      expect(turned).toBe(button)
+      expect(turned).toHaveFocus()
+    })
+
+    it('adds no button row to a strip with nothing to put back', () => {
+      const plain = reduce(initialState, { type: 'loaded', range: { start: 0, end: 1 }, name: 'f', steps: [{ ...base, kind: 'tap', point: [0.5, 0.5] }] as never })
+      const { container } = draw(plain)
+      expect(container.querySelector('[data-row="buttons"]')).toBeNull()
+      // No room kept for one either: the strip is its frame's height (12 + 10 + 217 + 10 + 12).
+      expect((container.querySelector('ol[aria-label]')!.parentElement as HTMLElement).style.height).toBe('261px')
+    })
+  })
+
   it('asks for the password, hidden, and holds Continue until it is given', async () => {
     const dispatch = vi.fn()
     draw(loaded, dispatch)
@@ -280,20 +386,19 @@ describe('EditScreen', () => {
     <EditScreen state={state} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />,
   )
 
-  it('draws where the step touched on its picture', () => {
+  // A canvas has no DOM to read: the layer says where its mark starts, as percentages of the picture.
+  it('draws where the step touched on its picture, in the machine\'s colour', () => {
     draw()
-    expect(screen.getByTestId('step-mark')).toBeInTheDocument()
+    const mark = screen.getByTestId('touch-marks')
+    expect(mark.getAttribute('data-anchor')).toBe('30,40')
+    expect(mark.getAttribute('data-tone')).toBe('machine')
   })
 
-  it('draws a swipe as a dashed trail that strengthens toward where the finger lifted', () => {
+  it('draws a swipe from where the finger went down', () => {
     const swipe = { at: 0, endAt: 0, outcome: 'landed', messages: [], kind: 'swipe', from: [0.5, 0.7], to: [0.5, 0.3], durationMs: 200 }
     const swiped = { ...(state as object), captured: { steps: [{ raw: swipe, step: { type: 'tapOn', selector: { text: 'Login' } } }], secrets: {}, launchAdded: false } } as never
     render(<EditScreen state={swiped} dispatch={vi.fn()} flow={null} renameCheck={() => ({})} onVerify={vi.fn()} onBackToRange={vi.fn()} verifyRef={{ current: null }} />)
-    const mark = screen.getByTestId('step-mark')
-    const line = mark.querySelector('line')!
-    expect(line.getAttribute('stroke-dasharray')).toBe('1 9')
-    expect(line.getAttribute('stroke')).toBe(`url(#${mark.querySelector('linearGradient')!.id})`)
-    expect(mark.querySelector('linearGradient')!.getAttribute('y1')).toBe('70%')
+    expect(screen.getByTestId('touch-marks').getAttribute('data-anchor')).toBe('50,70')
   })
 
   // The YAML takes the picture's place, so the buttons stay where they are.
@@ -322,7 +427,7 @@ describe('VerifyScreen', () => {
   // The count said the step it was on twice ("2 of 2") until the result came, and moved the line as it grew.
   it('counts through the flow\'s own steps, in the room of the widest count', () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 2, live: [] } }
-    render(<VerifyScreen state={running} tap={{ surface: () => null } as never} marks={{ cursor: null, trails: [] }} total={15}
+    render(<VerifyScreen state={running} tap={{ surface: () => null } as never} touch={null} total={15}
       onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
     const status = screen.getByRole('status')
     expect(status).toHaveTextContent('Running step 3 of 15')
@@ -334,7 +439,7 @@ describe('VerifyScreen', () => {
   it('turns its button into Back to Edit, in place, when the run threw', async () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 1, live: [] } }
     const onBack = vi.fn()
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack, primaryRef: { current: null } }
     const { rerender } = render(<VerifyScreen state={running} {...props} />)
     const button = screen.getByRole('button', { name: 'Continue' })
     button.focus()
@@ -353,7 +458,7 @@ describe('VerifyScreen', () => {
       { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 },
       { index: 1, name: 'tapOn("Row 23")', status: 'running' as const, startedAt: 1200 },
     ] } }
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const { rerender } = render(<VerifyScreen state={live} {...props} />)
     const list = screen.getByRole('list', { name: 'Verify' })
     expect(within(list).getByText('launchApp')).toBeInTheDocument()
@@ -376,7 +481,7 @@ describe('VerifyScreen', () => {
   // step after a failure as not run, and following those to the bottom pushed the failed step, opened onto why, out of
   // view (pre-PR review): the result does not move the list.
   it('follows the step running, and does not move when the result adds the steps that did not run', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 3, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const step0 = { index: 0, name: 'launchApp', status: 'passed' as const, startedAt: 0, durationMs: 1200 }
     const one = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [step0] } }
     const { rerender } = render(<VerifyScreen state={one} {...props} />)
@@ -398,7 +503,7 @@ describe('VerifyScreen', () => {
 
   // #1125: a passed step whose touch the device could not judge opens onto why, since a covered row passed that way.
   it('opens a passed step onto a touch that was not checked to land on its element', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 1, live: [], result: { status: 'passed', steps: [
       { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'unchecked', reachNote: 'old agent' },
       { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified' },
@@ -412,7 +517,7 @@ describe('VerifyScreen', () => {
   // #1125: an overlay the tree does not show takes a touch and the step still passes, so a touch that changed nothing
   // says so, and one that changed something says what a run will look for.
   it('says a touch changed nothing, open, and what a run checks after one that did, closed', () => {
-    const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
+    const props = { tap: { surface: () => null } as never, touch: null, total: 1, onExport: vi.fn(), onBack: vi.fn(), primaryRef: { current: null } }
     const passed = { ...initialState, phase: 'verifying' as const, verify: { status: 'passed' as const, done: 2, live: [], result: { status: 'passed', steps: [
       { index: 0, name: 'tapOn("Row 13")', status: 'passed', durationMs: 900, reach: 'verified', observed: null },
       { index: 1, name: 'tapOn("Save")', status: 'passed', durationMs: 900, reach: 'verified', observed: { appear: [{ text: 'Saved', role: 'text' }], gone: [{ id: 'save' }] } },
@@ -429,7 +534,7 @@ describe('VerifyScreen', () => {
 
 // #1139: Match and Verify start from a run's reset, and say what it did.
 describe('the device reset', () => {
-  const props = { tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+  const props = { tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null, onPutBackAndMatch: vi.fn() }
   const matching = reduce({ ...initialState, phase: 'range' as const }, { type: 'match-started', total: 2 })
 
   it('says what was reset, by name, once the agent has answered', () => {
@@ -471,13 +576,13 @@ describe('the device reset', () => {
 })
 
 describe('focus through a run', () => {
-  const marks = { cursor: null, trails: [] }
+  const touch = null
   const tapStub = { surface: () => null } as never
 
   // Review of #1125: Stop's button was swapped for Start again's, and the focus of the one pressed fell to the page.
   it('keeps focus on the button pressed when Stop becomes Start again', () => {
     const running = { ...initialState, phase: 'matching' as const, progress: { done: 1, total: 3 } }
-    const props = { tap: tapStub, marks, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null }
+    const props = { tap: tapStub, touch, onStop: vi.fn(), onRestart: vi.fn(), onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null, onPutBackAndMatch: vi.fn() }
     const { rerender } = render(<MatchScreen state={running} {...props} />)
     const stop = screen.getByRole('button', { name: 'Stop' })
     stop.focus()
@@ -488,7 +593,7 @@ describe('focus through a run', () => {
   // With nothing to hold, focus fell to the page when Verify began and stayed there after it finished.
   it('has its primary button there, busy, while Verify runs', () => {
     const running = { ...initialState, phase: 'verifying' as const, verify: { status: 'running' as const, done: 0, live: [] } }
-    render(<VerifyScreen state={running} tap={tapStub} marks={marks} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
+    render(<VerifyScreen state={running} tap={tapStub} touch={touch} total={3} onExport={vi.fn()} onBack={vi.fn()} primaryRef={{ current: null }} />)
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveAttribute('aria-disabled', 'true')
   })
 })

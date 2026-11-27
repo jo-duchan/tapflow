@@ -21,7 +21,7 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 ## HOW
 
 - Entry: `src/index.ts` → `src/startup.ts` — reads `TAPFLOW_RELAY_URL`, resolves the token (`TAPFLOW_TOKEN`, else the credentials file, flow-runner's `resolveToken`), connects `TapflowClient`, calls `registerTools`, starts `StdioServerTransport`.
-- **A token is re-read, never read once** (T1). REST goes through flow-runner's `fetchWithToken`, which retries a 401 once when the file now holds a different token than the request carried. The socket cannot be retried in place: the relay closes it 1008 as a revocation lands (`onAuthChanged`; the heartbeat is the fallback), and at that moment the file is usually still old, so **`reconnectIfRotated` runs before every tool** (the `register` wrapper in `tools.ts`) and reconnects once when the token changed. A browser-role socket has no reconnect grace — the relay clears ownership on close — so held sessions are *not* re-joined silently; a tool on one answers "call connect_device again". **Start does not guess loopback from the URL**: it connects, and one `agents:list` round trip lets the relay decide (its tunnel port and a Docker bridge are not local though both are `localhost` here); a 1008 there exits 1 with the relay, the token's source and the fix; any other failure of that round trip (a slow relay) starts anyway, as before the check existed.
+- **A token is re-read, never read once** (T1). REST goes through flow-runner's `fetchWithToken`, which retries a 401 once when the file now holds a different token than the request carried. The socket cannot be retried in place: the relay closes it 1008 as a revocation lands (`onAuthChanged`; the heartbeat is the fallback), and at that moment the file is usually still old, so **`reconnectIfClosed` runs before every tool** (the `register` wrapper in `tools.ts`) and reconnects once when the token changed. The same call reconnects after **any other close the relay made** (restart, crash, sleep, heartbeat, a network drop — #1213), once per tool call and never in the background, since nothing else needs the socket; the call that failed on the close is not re-sent, because its input may already have landed. The token is re-read before every such reconnect, and the token a socket used is recorded only once it opens, so a reconnect that never reached the relay is tried again. A long press, pinch or swipe that waits between frames stops as unconfirmed when its socket was replaced meanwhile, rather than sending the rest on a socket whose session is not held. A reconnect that fails is named in the next tool's error, and the handshake times out (10 s) so it cannot hang a tool call. A browser-role socket has no reconnect grace — the relay clears ownership on close — so held sessions are *not* re-joined silently; a tool on one answers "call connect_device again". **Start does not guess loopback from the URL**: it connects, and one `agents:list` round trip lets the relay decide (its tunnel port and a Docker bridge are not local though both are `localhost` here); a 1008 there exits 1 with the relay, the token's source and the fix; any other failure of that round trip (a slow relay) starts anyway, as before the check existed.
 - Client: `src/client.ts` — WebSocket connection to relay + REST calls for build/app data. Its `send()` takes `BrowserToRelay` from [`@tapflowio/protocol`](../protocol/AGENTS.md), so a new outbound message goes in that union first. Receiving stays loose (`Record<string, unknown>` + a predicate) — a **deferral, not a settled decision**, tracked in #512. Narrowing it is a judgement about this file rather than a bug fix now: the defect it used to promise to catch — `error` matched on a `sessionId` that message did not have, so one session's refusal woke another's join — was closed by L5d addressing `error`, and `connectDevice` compares that field today. What narrowing would still do is make `message: string`, turning this file's `?? 'failed'` fallbacks into unreachable code. Deleting those used to remove a real defence, because nothing validated inbound JSON; #444 landed that validation at the relay, so the prerequisite this deferral named is met and #512 is now a judgement about this file alone.
 - Tools: `src/tools.ts` — all MCP tool definitions. One `registerTools(server, client)` call registers everything.
 - `src/guide.ts` — what the agent is told, at two costs. `INSTRUCTIONS` (server `instructions`) rides in every session, so it holds only what goes wrong when unknown, most important first (Claude Code cuts at 4,096 chars, Codex reads the first 512), and does not repeat tool descriptions. `TESTING_GUIDE` is returned by `get_testing_guide`, so it costs nothing until asked; it recommends only what these tools can do. `__tests__/guide.test.ts` holds both and the tool list to a size, and fails on a snake_case tool name that is not registered (a name misspelled out of that shape is not seen). A new tool that changes how to test belongs in the guide; one sentence in its own description is the rest.
@@ -31,7 +31,7 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 - **The screenshot's format is read from its magic bytes, not from the request or the reply** (#508).
   The request's `format` is a preference (`ScreenshotRequest` in protocol) and the reply's is a claim, so
   neither can decide how to *parse* the bytes — and `getImageDimensions` picks a parser by format, feeding
-  numbers the LLM hands back as `tap`'s divisors. Android produces PNG whatever is asked and used to echo
+  numbers the LLM hands back as `tap`'s divisors. An older Android agent produces PNG whatever is asked and used to echo
   the request, so a JPEG request was measured with a JPEG parser against PNG bytes, where a stray `ff c0`
   in the IDAT reads as a SOF0 marker and yields a wrong size. Sniffing here rather than trusting the
   agent's fix is what makes it work against an agent that has **not** been upgraded — separate processes,
@@ -47,6 +47,38 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 `run_flow` replays a `@tapflowio/flow-runner` YAML flow deterministically (no LLM at replay time) over this process's existing relay connection — it shares the session joined via `connect_device`, so it never opens a second WebSocket or hits "Session busy".
 
 `query_ui_tree` returns the unified element schema (`role`/`label`/`identifier`/`placeholder`/`frame`/`enabled`/`rawRole`) via `GET /api/v1/sessions/:sessionId/ui-tree`. Frames are normalized 0-1, so a frame center multiplied by the screenshot pixel size feeds straight into `tap` — except on an iOS app drawn in landscape, where the frames are in the app's space and the screenshot is the portrait framebuffer (#1119). `run_flow` turns its points by the tree's `interfaceTurn`; these two tools do not.
+
+### MCP Flow Capture (L6a): this server keeps the record, the relay keeps none
+
+`connect_device` with `capture: true` opens a capture (`src/capture.ts`, one per process): from then on the tools record
+what the agent did on that session — an element tap with the selector it named (the engine's wait left out), a tap or
+swipe by pixels carried into the app's space by the latest tree's turn, typed text with the field a tree read **just
+before** it saw focused, each tree read, a `run_flow` as one block of the agent's steps, keys, buttons and launches.
+`list_captured_steps` and `capture_flow` hand that to flow-runner's `agentSteps` and `agentFlow`; nothing is named here.
+
+- **Observation is paired by `requestId`, which only this client knows.** `client.onSend` hears every touch-end as it
+  leaves, and the relay passes on `capture:observation` only for a touch this socket sent. An observation of a touch the
+  capture did not send (a Verify's, a dashboard's) is dropped, and one that arrives before its tool recorded the touch is
+  held until it does. The listeners are attached at the first capture, so a server nobody captures with pays nothing.
+- **What is typed is a secret unless a read said otherwise** (fail-closed): a field only becomes `inputText` when the
+  read before it found one focused field with `secure: false`. While capturing, `type_text` answers with the length, not
+  the text, and `run_flow` refuses an `inputText` step, since its field is never read. A key is the same text by
+  another door, so `press_key` and a `run_flow` `pressKey` take only an allowlist of keys that type nothing (Enter, Tab,
+  Backspace, arrows…) — an allowlist, because `Numpad1` or a layout's punctuation would slip past a list of letters
+  and digits. The values live in this process's
+  memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
+  or with the process.
+- **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its
+  platform. It refuses rather than verify what it cannot reset: no build launched while capturing (every flow begins
+  with a launch), or a build whose bundle id the relay cannot give. `viewport` is the capture's screen, read when it
+  opened, not the Verify device's. Its inputs are marked `verifying`, so none is recorded or paired. A failed step is told in the agent's own
+  numbers (`AgentFlow.origins`) and noted as failed before, so leaving it out is written into the file as such.
+- **The two tools are listed in every session**, not added once a capture opens: `tools/list_changed` is off by default
+  in Codex and unreliable in Cursor (their docs and issue trackers, 2026-11-26), so a capture there would have had nothing to call. They cost
+  1,533 bytes of the budget `guide.test.ts` holds.
+- **iOS names what a touch hit only in an app process started after observation was armed** (app accessibility is read
+  at launch), which `connect_device` says. The plan's automatic relaunch on opening a capture is not done: the tree read
+  before a tap still names it, and Verify starts from a reset either way.
 
 ### Input acks: silence is answered "could not confirm", and never retried here
 

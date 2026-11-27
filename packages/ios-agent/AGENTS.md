@@ -183,6 +183,13 @@ call reads a plist it cannot open as one panel, and asking again could drop a Du
 connect still re-reads every type, as before. `agent:devices-applied` is the one relay message with no `sessionId`,
 so it is handled before the filter that drops those.
 
+App logs use a `simctl spawn ... log stream --level debug` child after a successful app launch, scoped by the launched
+host PID and installed app executable path so a recycled PID from another app cannot match. The `DeviceState` owns it;
+a generation check prevents a launch that finishes after install, boot, shutdown or disconnect from reviving it. The
+stream drains queued final output after the app exits, reports bounded stderr on unexpected child failure, and clears
+queued output on explicit stop. Each bounded text chunk carries its launch request ID and is forwarded unchanged, but
+only to a relay advertising `'app-logs'`.
+
 ## HOW NOT
 
 - Do not expose iOS-specific methods as public API if they are not in the `DeviceAgent` interface.
@@ -405,6 +412,18 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   gate runs after load. UIKit is reached at run time, after the gate: class names, selectors, the string values of its
   constants, rects as four doubles. The gate has network-hook.m's refusals (an embedded NUL in the bundle id, a udid
   that does not fit).
+- **No Objective-C in either gate** (`tf_main_bundle_id`, `src/main-bundle.c`). The constructors run before `main`,
+  with no autorelease pool, and `+[NSBundle mainBundle]` autoreleases: `fileproviderd` and `GSSCred` abort on it
+  (`autoreleaseNoPage` → `_objc_fatal`, inside the pool push itself, so `@autoreleasepool` does not help), measured
+  on iOS 26.5. Both gates read the bundle id whenever a target was named, so with Capture on (`TAPFLOW_OBSERVE_BUNDLE`)
+  both daemons crashed in a loop — 95 reports in one day — and WebKit's navigations, which wait on them, never
+  finished: Safari and every web view stayed white, the app's own WebView included. It surfaced with app
+  accessibility on at boot (more processes start), which first read as accessibility being the cause; turning it
+  on in a running device changed nothing, and the crash reports named the library. So a process that is not
+  directly inside an `.app` (`tf_exe_in_app_bundle_decision`, the executable's path) stops before any bundle is
+  read — no daemon is, and no target ever is anything else — and an app's identifier is read through
+  CoreFoundation, which autoreleases nothing. Verified with Capture on: no daemon report after the boot, Safari and
+  the sample app's WebView load, the observer names taps, the network hook installs in the app.
 - **Asked by file, answered by file, in `/tmp/tapflow-observe-<udid>` (0700).** The host's /tmp is the simulator's
   (measured), so the agent writes a nonce and the bundle it asks about to `request` by rename and that app, watching
   the directory, answers `<nonce>.json` (0600), which the agent reads and removes; an answer whose nonce or bundle is
@@ -439,13 +458,13 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   field lives in another process (it read `secure: false` on a password input), Flutter, a custom `UITextInput` —
   answers `reason: secure`, which flow-runner turns into a secret step. So does any field read while the app is not
   active: typing then goes elsewhere, a system sign-in alert's password field among them.
-- **Touch reports, while a person is recorded** (record-time observation). The observer wraps `-[UIApplication
+- **Touch reports, while a person is recorded or an MCP client armed them** (record-time observation). The observer wraps `-[UIApplication
   sendEvent:]` (the original IMP kept, so other SDKs' wrappers chain) and, while a `touches` file is in the directory,
   writes `touch-<seq>.json` per touch-down: whether a list under it was still moving (`isDecelerating`, or the private
   `_isBouncing` at the end of a list, read **before** the event is delivered, since the touch stops the scroll), and the
   accessibility element and nearest button it hit (identifier, label — never a text input's — traits, frame), or only
   the surface for the keyboard, a web view or Flutter. The agent pairs each with the gesture it delivered (point and
-  time, both on this Mac) and sends `capture:touched`, only to a relay that asked (`touchObservations` on the boot).
+  time, both on this Mac) and sends `capture:touched`, only to a relay that asked (`touchObservations` on the boot, or its `capture:observe`).
   **Cost, measured on Food Truck (iOS 26.5):** the hit test is the cost — 10–30 ms the first time on a screen, 3–5 ms
   after — so one is run 0.7 s after a touch lifts and after the app becomes active, when nothing moves (a touch cancels
   it), and the touch-down's own costs under 5.5 ms; the file is written off the main queue. Frame-count comparisons over
@@ -465,7 +484,7 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   window, or UIKit's every-touch ones, is not the app acting (`_UIFlexInteraction` reaches Ended on a nav-bar tap).
   **A touch inside a web view lands on a plain `UIView`** under `WKContentView` (iOS 26.5), so the surface check walks
   the superviews; looking at the touched view alone missed every web touch.
-- **App accessibility is on for a person Flow Capture records** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
+- **App accessibility is on for a person Flow Capture records, or a device an MCP client armed** (`AppAccessibility`, `ApplicationAccessibilityEnabled`).
   Without it SwiftUI and React Native build no accessibility nodes, so the observer can name neither a SwiftUI field's
   `.accessibilityIdentifier` nor what a touch hit (measured on iOS 26.5: Food Truck, Sample SwiftUI/UIKit, a React Native
   app — nothing off, every element named on; scroll smoothness the same either way). **It costs the app 13–21 MB**
@@ -479,13 +498,78 @@ observer answers in the runner's own shapes, so `toKeyboardState` and `toFocused
   any app runs; a recorded person who picked up a device with the app already running gets names from its next launch.
   **This and touch reports follow the relay's `observed` on `device:boot`**, which no memory gate touches: an earlier
   flag carried one, drawn for the runner, and turned observation off for the whole boot on a busy Mac — every `touched`
-  gone, with nothing saying so. A relay that sends no `observed` observes nobody. Decided at the boot: turning
-  capturing on mid-session, or a boot during a replay's pause, is observed from the next boot. Without it a field is told apart by placeholder and
+  gone, with nothing saying so. A relay that sends no `observed` (and no `capture:observe`) observes nobody. Decided at the boot for a person: turning
+  capturing on mid-session, or a boot during a replay's pause, is observed from the next boot. An MCP holder arms a running
+  device with `capture:observe` instead (L6a; `applyObservation` is the boot's own setup, shared): the app reports touches
+  from the moment its flag is written, and only element names wait for a new process, as above. Arming again keeps the
+  watch, so a gesture in flight keeps its report. A request a newer boot overtook while it waited its turn sets
+  nothing, and one that goes stale mid-write leaves the touch flag to whichever watch now holds the device: the flag is
+  the device's, and a `capture:observe` is not ordered against a boot. Without it a field is told apart by placeholder and
   frame, failures that show as unread or a divergence, never a wrong flow. The home screen is outside the app too,
   hence the marker.
 - **Verified with a probe app** on iOS 26.5 (MacBook) and 27.0 (Mac mini, Xcode 27.1): UIKit, SwiftUI `TextField` and
   `SecureField`, React Native fields, a WKWebView's inputs, the soft keyboard in portrait and landscape, a hardware
   keyboard, and the lifecycle above. The probe is not committed; the measurements are here.
+
+---
+
+### Where a touch landed (#1214)
+
+For a recorded person's boot on a relay that announced `touch-landings`, the agent sends `capture:landed` for each
+gesture: the app, the home screen, a system surface, a prompt, or another app. **It is read from outside the device,
+with nothing injected**: every UIKit process logs, at default level, `Sending UIEvent type: 0; subtype: 0; to window:
+<CLASS: 0x…>; contextId: 0x…` for each touch event it delivers, the class a public argument. `DispatchLog` streams that
+line alone (`simctl spawn <udid> log stream --style ndjson` with a predicate), `touchLanding.ts` holds the rules as pure
+functions, `IOSAgent.landTouch` pairs and sends. A device already up (picked up as it was, DeviceHub) is read the same.
+
+- **Why not injected.** An earlier design put a `sendEvent:` hook into SpringBoard through the boot's
+  `DYLD_INSERT_LIBRARIES`. It worked, and the log named the same process and window class in 23 of 23 touches on iOS
+  26.5 (home, pages, App Library and its keys, Control Center, Notification Center, status bar, alert, banner, the app)
+  and on 27.0 the same classes, a secure field's keys in the app's own process as on 26.5 — without putting a library in
+  every process the boot starts, which is how the observer once
+  crash-looped two daemons (App observer, above). The measurements are in the plan for #1214.
+- **Measured delivery.** Each line reaches the pipe as its own chunk within 1 ms of the event's timestamp (iOS 26.5,
+  spawned from Node as the agent does); the stream is attached ~1.4 s after the spawn, and a touch before that has no
+  line. On iOS 27.0 a touch in the first seconds after the boot produced no line at all: SpringBoard was not dispatching
+  yet. The `log` process: 38 MB, 0.18 s of CPU over ten seconds of swipes.
+- **A line carries no touch phase**, so a gesture's moves and lift log lines too, and a lagging log (0.1–2.1 s on a
+  loaded Mac mini, iOS 27.0) stamps them after the next gesture's down. `pickDispatch` takes the earliest line in
+  [downᵢ, downᵢ₊₁) and places gesture `i` only when the one before it finished delivering first: its lag (first line −
+  down), stretched for the lift (×1.5 + 50 ms: lifts trailed by 13–40 ms where first events trailed by 7–11 ms, iOS
+  26.5), shorter than the gap from its up to `i`'s down, an unknown lag counting as too long within `MAX_DISPATCH_LAG_MS`.
+  A wrong landing outranks every read in flow-runner; a missing one leaves the reads, so doubt sends nothing. A pinch's
+  down is in the timeline though a pinch is not placed. **The lift margin is an assumption the measurements hold, not a
+  bound**: over 130 gestures (iOS 26.5 idle; 27.0 just after boot and at load 51–104) a lift trailed its first line by
+  at most 14 ms, and by 128 ms where the first line was 897 ms late.
+- **A home-screen widget's renderer is not a landing.** It logs a touch beside SpringBoard's home-screen window, and on
+  iOS 27.0 it logged a page swipe 28 ms after its down while a stalled SpringBoard logged it 800 ms after: taken first,
+  the swipe was `other` with the renderer's id. `landsNothing` leaves it out with the system-gesture layer. Lag is per
+  process, which is also why the margin above is measured on one.
+- **Classification** (`landingOf`): the app under test, any window — its keyboard's keys land in its own process, a
+  secure field's too (measured on 26.5 and 27.0). SpringBoard by window class: `SBHomeScreenWindow` home; status bar, the switcher's
+  status bar over an app (a tap at the top of the screen, which the app never sees), cover sheet, Control Center, banner
+  system; `SBAlertItemWindow` alert, or system while the app is away (an alert over the home screen is not the app's);
+  `UIRemoteKeyboardWindow` takes the surface of the last SpringBoard landing within 30 s, and only while the app is away,
+  so no key typed in the app is ever placed on the home screen (the relay keeps a thumbnail of a home-screen step).
+  Spotlight and any other app are `other` with their id. **A class not in the table is unknown**: a new iOS that renames
+  one gives no landing, which is what every touch had before, and `LANDING_SILENT_WARN` logs once when a stream that has
+  spoken places nothing for ten gestures in a row — no line, an unreadable bundle, or a SpringBoard window it does not
+  know; a touch left out on purpose (SpringBoard's keyboard over the app) does not count. A gesture's down stays in the
+  timeline for the last 32, so a burst while the log trails is placed whole. With no app under test known (an agent restart), only SpringBoard and
+  Spotlight are placed: the app's own touches would read as another app's.
+- **Away is asked directly** (`AppObserver.isAway`: the background marker, then `launchctl`), not through `read`, which
+  waits behind other reads, and **as of the touch's line**: a marker written after it (Home pressed since) means the app
+  was in front. A check that fails keeps `alert`. The last SpringBoard landing is kept in event-time order, since
+  gestures finish placing out of order, and a key takes only one from before it.
+- **The bundle** of a line's process is the `CFBundleIdentifier` of the `Info.plist` beside its `processImagePath` (a host
+  path), read once per path with `plutil`.
+- **Lifecycle.** The stream lives in the touch watch: `replaceTouchWatch` stops the one a re-boot replaces,
+  `endTouchWatch` is the one way a watch ends (teardown, shutdown, a boot nobody records, disconnect). A stream that dies
+  is started again at most 3 times in 30 s. Killing `simctl spawn` with TERM ends the `log` inside the simulator too
+  (measured); an agent killed with -9 leaves both, so each start first kills this device's leftovers, found by `pgrep`
+  and matched by the predicate. Lines older than 10 s are let go each second and all of them at stop, since they name
+  what a person touched; stdout is decoded as a stream (a chunk can end inside a Hangul path). A spawn `error` ends the
+  stream as an `exit` does, once. Under vitest the default reads nothing; a test passes `options.dispatchLog`.
 
 ---
 

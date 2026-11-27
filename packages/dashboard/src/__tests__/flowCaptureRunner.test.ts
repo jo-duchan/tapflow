@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { RawStep, ScreenCells } from '@tapflowio/flow-runner/browser'
+import type { CapturedStep, RawStep, ScreenCells } from '@tapflowio/flow-runner/browser'
 import type { ScreenDivergence } from '@/lib/flowCapture/runner'
 import type { Carried } from '@/lib/flowCapture/remembered'
 
@@ -10,7 +10,7 @@ import type { Carried } from '@/lib/flowCapture/remembered'
 const NO_CELLS: ScreenCells = { share: 1, cells: new Uint8Array([1]), gridWidth: 1, gridHeight: 1 }
 const log: string[] = []
 // What the screen reads as before each step: one test puts a field on it.
-const screen: { elements: unknown[]; interfaceTurn?: number } = { elements: [] }
+const screen: { elements: unknown[]; interfaceTurn?: number; aspect?: number } = { elements: [] }
 // One test has the device refuse what is replayed.
 const replay = { refuse: false }
 // What each step was matched with: one test reads the device's reach answers off it.
@@ -18,11 +18,14 @@ const matchedWith: unknown[] = []
 // Settle reads and replays in the order they happened: one test needs reads it does not log above.
 const seq: string[] = []
 // The options the engine was last run with, the flows it was given, and what it answers next (else a pass).
-const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void; probe?: Record<string, string> } = { flows: [], answers: [] }
+const ran: { options?: { observeEffects?: boolean }; flows: Array<{ steps: unknown[] }>; answers: Array<{ status: string; failureKind?: string; failureMessage?: string }>; beforeRun?: () => void; probe?: Record<string, string>; drive?: (d: Record<string, (...a: unknown[]) => Promise<unknown>>) => Promise<void> } = { flows: [], answers: [] }
 vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tapflowio/flow-runner/browser')>()),
   rangeStartOrientation: () => 'landscape',
-  waitForStableScreen: async () => { seq.push('settle'); return { elements: screen.elements, ...(screen.interfaceTurn !== undefined ? { interfaceTurn: screen.interfaceTurn } : {}) } },
+  waitForStableScreen: async () => {
+    seq.push('settle')
+    return { elements: screen.elements, ...(screen.interfaceTurn !== undefined ? { interfaceTurn: screen.interfaceTurn } : {}), ...(screen.aspect !== undefined ? { aspect: screen.aspect } : {}) }
+  },
   replayStep: async (_c: unknown, _s: string, raw: RawStep) => {
     if (replay.refuse) throw new Error('channel-unavailable')
     log.push(`replay ${raw.kind}`)
@@ -36,11 +39,12 @@ vi.mock('@tapflowio/flow-runner/browser', async (importOriginal) => ({
     ran.beforeRun?.()
     if (ran.probe) {
       const d = driver as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
-      const calls: Array<[string, unknown[]]> = [['queryUITree', []], ['reach', [[]]], ['swipe', [[0.5, 0.7], [0.5, 0.3], 300]], ['tap', [0.5, 0.5]], ['screenshot', []]]
+      const calls: Array<[string, unknown[]]> = [['queryUITree', []], ['reach', [[]]], ['swipe', [[0.5, 0.7], [0.5, 0.3], 300, 150]], ['tap', [0.5, 0.5]], ['screenshot', []]]
       for (const [m, args] of calls) ran.probe[m] = await Promise.resolve().then(() => d[m]!(...args)).then(() => 'sent', (e: unknown) => ((e as Error).name === 'AbortError' ? 'stopped' : 'sent'))
     }
     const answer = ran.answers.shift()
     if (answer) return answer
+    if (ran.drive) { await ran.drive(driver as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>); return { status: 'passed' } }
     await driver.tap(0.5, 0.5)
     await driver.inputText('안녕')
     await driver.pressKey('ImeAction')
@@ -71,6 +75,10 @@ const channel = {
   launchApp: async () => { log.push('launch') },
   queryUITreeWithTurn: async () => ({ elements: [] }),
   tap: async () => { log.push('tap') },
+  swipe: async (_s: string, from: [number, number], to: [number, number], durationMs: number, holdMs?: number) => {
+    log.push(`swipe ${from} ${to} ${durationMs} ${holdMs}`)
+  },
+  pinch: async () => { log.push('pinch') },
   typeText: async () => { log.push('type') },
   pressKey: async (_s: string, code: string) => { log.push(`key ${code}`) },
   screenshot: async () => { if (trackShots.on) seq.push('shot'); throw new Error('no screenshot here') },
@@ -97,6 +105,7 @@ beforeEach(() => {
   seq.length = 0
   screen.elements = []
   screen.interfaceTurn = undefined
+  screen.aspect = undefined
   replay.refuse = false
   pauseOk = true
   keyboardAnswers = ['done']
@@ -106,6 +115,7 @@ beforeEach(() => {
   ran.flows = []
   ran.answers = []
   ran.beforeRun = undefined
+  ran.drive = undefined
   ran.probe = undefined
   trackShots.on = false
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -208,13 +218,206 @@ describe('matchRange', () => {
     expect(shots).toEqual([''])
   })
 
+  // A recorded rotate is a quarter turn, not a target, so the flow's `setOrientation` is read from the chrome after it.
+  // Android sends that chrome only once the display settles (0.6–3.6 s): read at once, every turn was given the one
+  // before it (Pixel_9_tapflow: landscape, upside-down, landscape, portrait came out portrait, landscape, unknown,
+  // landscape).
+  describe('a rotate\'s orientation, from the chrome once the turn shows', () => {
+    // As `segment` makes it: the payload as `to`, and the message it replays.
+    const rotate = { ...base, kind: 'rotate', to: { direction: 'clockwise' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'clockwise' } } }] } as unknown as RawStep
+    const held = (body: number) => ({ buttons: [], streamType: 'h264', bodyRotation: body, streamRotation: 0 }) as never
+    // A clock that moves only when the wait sleeps: an 8 s wait runs at once (AGENTS.md "Test Hygiene").
+    const clock = { t: 0, now: () => clock.t, sleep: async (ms: number) => { clock.t += ms } }
+    beforeEach(() => { clock.t = 0 })
+    const orientationOf = () => (matchedWith.find((c) => (c as { orientationAfter?: unknown }).orientationAfter !== undefined) as { orientationAfter?: string } | undefined)?.orientationAfter
+
+    it('waits for the chrome to show the turn, rather than taking the one from before it', async () => {
+      let after = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (!log.includes('replay rotate')) return held(0)
+        return after++ < 2 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
+    it('waits for a counterclockwise turn to show as one', async () => {
+      const back = { ...rotate, to: { direction: 'counterclockwise' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { direction: 'counterclockwise' } } }] } as unknown as RawStep
+      let after = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (!log.includes('replay rotate')) return held(0)
+        return after++ < 2 ? held(0) : held(270)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [back, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
+    // The reset stands the device up and reports it done before Android's chrome says so (0.6–3.6 s later). Waited for,
+    // the turn after it is read from upright; not waited for, from the sideways chrome the recording ended on.
+    it('reads the first turn from the upright the reset left, once the chrome shows it', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      let resetAt = 0
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        if (log.includes('replay rotate')) return held(90)
+        if (!resetAt && log.some((l) => l.startsWith('reset'))) resetAt = clock.t || 1
+        return resetAt && clock.t - resetAt > 600 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
+    // Review of the wait: past it, the chrome may still say the sideways turn the recording ended on (270), and a
+    // clockwise turn from there is expected at 0 — which the reset's late upright chrome then shows. Named portrait, the
+    // device at 90. Until a chrome shows upright, a rotate is left out instead.
+    it('leaves a turn out while the reset\'s upright has not shown, rather than count it from the recording\'s last', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.includes('replay rotate') ? held(0) : held(270)))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    })
+
+    // A chrome that carries no turn (an older agent) has no upright to wait for: its rotates are read as before.
+    it('reads a turn at once where the chrome cannot say which way the device is held', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.includes('replay rotate') ? held(90) : null as never))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBe('landscape')
+    })
+
+    // CodeRabbit on #1221: an older viewer's rotate names its target, which the device may already hold, so no turn
+    // shows; waiting for one cost the full wait. Waited for is the target, and a device already there is not waited on.
+    it('does not wait for a target the device already shows', async () => {
+      const upright = { ...base, kind: 'rotate', to: { orientation: 'portrait' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { orientation: 'portrait' } } }] } as unknown as RawStep
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(held(0))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [upright, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a rotate the device refused when it was recorded is not sent again, so no turn comes.
+    it('does not wait for a rotate that is not sent', async () => {
+      const refused = { ...rotate, outcome: 'refused' } as unknown as RawStep
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(held(0))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [refused, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a turn left out is not waited for, so the next one's base can be read before it lands — the
+    // reset's late upright (0) — and the left-out turn's own late chrome (90) then reads as the next turn's. Once a turn
+    // has been left out, the turns after it are too.
+    it('leaves out the turns after one it left out, whose landing it never saw', async () => {
+      resetAnswer = { done: ['orientation'], failed: [] }
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => {
+        const sent = log.filter((l) => l === 'replay rotate').length
+        return sent === 0 ? held(270) : sent === 1 ? held(0) : held(90)
+      })
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, rotate, textStep], { start: 0, end: 3 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    })
+
+    // CodeRabbit on #1221: a multi-panel iOS chrome cannot say which way it is held (`scaleBasis`, #1116), so a target was
+    // waited for in vain. The step's orientation is its target either way.
+    it('does not wait for a target on a chrome that cannot say which way it is held', async () => {
+      const upright = { ...base, kind: 'rotate', to: { orientation: 'portrait' }, messages: [{ at: 0, msg: { type: 'input:rotate', payload: { orientation: 'portrait' } } }] } as unknown as RawStep
+      const duo = { framePng: '', streamRotation: 90, scaleBasis: 2000, logicalWidth: 1, logicalHeight: 1, buttons: [] } as never
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue(duo)
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [upright, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(clock.t).toBeLessThan(1_000)
+    })
+
+    // CodeRabbit on #1221: a turn that never showed in time leaves the base unknown; the next turn, counted from the base
+    // before it, then took the first one's late report (90) as its own while the device was at 180.
+    it('leaves out the turns after one that never showed, whose late report would read as theirs', async () => {
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.filter((l) => l === 'replay rotate').length < 2 ? held(0) : held(90)))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, rotate, textStep], { start: 0, end: 3 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    })
+
+    // Review: the reset stands the device up and its chrome comes late, so the chrome read before the turn can still be
+    // the sideways one the recording ended on. Any change from it was taken, and the late upright chrome named the
+    // turn portrait. Only the turn it should reach counts: never seen, the step is left out, not given a wrong name.
+    it('leaves the turn out when the chrome before it was stale, rather than naming it by a late one', async () => {
+      const chromeSpy = vi.spyOn(channel, 'chrome').mockImplementation(async () => (log.includes('replay rotate') ? held(0) : held(90)))
+      const lease = new PauseLease(tap)
+      await matchRange(tap, channel, lease, [rotate, textStep], { start: 0, end: 2 }, null, { ...hooks(), clock })
+      await lease.stop()
+      chromeSpy.mockRestore()
+      expect(orientationOf()).toBeUndefined()
+    })
+  })
+
+  // #1196: the tree a swipe is matched against comes with its aspect, which the scroll rule reads a list's frame by.
+  it('matches a swipe with the aspect of the read its tree came in', async () => {
+    const lease = new PauseLease(tap)
+    screen.aspect = 0.45
+    const swipe = { ...base, kind: 'swipe', from: [0.5, 0.8], to: [0.5, 0.3], durationMs: 300 } as unknown as RawStep
+    await matchRange(tap, channel, lease, [swipe, textStep], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    // After the turn the range starts with (`rangeStartOrientation`, landscape here), which is matched with no tree read.
+    expect(matchedWith[1]).toMatchObject({ screenAspect: 0.45 })
+    expect(matchedWith[0]).not.toHaveProperty('screenAspect')
+  })
+
   it('says where each step touches before it is replayed, for drawing on the device', async () => {
     const onTouch = vi.fn()
     const lease = new PauseLease(tap)
     const at = { ...base, kind: 'tap', point: [0.25, 0.75] } as unknown as RawStep
     await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
     await lease.stop()
-    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', x: 0.25, y: 0.75 }]])
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 } }]])
+  })
+
+  // An Android body-mode step is in the frame's own points, which the replay's mirror is: drawn as it is, and said so.
+  it('says an Android body-mode step\'s touch is in the frame the mirror shows', async () => {
+    const onTouch = vi.fn()
+    const lease = new PauseLease(tap)
+    const at = { ...base, kind: 'tap', point: [0.25, 0.75], space: 'frame', chrome: { bodyRotation: 90, streamRotation: 90 } } as unknown as RawStep
+    await matchRange(tap, channel, lease, [at, textStep], { start: 0, end: 2 }, null, { ...hooks(), onTouch })
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.25, y: 0.75 }, inFrame: true }]])
+  })
+
+  // `replayStep` sends nothing for these, so a touch drawn for one shows a tap the device never had (CodeRabbit on #1216).
+  // Mutations: drop any one of the three conditions.
+  it('says no touch for a step the replay does not send', async () => {
+    const onTouch = vi.fn()
+    const lease = new PauseLease(tap)
+    const refused = { ...base, kind: 'tap', point: [0.1, 0.1], outcome: 'refused', space: 'frame', chrome: { bodyRotation: 0, streamRotation: 0 } } as unknown as RawStep
+    const dropped = { ...base, kind: 'tap', point: [0.2, 0.2], dropped: true } as unknown as RawStep
+    const key = { ...base, kind: 'keyboardKey', point: [0.3, 0.3] } as unknown as RawStep
+    const sent = { ...base, kind: 'tap', point: [0.4, 0.4] } as unknown as RawStep
+    await matchRange(tap, channel, lease, [refused, dropped, key, sent, textStep], { start: 0, end: 5 }, null, { ...hooks(), onTouch })
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.4, y: 0.4 } }]])
   })
 
   // #1125: the tree cannot say what covers an element on the device, so the device is asked about the screen the step is
@@ -508,6 +711,44 @@ describe('matchRange: comparing each step with its recording', () => {
       expect(turns).toEqual([undefined, 90])
     })
 
+    // #1178: a step the person waved through as mostly different is marked, so Edit can say its screen was not compared.
+    describe('marks a step whose screen was not compared', () => {
+      const stepsOf = async (carried: Carried, compare: () => Promise<ScreenDivergence | null>) => {
+        const h = hooks()
+        await matchRange(viewer, channel, lease, [tapStep, tapStep, tapStep], { start: 1, end: 3 }, null, {
+          ...h, compare, carried: async () => carried, onDiverged: async () => {},
+        })
+        return h.onStep.mock.calls.slice(-2).map((c) => (c[0] as CapturedStep).notCompared)
+      }
+
+      it('where an earlier Continue anyway on it waived a difference', async () => {
+        // The range's first step comes after the launch and is not compared (`asked` above is [2]).
+        expect(await stepsOf('skip', async () => leftDiffers)).toEqual([undefined, true])
+      })
+
+      it('not where it was compared and matched, though it was waived before', async () => {
+        expect(await stepsOf('skip', async () => null)).toEqual([undefined, undefined])
+      })
+
+      it('not where set-aside areas covered the difference: the rest was compared', async () => {
+        expect(await stepsOf({ areas: [LEFT], from: 0 }, async () => leftDiffers)).toEqual([undefined, undefined])
+      })
+
+      it('where this Match stopped on it as mostly different and the person went on, not on one different in places', async () => {
+        const run = async (stop: ScreenDivergence) => {
+          const h = hooks()
+          const looks = [stop]
+          await matchRange(viewer, channel, lease, [tapStep, tapStep], { start: 0, end: 2 }, null, {
+            ...h, compare: async () => looks.shift() ?? null, onDiverged: async () => {},
+          })
+          return h.onStep.mock.calls.slice(-2).map((c) => (c[0] as CapturedStep).notCompared)
+        }
+        // The second step is the one compared (the first follows the launch).
+        expect(await run({ ...leftDiffers, mostly: true })).toEqual([undefined, true])
+        expect(await run(leftDiffers)).toEqual([undefined, undefined])
+      })
+    })
+
     it('goes on past a step the person said is mostly different, and stops without anything remembered', async () => {
       expect((await runWith('skip')).stops).toEqual([])
       expect((await runWith(null)).stops).toHaveLength(1)
@@ -678,7 +919,19 @@ describe('verifyFlow', () => {
     const lease = new PauseLease(tap)
     await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {}, undefined, onTouch)
     await lease.stop()
-    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', x: 0.5, y: 0.5 }]])
+    expect(onTouch.mock.calls).toEqual([[{ kind: 'tap', point: { x: 0.5, y: 0.5 } }]])
+  })
+
+  // A flow's pinch step draws its two fingers as a replay goes (it drew nothing). Mutation: drop the override.
+  it('says where a pinch\'s two fingers go, for drawing on the device', async () => {
+    const onTouch = vi.fn()
+    ran.drive = async (d) => { await d['pinch']!([[0.4, 0.45], [0.6, 0.55]], [[0.2, 0.35], [0.8, 0.65]], 400) }
+    const lease = new PauseLease(tap)
+    await verifyFlow(tap, channel, lease, { name: 'f', steps: [] }, {}, () => {}, undefined, onTouch)
+    await lease.stop()
+    expect(onTouch.mock.calls).toEqual([[{
+      kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 400,
+    }]])
   })
 })
 
@@ -926,10 +1179,10 @@ describe('matchRange with the app\'s touch reports', () => {
   describe('a tap made while the screen was still changing', () => {
     const first = { ...tapStep, at: 1_000, endAt: 1_100, touched: { point: { x: 0.3, y: 0.66 }, moving: false, element: { label: 'Active', traits: 1 }, tapCount: 1 } } as unknown as RawStep
     const second = (touched?: object) => ({ ...tapStep, at: 1_250, endAt: 1_350, ...(touched ? { touched: { point: { x: 0.3, y: 0.66 }, moving: false, ...touched } } : {}) }) as unknown as RawStep
-    const run = async (steps: RawStep[], differs: (s: RawStep) => boolean) => {
+    const run = async (steps: RawStep[], differs: (s: RawStep) => boolean, putBack?: ReadonlySet<number>) => {
       screen.elements = []
       const compare = vi.fn(async (s: RawStep) => (differs(s) ? { diff: 0.2, nowUrl: 'blob:x', masks: [], areas: [], mostly: false, cells: NO_CELLS } : null))
-      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 } }
+      const h = { ...hooks(), compare, onDiverged: vi.fn(async () => {}), lookAgain: { forMs: 200, everyMs: 10 }, ...(putBack ? { putBack } : {}) }
       const lease = new PauseLease(ctap)
       const matched = await matchRange(ctap, channel, lease, steps, { start: 0, end: steps.length }, null, h)
       await lease.stop()
@@ -959,6 +1212,14 @@ describe('matchRange with the app\'s touch reports', () => {
       await lease.stop()
       expect(log.filter((l) => l === 'replay tap')).toHaveLength(2)
       expect(carried).not.toHaveBeenCalled()
+    })
+
+    // CodeRabbit on #1228: a tap the person put back after it was left out (#1170) is asked to be replayed.
+    it('is sent all the same when the person put it back', async () => {
+      const s2 = second({ tapCount: 2, element: { label: 'Active', traits: 1 }, acted: false })
+      const { matched } = await run([launchStep, tapStep, first, s2], (s) => s === s2, new Set([3]))
+      expect(log.filter((l) => l === 'replay tap')).toHaveLength(3)
+      expect(matched.at(-1)!.raw).toBe(s2)
     })
 
     it('is replayed without stopping when the app acted on it', async () => {
@@ -1215,6 +1476,39 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(compare.mock.calls.map((c) => c[0])).toEqual([tapStep])
   })
 
+  // P4: Android reports touches too, and in body mode a sideways device's points are the frame's; scrolled in the frame's
+  // own directions, the search went across the list.
+  it('scrolls the way an Android swipe went on the screen, not in the frame it was sent in', async () => {
+    screen.elements = []
+    ran.answers = [{ status: 'failed', failureKind: 'product' }]
+    // The channel's chrome, which follows the relay; the viewer's (a render behind) still says upright.
+    const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue({ streamRotation: 90 } as never)
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => null } as unknown as Tap
+    // Leftward in a frame turned a quarter from the screen: up the screen.
+    const swipe = { ...base, kind: 'swipe', from: [0.8, 0.5], to: [0.3, 0.5], space: 'frame', durationMs: 300 } as unknown as RawStep
+    const lease = new PauseLease(sideways)
+    await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, compareHooks().h)
+    await lease.stop()
+    chromeSpy.mockRestore()
+    expect(flowsAsSteps()).toEqual([['scroll down', 'tapOn'], ['scroll up', 'tapOn']])
+  })
+
+  // Review of P4: off the frame's middle, an unturned point falls outside the band `scroll` takes, and the swipe was
+  // compared by its picture, which a fling's length makes differ.
+  it('does not compare an Android swipe before a named tap by the frame it was sent in', async () => {
+    screen.elements = [orders]
+    // The channel's chrome, which follows the relay; the viewer's (a render behind) still says upright.
+    const chromeSpy = vi.spyOn(channel, 'chrome').mockResolvedValue({ streamRotation: 90 } as never)
+    const sideways = { ...(tap as object), platform: 'android', chrome: () => null } as unknown as Tap
+    const swipe = { ...base, kind: 'swipe', from: [0.8, 0.75], to: [0.3, 0.75], space: 'frame', durationMs: 300 } as unknown as RawStep
+    const { compare, h } = compareHooks()
+    const lease = new PauseLease(sideways)
+    await matchRange(sideways, channel, lease, [launchStep, tapStep, tapStep, swipe, named], { start: 0, end: 5 }, null, h)
+    await lease.stop()
+    chromeSpy.mockRestore()
+    expect(compare.mock.calls.map((c) => c[0])).not.toContain(swipe)
+  })
+
   it('falls back to the picture and the recorded point when the element is found neither way', async () => {
     screen.elements = []
     ran.answers = [{ status: 'failed', failureKind: 'product' }, { status: 'failed', failureKind: 'product' }]
@@ -1303,6 +1597,18 @@ describe('matchRange with the app\'s touch reports', () => {
     expect(log).not.toContain('tap')
     // Every way the engine reaches the device from a scroll search and a tap, its failure picture included.
     expect(ran.probe).toEqual({ queryUITree: 'stopped', reach: 'stopped', swipe: 'stopped', tap: 'stopped', screenshot: 'stopped' })
+  })
+
+  // Design review of the overshoot fix: Match and Verify drive the engine through this driver, and a swipe that dropped
+  // `holdMs` left their scroll searches flinging past the element.
+  it('passes a search step\'s hold through to the channel', async () => {
+    screen.elements = [orders]
+    ran.answers = [{ status: 'passed' }]
+    ran.probe = {}
+    const lease = new PauseLease(ctap)
+    await matchRange(ctap, channel, lease, [launchStep, named], { start: 0, end: 2 }, null, hooks())
+    await lease.stop()
+    expect(log).toContain('swipe 0.5,0.7 0.5,0.3 300 150')
   })
 
   it('stops on a session that ended rather than falling back', async () => {

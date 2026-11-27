@@ -28,7 +28,7 @@ xcrun --sdk iphonesimulator clang \
   -framework Network \
   -framework SystemConfiguration \
   -o "$out" \
-  src/network-hook.m src/inline-hook.c src/app-observer.m
+  src/network-hook.m src/inline-hook.c src/app-observer.m src/main-bundle.c
 
 # The tarball flattens the executable bit (measured on the netfilter app, same cause), and
 # `postinstall` puts it back on everything in `bin/`. Set it here so a local build matches.

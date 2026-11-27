@@ -11,7 +11,7 @@ import {
   type MatchContext, type RawStep, type CapturedStep,
 } from '../capture/index.js'
 import type { Step } from '../schema.js'
-import type { TouchObservation } from '@tapflowio/protocol'
+import type { TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { parseFlow } from '../schema.js'
 import { matchSelector } from '../selector.js'
 
@@ -61,6 +61,13 @@ class Rec {
     const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
     const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
     this.entries.push({ at: this.t + 10, kind: 'touched', requestId, touched: { point: { x: 0, y: 0 }, ...touched } })
+    return this
+  }
+  /** Where the agent saw the last touch go down (#1214), keyed by its end as the relay keeps it. */
+  landed(on: TouchLanding['on'], id?: string): this {
+    const end = [...this.entries].reverse().find((e) => e.kind === 'input' && e.msg.type === 'input:touch:end')
+    const requestId = end && end.kind === 'input' && 'requestId' in end.msg ? end.msg.requestId! : ''
+    this.entries.push({ at: this.t + 5, kind: 'landed', requestId, landed: id ? { on, id } : { on } })
     return this
   }
 }
@@ -792,6 +799,47 @@ describe('defaultRange', () => {
       expect(defaultRange(r.steps())).toEqual({ start: 2, end: 3 })
     })
 
+    // Measured on iOS 26.5: a read takes about half a second, and home-screen pages turned faster than that left the
+    // second swipe with no read answered before it began. The one asked after the first ended answered before the second
+    // lifted, and a touch changes what is in front only as it lifts.
+    it('places a quick home-screen swipe by a read answered before it lifted', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.9, 0.5], [0.2, 0.5]])
+      const asked = r.t
+      r.wait(60).touch([[0.9, 0.5], [0.2, 0.5]], { stepMs: 120 })
+      r.entries.push({ at: r.t - 20, kind: 'keyboard', requestedAt: asked, keyboard: IOS_HOME, settled: false })
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 4, end: 5 })
+    })
+
+    // Review: the relay keeps reading while the home screen is in front, so a read can be asked while a touch is held.
+    // Asked about a screen the touch is already on, it does not say where the touch began.
+    it('does not place a touch by a read asked after it began', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.3]])
+      const start = r.t + 50
+      r.wait(50).touch([[0.5, 0.5]], { holdMs: 1000 })
+      r.entries.push({ at: start + 400, kind: 'keyboard', requestedAt: start + 100, keyboard: HOME, settled: false })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined])
+    })
+
+    // A button acts as it goes down: a read answered while it was held says what the press did.
+    it('places a button only by a read answered before it went down', () => {
+      const r = new Rec().install()
+      read(r, APP)
+      const asked = r.t
+      r.msg({ type: 'input:button', sessionId: 's', requestId: 'd', payload: { name: 'home', phase: 'down' } }, true)
+      r.entries.push({ at: r.t + 60, kind: 'keyboard', requestedAt: asked, keyboard: HOME, settled: false })
+      r.wait(120).msg({ type: 'input:button', sessionId: 's', requestId: 'u', payload: { name: 'home', phase: 'up' } }, true)
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'button'])
+      expect(steps[1]!.onHome).toBe(false)
+    })
+
     // A tap made before the next read answered: the read before it is the one the icon's tap started, still home.
     it('keeps a quick first tap in the app, which only the read after it places', () => {
       const r = new Rec().install()
@@ -845,6 +893,92 @@ describe('defaultRange', () => {
       const steps = r.steps()
       expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false])
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // #1224, measured on iOS 26.5 (Food Truck): home-screen pages turned faster than the reads, so no read placed the
+    // icon's tap — the one before it was asked before the last swipe ended, the next answered just after the tap lifted.
+    // The app's first report after it still says which tap opened it, as long as the step before was home.
+    it('leaves out the icon\'s tap no read placed, after a step read as home, when the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.3, 0.68], [0.88, 0.68]])
+      // Asked after the swipe ended and before the tap began, answered 18 ms after the tap lifted: it places neither the
+      // tap nor anything after it, but says the swipe stayed on the home screen.
+      const asked = r.t
+      r.wait(60).touch([[0.19, 0.48]])
+      r.entries.push({ at: r.t + 18, kind: 'keyboard', requestedAt: asked, keyboard: IOS_HOME, settled: false })
+      read(r.wait(100), { shown: null }).touch([[0.42, 0.84], [0.42, 0.5]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.3, 0.42]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['install', 'swipe', 'tap', 'swipe', 'tap'])
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 3, end: 5 })
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+    })
+
+    // Pre-PR review: a permission alert the app raised as it started, its Allow tapped before any read placed it, then the
+    // app's first touch. The step before is the icon's tap, which left home: Allow is kept.
+    it('keeps an unplaced tap right after the icon\'s, which left home, though the app reports the next touch as its first', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      // The app coming up: the next read can say nothing of home.
+      read(r, { shown: null }).touch([[0.5, 0.62]])
+      read(r.wait(100), APP).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false])
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // CodeRabbit on #1225: the read that says the step before stayed home must be one asked before this step began. A
+    // read asked after a later trip home (icon, Allow, the app's first touch, Home) would vouch for the icon's tap.
+    it('does not take a read asked after the next step began as the step before staying home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      read(r.wait(400), IOS_HOME)
+      const steps = r.steps()
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // CodeRabbit on #1225, second pass: an app takes a moment to come up, so the read right after the icon's tap still
+    // says home. A tap is never vouched for as having stayed home: it may be the one that opened the app. Costs a folder
+    // opened by a tap, whose icon tap is left unknown as before this rule (the range warns and the person moves it).
+    it('does not take a tap as having stayed home, though the read right after it says home', () => {
+      const r = new Rec().install()
+      read(r, IOS_HOME).touch([[0.62, 0.38]])
+      // Asked right after the icon's tap, answered while the app was still coming up.
+      r.entries.push({ at: r.t + 180, kind: 'keyboard', requestedAt: r.t + 10, keyboard: IOS_HOME, settled: false })
+      r.wait(60).touch([[0.5, 0.62]])
+      r.wait(100).touch([[0.42, 0.84]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps[1]!.onHome).toBe(true)
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(2)
+    })
+
+    // The same recording, one fact changed each: either is enough to leave the tap unknown, as before.
+    const iconRun = (before: KeyboardState, firstSeq: number) => {
+      const r = new Rec().install()
+      read(r, before).touch([[0.3, 0.68], [0.88, 0.68]])
+      const asked = r.t
+      r.wait(60).touch([[0.19, 0.48]])
+      r.entries.push({ at: r.t + 18, kind: 'keyboard', requestedAt: asked, keyboard: before, settled: false })
+      read(r.wait(100), { shown: null }).touch([[0.42, 0.84], [0.42, 0.5]]).touched({ moving: false, seq: firstSeq })
+      read(r, APP).touch([[0.3, 0.42]]).touched({ moving: false, seq: firstSeq + 1 })
+      return r.steps()
+    }
+
+    it('leaves a tap no read placed unknown when the step before it was not read as home either', () => {
+      const steps = iconRun({ shown: null }, 1)
+      expect(steps[2]!.onHome).toBeUndefined()
+      expect(defaultRange(steps).start).toBe(1)
+    })
+
+    it('leaves a tap no read placed unknown when the app\'s next report is not its first', () => {
+      const steps = iconRun(IOS_HOME, 2)
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false, false])
+      expect(defaultRange(steps).start).toBe(2)
     })
 
     // A touch no app reported between them (a permission alert's Allow, SpringBoard's) leaves the first unknown.
@@ -909,6 +1043,84 @@ describe('defaultRange', () => {
       const steps = r.steps()
       expect(steps.map((s) => (s.kind === 'button' ? s.name : s.kind))).toEqual(['install', 'home', 'volume_up', 'tap'])
       expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // #1194, measured on Android 16 (Pixel 9): a swipe right opens the Google feed, which is another package and reads as
+    // not home, so the swipe onto it is not placed (home before, not after) and the one back is off the home screen. The
+    // drawer's swipe and the icon's tap followed, and all of it was kept in the flow.
+    it('leaves out a screen beside the home screen when the home screen comes after it', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.5, 0.8], [0.5, 0.3]])
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.5, 0.9], [0.5, 0.2]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      read(r, APP).touch([[0.5, 0.6]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, undefined, false, true, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 6, end: 8 })
+    })
+
+    // A permission dialog the app opens is another package too, and reads the same as the search screen: what follows it
+    // decides. Its Allow comes after the icon's tap, so it stays.
+    it('keeps a tap off the home screen after the icon\'s tap, such as a permission dialog\'s Allow', () => {
+      const r = new Rec().install()
+      // The read after the icon's tap still says home while the app comes up, then the dialog is in front.
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.7]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+    })
+
+    // Without a touch the app reported there is no point it was surely in front by, and a visit home later is the
+    // person's own (the case above, 'not a visit to it later').
+    it('does not look past a screen beside the home screen when the app reported no touch', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(read(r, HOME), APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]])
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
+    })
+
+    // Adversarial review: a report from before the clean start is another run of the app, not where this one began.
+    it('looks for the app\'s first touch after the clean start', () => {
+      const r = new Rec().launch()
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      r.msg({ type: 'app:clear-state', sessionId: 's', requestId: r.id(), payload: { bundleId: 'b' } }, true)
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.kind)).toEqual(['launch', 'tap', 'clearState', 'swipe', 'swipe', 'tap', 'tap'])
+      expect(defaultRange(steps)).toEqual({ start: 6, end: 7 })
+    })
+
+    // Adversarial review: the app took a touch whose report was not paired (seq 1 missing), so a step before the first
+    // paired one may be in the app — the skip stays where the reads put it.
+    it('does not look past a step when the app\'s first paired touch is not its first', () => {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]])
+      read(read(r, HOME), APP).touch([[0.9, 0.5], [0.2, 0.5]])
+      read(r, HOME).touch([[0.3, 0.4]])
+      read(read(r, HOME), APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 2 })
+      const steps = r.steps()
+      expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, true, false])
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 5 })
+    })
+
+    it('does not look past a step that does not find the app', () => {
+      const typed = new Rec().install()
+      read(typed, APP).msg({ type: 'open-url', sessionId: 's', requestId: typed.id(), payload: { url: 'app://x' } }, true)
+      read(typed, HOME).touch([[0.3, 0.4]])
+      read(typed, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+      expect(defaultRange(typed.steps())).toEqual({ start: 1, end: 4 })
     })
 
     it('keeps a Launch in charge when there is one', () => {
@@ -1072,7 +1284,9 @@ describe('matchStep', () => {
     r.msg({ type: 'input:rotate', sessionId: 's', payload: { orientation: 'portrait' } })
     const [turn, upright] = r.steps()
     expect(matchStep(turn!, ctxOf([], { orientationAfter: 'landscape' })).step).toEqual({ type: 'setOrientation', orientation: 'landscape' })
-    expect(matchStep(turn!, ctxOf([], { orientationAfter: 'upside-down' })).skipped).toBe('orientation-unknown')
+    // Upside down was reported, but a flow cannot turn a device there; no report at all is another reason to leave it out.
+    expect(matchStep(turn!, ctxOf([], { orientationAfter: 'upside-down' })).skipped).toBe('orientation-upside-down')
+    expect(matchStep(turn!, ctxOf([])).skipped).toBe('orientation-unknown')
     expect(matchStep(upright!, ctxOf([])).step).toEqual({ type: 'setOrientation', orientation: 'portrait' })
   })
 
@@ -1128,15 +1342,200 @@ describe('matchStep: the soft keyboard (#1135)', () => {
 describe('toFlowSteps', () => {
   const list = (n: number) => Array.from({ length: n }, (_, i) => el({ role: 'cell', label: `Item ${i}`, frame: { x: 0, y: i * 0.1, width: 1, height: 0.1 } }))
   const item30 = el({ role: 'cell', label: 'Item 30', frame: { x: 0, y: 0.5, width: 1, height: 0.1 } })
+  // The same list after the swipe: its rows moved up with the finger, and Item 30 came on. A scroll, as a device shows it.
+  const scrolledTo30 = [...list(8).map((e) => ({ ...e, frame: { ...e.frame, y: e.frame.y - 0.3 } })).filter((e) => e.frame.y >= 0), item30]
 
   it('turns a swipe that brought the tapped element on screen into scroll until it', () => {
     const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps.map((s) => s.step)).toEqual([
       { type: 'scroll', direction: 'down', until: { text: 'Item 30' } },
       { type: 'tapOn', selector: { text: 'Item 30' } },
     ])
     expect(flow.steps[0]!.auto).toBe(true)
+  })
+
+  // A drag-and-drop that completed a puzzle brought Retry on a new screen (iOS, wdio demo app). As a scroll, Verify never
+  // dragged the last piece and searched for Retry on the puzzle.
+  it('keeps a swipe after which the screen was replaced, not scrolled', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const puzzle = [el({ label: 'Drag and Drop', frame: { x: 0.2, y: 0.1, width: 0.6, height: 0.05 } }), el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })]
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(puzzle)), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A fling past a whole screen leaves nothing in common; inside a scroll container it is still a scroll.
+  it('turns a swipe inside a list into a scroll even when nothing on screen stayed', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.9 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+  })
+
+  // #1178: Match's trace that the swipe's screen was not compared goes with the scroll it becomes.
+  it('keeps a swipe\'s not-compared trace on the scroll it becomes', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.9 } })
+    const flow = toFlowSteps([{ ...matchStep(swipe!, ctxOf([table, ...list(8)])), notCompared: true }, matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]).toMatchObject({ step: { type: 'scroll' }, notCompared: true })
+    expect(flow.steps[1]!.notCompared).toBeUndefined()
+  })
+
+  // Review: the view a touch begins on takes the scroll, so a fling that ends in the tab bar is still one.
+  it('takes a swipe begun in a list and ended below it for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.1]]).touch([[0.5, 0.55]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...list(8)])), matchStep(tap!, ctxOf([table, item30]))])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+  })
+
+  // A sideways swipe on a row of a vertical list reveals its Delete; as a scroll, the engine's swipe across the middle
+  // of the screen would reveal another row's, or none.
+  it('keeps a sideways swipe in a vertical list as a swipe', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+    const row = (x: number) => el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.3, width: 1, height: 0.1 } })
+    const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.3, width: 0.2, height: 0.1 } })
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, row(0), ...list(3)])), matchStep(tap!, ctxOf([table, row(-0.2), del, ...list(3)]))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+  })
+
+  // A carousel inside a vertical list scrolls sideways: the innermost list decides.
+  it('takes a sideways swipe in a carousel inside a vertical list for a scroll', () => {
+    const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.2, 0.35]]).touch([[0.5, 0.35]]).steps()
+    const table = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const carousel = el({ role: 'list', frame: { x: 0, y: 0.25, width: 1, height: 0.2 } })
+    const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.27, width: 0.4, height: 0.16 } })
+    const flow = toFlowSteps([
+      matchStep(swipe!, ctxOf([table, carousel, card(1, 0.05), card(2, 0.55)])),
+      matchStep(tap!, ctxOf([table, carousel, card(2, -0.05), card(3, 0.45)])),
+    ])
+    expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+  })
+
+  // The list's axis from its items where its frame would say otherwise, and from its frame (height counted twice) where
+  // the items cannot say.
+  describe('the way a list scrolls', () => {
+    it('is sideways for items side by side, though the frame is tall: a pager of cards', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, card(1, 0.05), card(2, 0.55)])), matchStep(tap!, ctxOf([pager, card(2, -0.05), card(3, 0.45)]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
+    // Review: a container around a full-screen list (a window) lies within its frame too, and as the outermost element
+    // it hid the cards; the frame then said vertical.
+    it('is sideways for a full-screen row of cards inside a window of the same size', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.5]]).steps()
+      const window = el({ role: 'other', label: 'Window', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const pager = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+      const card = (n: number, x: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x, y: 0.2, width: 0.4, height: 0.6 } })
+      const flow = toFlowSteps([
+        matchStep(swipe!, ctxOf([window, pager, card(1, 0.05), card(2, 0.55)])),
+        matchStep(tap!, ctxOf([window, pager, card(2, -0.05), card(3, 0.45)])),
+      ])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+    })
+
+    // Review: a cell the size of its list is one of its items, not a container around it; dropped, the two controls
+    // side by side inside it read as a row and the sideways swipe that showed Delete became a scroll.
+    it('keeps a list-sized cell as an item: a sideways swipe on its row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const table = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const row = (x: number) => [
+        el({ role: 'cell', label: 'Mail from Ann', frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: 'Mail from Ann', frame: { x: x + 0.05, y: 0.32, width: 0.4, height: 0.06 } }),
+        el({ role: 'button', label: 'Star', frame: { x: x + 0.6, y: 0.32, width: 0.1, height: 0.06 } }),
+      ]
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.1, width: 0.2, height: 0.8 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([table, ...row(0)])), matchStep(tap!, ctxOf([table, ...row(-0.2), del]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    // #1196: a frame is fractions of the tree's space, so its shape needs that space's aspect. A list 0.3 wide and 0.5
+    // tall is taller than wide on a phone held upright (×2) and wider than tall in landscape (×0.45).
+    describe('by its frame, in the tree\'s own aspect', () => {
+      const one = el({ role: 'list', frame: { x: 0.35, y: 0.25, width: 0.3, height: 0.5 } })
+      const card = (n: number) => el({ role: 'cell', label: `Card ${n}`, frame: { x: 0.37, y: 0.3, width: 0.26, height: 0.4 } })
+      const flowOf = (from: [number, number], to: [number, number], aspect?: number) => {
+        const [swipe, tap] = new Rec().touch([from, to]).touch([[0.5, 0.5]]).steps()
+        const extra = aspect === undefined ? {} : { screenAspect: aspect }
+        return toFlowSteps([matchStep(swipe!, ctxOf([one, card(1)], extra)), matchStep(tap!, ctxOf([one, card(2)], extra))])
+      }
+
+      it('is sideways in landscape: a sideways swipe in it is a scroll, a vertical one stays a swipe', () => {
+        expect(flowOf([0.6, 0.5], [0.4, 0.5], 0.45).steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'right' })
+        expect(flowOf([0.5, 0.65], [0.5, 0.35], 0.45).steps[0]!.step?.type).toBe('swipe')
+      })
+
+      it('is vertical held upright, and with no aspect, as a phone held upright', () => {
+        for (const aspect of [2.2, undefined]) {
+          expect(flowOf([0.5, 0.65], [0.5, 0.35], aspect).steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+          expect(flowOf([0.6, 0.5], [0.4, 0.5], aspect).steps[0]!.step?.type).toBe('swipe')
+        }
+      })
+    })
+
+    it('is vertical for items stacked, though the frame is wide: a sideways swipe on a short list\'s row stays a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.35], [0.4, 0.35]]).touch([[0.9, 0.35]]).steps()
+      const short = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.4 } })
+      const rows = (shift: number) => [0.25, 0.35, 0.45].map((y, i) => el({ role: 'cell', label: `Mail ${i}`, frame: { x: i === 1 ? shift : 0, y, width: 1, height: 0.08 } }))
+      const del = el({ role: 'button', label: 'Delete', frame: { x: 0.8, y: 0.35, width: 0.2, height: 0.08 } })
+      // A tab outside the list is not one of its items: counted, the layout would read as a grid.
+      const tab = el({ role: 'tab', label: 'Inbox', frame: { x: 0.05, y: 0.92, width: 0.2, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([short, ...rows(0), tab])), matchStep(tap!, ctxOf([short, ...rows(-0.2), del, tab]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    // Review: trees are flat, so a row's label and switch sit beside it; only the rows count. A short list (under half
+    // the screen) read by its frame would have been sideways, and its vertical scroll would have stayed a swipe.
+    it('reads rows by their outermost frames, not the labels and switches inside them', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.75], [0.5, 0.55]]).touch([[0.5, 0.63]]).steps()
+      const sheet = el({ role: 'list', frame: { x: 0, y: 0.5, width: 1, height: 0.4 } })
+      const row = (n: number, y: number) => [
+        el({ role: 'cell', label: `Setting ${n}`, frame: { x: 0, y, width: 1, height: 0.08 } }),
+        el({ role: 'text', label: `Setting ${n}`, frame: { x: 0.05, y: y + 0.02, width: 0.4, height: 0.04 } }),
+        el({ role: 'switch', label: `Setting ${n}`, identifier: `switch.${n}`, frame: { x: 0.8, y: y + 0.02, width: 0.12, height: 0.04 } }),
+      ]
+      const scrollBar = el({ label: 'Vertical scroll bar', frame: { x: 0.99, y: 0.52, width: 0.01, height: 0.3 } })
+      const before = [sheet, ...row(1, 0.52), ...row(2, 0.62), ...row(3, 0.72), scrollBar]
+      const after = [sheet, ...row(3, 0.52), ...row(4, 0.62), ...row(5, 0.72), scrollBar]
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf(before)), matchStep(tap!, ctxOf(after))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+
+    // A pager shows one page (pages off screen are dropped from the tree), so its way cannot be read and its frame says
+    // vertical: a sideways swipe on it stays a swipe, which replayed at its points turns the same one page.
+    it('keeps a sideways swipe on a tall pager as a swipe', () => {
+      const [swipe, tap] = new Rec().touch([[0.8, 0.5], [0.2, 0.5]]).touch([[0.5, 0.75]]).steps()
+      const pager = el({ role: 'list', frame: { x: 0, y: 0.1, width: 1, height: 0.8 } })
+      const page = (n: number, x: number) => [
+        el({ label: `Page ${n}`, identifier: `page.${n}`, frame: { x, y: 0.1, width: 1, height: 0.8 } }),
+        el({ role: 'text', label: `Title ${n}`, frame: { x: x + 0.1, y: 0.2, width: 0.8, height: 0.06 } }),
+      ]
+      const next = el({ role: 'button', label: 'Start', frame: { x: 0.3, y: 0.72, width: 0.4, height: 0.06 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([pager, ...page(1, 0)])), matchStep(tap!, ctxOf([pager, ...page(2, 0), next]))])
+      expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
+    })
+
+    it('is vertical for one item in a frame wider than tall in parts of the screen but taller in pixels', () => {
+      const [swipe, tap] = new Rec().touch([[0.5, 0.6], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+      const box = el({ role: 'list', frame: { x: 0, y: 0.2, width: 1, height: 0.6 } })
+      const item = (y: number) => el({ role: 'cell', label: 'Item 1', frame: { x: 0, y, width: 1, height: 0.1 } })
+      const flow = toFlowSteps([matchStep(swipe!, ctxOf([box, item(0.5)])), matchStep(tap!, ctxOf([box, item(0.2), item30]))])
+      expect(flow.steps[0]!.step).toMatchObject({ type: 'scroll', direction: 'down' })
+    })
+  })
+
+  // Review: a screen wrapped whole in a scroll view, where a drag opened another screen that has none.
+  it('keeps a swipe begun in a scroll view when the next screen has none there', () => {
+    const [swipe, tap] = new Rec().touch([[0.5, 0.8], [0.5, 0.3]]).touch([[0.5, 0.55]]).steps()
+    const page = el({ role: 'list', frame: { x: 0, y: 0, width: 1, height: 1 } })
+    const done = [el({ label: 'Congratulations', frame: { x: 0.2, y: 0.4, width: 0.6, height: 0.05 } }), el({ label: 'Retry', frame: { x: 0.3, y: 0.5, width: 0.4, height: 0.08 } })]
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf([page, el({ role: 'image', identifier: 'drag-c1', frame: { x: 0.4, y: 0.8, width: 0.2, height: 0.1 } })])), matchStep(tap!, ctxOf(done))])
+    expect(flow.steps.map((s) => s.step?.type)).toEqual(['swipe', 'tapOn'])
   })
 
   it('keeps a swipe whose tapped element was on screen already: a pager, not a scroll', () => {
@@ -1149,7 +1548,7 @@ describe('toFlowSteps', () => {
   // iOS E2E: a scroll made with a mouse leans; at 4:1 it stayed a swipe and the tap after it failed in Verify.
   it('takes a swipe that leans, as one made with a mouse does, as the scroll it was', () => {
     const [swipe, tap] = new Rec().touch([[0.225, 0.724], [0.41, 0.286]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(8))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { text: 'Item 30' } })
   })
 
@@ -1193,7 +1592,7 @@ describe('toFlowSteps', () => {
 
   it('keeps a diagonal swipe a swipe', () => {
     const [swipe, tap] = new Rec().touch([[0.2, 0.8], [0.7, 0.3]]).touch([[0.5, 0.55]]).steps()
-    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf([item30]))])
+    const flow = toFlowSteps([matchStep(swipe!, ctxOf(list(3))), matchStep(tap!, ctxOf(scrolledTo30))])
     expect(flow.steps[0]!.step?.type).toBe('swipe')
   })
 
@@ -1247,6 +1646,37 @@ describe('flowToYaml', () => {
     expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
     expect(yaml).toContain('tapOn: [ 0.4, 0.6 ]')
     expect(yaml).toContain('inputText:\n      secret: PASSWORD')
+  })
+
+  // A character a person cannot see is written as its escape, so the file says what it is, and reads back the same.
+  it('writes an icon glyph, a zero-width space and a control as escapes, and keeps a joiner and plain text as they are', () => {
+    const steps = [
+      // First, so a stand-in named the same would be found here before the escaped string it stands for.
+      { type: 'tapOn', selector: { text: 'tapflowEscaped0x' } },
+      { type: 'tapOn', selector: { text: '\u{F01F0}' } },
+      { type: 'tapOn', selector: { label: 'Save\u200B', role: 'button' } },
+      { type: 'inputText', text: 'a\u0007"b"\\' },
+      { type: 'tapOn', selector: { text: '👩\u200D💻 Dev' } },
+      { type: 'tapOn', selector: { text: 'Sign in' }, expect: { gone: [{ text: '\uE5CD', role: 'button' }] } },
+      { type: 'tapOn', selector: { text: 'a\u2028b' } },
+      // Review (CodeRabbit): a joiner is text only beside text; alone it shows nothing.
+      { type: 'tapOn', selector: { text: '\u200D' } },
+      { type: 'tapOn', selector: { text: ' \u3000' } },
+    ] as const
+    const yaml = flowToYaml({ name: 'Login\u200B', tags: ['\u3164'], steps: steps as never })
+    expect(parseFlow(yaml, 'x.yaml').name).toBe('Login\u200B')
+    expect(yaml).toContain('name: "Login\\u200B"')
+    expect(yaml).toContain('tapOn: "a\\u2028b"')
+    expect(yaml).toContain('tapOn: "\\u200D"')
+    expect(yaml).toContain('tapOn: " \\u3000"')
+    expect(yaml).toContain('tags: [ "\\u3164" ]')
+    expect(parseFlow(yaml, 'x.yaml').steps).toEqual(steps)
+    expect(yaml).toContain('tapOn: "\\U000F01F0"')
+    expect(yaml).toContain('label: "Save\\u200B"')
+    expect(yaml).toContain('inputText: "a\\x07\\"b\\"\\\\"')
+    expect(yaml).toContain('tapOn: 👩\u200D💻 Dev')
+    expect(yaml).toContain('tapOn: tapflowEscaped0x')
+    expect(yaml).toContain('text: "\\uE5CD"')
   })
 
   // #1125: what a touch brings rides beside its action, in the same file.
@@ -1420,15 +1850,19 @@ describe('touch reports', () => {
       ])).toEqual([])
     })
     // Design review of P2c: the flow reads the next step it has, so the swipe is for the tap after a left-out one.
+    // Rows 1–5 before the swipe; after it Rows 4 and 5 have moved up with the finger and Row 9 has come on: a scroll.
+    const rows = (labels: number[], top: number) => labels.map((n, i) => el({ role: 'cell', label: `Row ${n}`, frame: { x: 0, y: top + i * 0.15, width: 1, height: 0.1 } }))
+    const before = rows([1, 2, 3, 4, 5], 0.1)
+    const after = [...rows([4, 5, 6, 7, 8, 9], 0.0), el({ label: 'Title', frame: { x: 0, y: 0.92, width: 1, height: 0.05 } })]
     it('turns a swipe before a left-out tap into a scroll to the tap after it', () => {
-      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
-      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title') }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9') }], [1]))
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const out = toFlowSteps(leaveOut([swipe, { raw: tapRaw({ acted: false }), step: tapOn('Title'), tree: after }, { raw: tapRaw({ acted: true }), step: tapOn('Row 9'), tree: after }], [1]))
       expect(out.steps[0]!.step).toEqual({ type: 'scroll', direction: 'down', until: { label: 'Row 9' } })
     })
     it('leaves them out before the flow is made, so a swipe for one alone stays a swipe', () => {
       // The row was not on the screen the swipe started from: the swipe brought it, so it is a scroll to the row.
-      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: [] }
-      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9') }
+      const swipe: CapturedStep = { raw: new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.2]]).steps()[0]!, step: { type: 'swipe', from: [0.5, 0.8], to: [0.5, 0.2], durationMs: 300 }, tree: before }
+      const tap: CapturedStep = { raw: tapRaw({ acted: false }), step: tapOn('Row 9'), tree: after }
       expect(toFlowSteps([swipe, tap]).steps[0]!.step).toMatchObject({ type: 'scroll' })
       const out = toFlowSteps(leaveOut([swipe, tap], [1]))
       expect(out.steps.map((s) => s.step?.type ?? s.skipped)).toEqual(['swipe', 'no-response'])
@@ -1526,6 +1960,24 @@ describe('touch reports', () => {
       // Several with no frame to choose by: none rather than a guess.
       expect(recordedTarget([a, b], { point: { x: 0, y: 0 }, moving: false, element: { label: 'Glaze', traits: 0 } })).toBeNull()
     })
+    // Review of P4: an Android list's rows share a resource id, and a fling leaves another row where the tapped one was.
+    it('tells rows that share an identifier apart by label, and names none when the label is gone', () => {
+      const row = (label: string, y: number) => el({ label, identifier: 'com.app:id/title', frame: at(0, y) })
+      const rows = [row('Item 30', 0.3), row('Item 31', 0.4), row('Item 37', 0.9)]
+      const tapped: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0, frame: at(0, 0.4) } }
+      expect(recordedTarget(rows, tapped)).toBe(rows[2])
+      expect(recordedTarget(rows.slice(0, 2), tapped)).toBeNull()
+      // One row of that id left on the screen is not the tapped one either.
+      expect(recordedTarget([rows[0]!], tapped)).toBeNull()
+      expect(recordedTarget([rows[2]!], tapped)).toBe(rows[2])
+      expect(matchSelector(rows, recordedSelector(tapped)!)).toEqual([rows[2]])
+    })
+    // Review of #1187: an identifier only one element has (iOS, a Compose test tag) names it whatever its label says now.
+    it('keeps an element alone with an identifier no list shares, though its label changed', () => {
+      const counter = el({ label: 'Count: 4', identifier: 'counter', frame: at(0.4, 0.5) })
+      const recorded: TouchObservation = { point: { x: 0, y: 0 }, moving: false, element: { identifier: 'counter', label: 'Count: 3', traits: 1 } }
+      expect(recordedTarget([counter], recorded)).toBe(counter)
+    })
     it('names nothing for the keyboard, a web view or Flutter, a text input by its label, or a secure field', () => {
       const field = el({ role: 'input', label: 'hunter2', secure: true })
       const obs = (over: Partial<TouchObservation>): TouchObservation => ({ point: { x: 0, y: 0 }, moving: false, ...over })
@@ -1538,10 +1990,17 @@ describe('touch reports', () => {
       expect(recordedSelector(obs({ element: { label: 'hunter2', traits: 0, input: true } }))).toBeNull()
       expect(recordedSelector(obs({ element: { label: 'Order#1215', traits: 1 } }))).toEqual({ label: 'Order#1215', exact: true, role: 'button' })
       expect(recordedSelector(obs({ element: { label: 'Truck', traits: 0 } }))).toEqual({ label: 'Truck', exact: true })
+      // An icon font's glyph selects the tab but reads as a box in the flow: by the id alone, or not named.
+      expect(recordedSelector(obs({ element: { label: '\uE88A', traits: 1 } }))).toBeNull()
+      // A resource id rows share, whose label is a glyph: by the id alone the search stops at the first row, so none.
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/tab', label: '\uE88A', traits: 1 } }))).toBeNull()
+      expect(recordedSelector(obs({ element: { identifier: 'tab.home', label: '\uE88A', traits: 1 } }))).toEqual({ id: 'tab.home' })
       // The user's session ff5d3d3c: a row is a button and a text of one label; the selector finds the row alone.
       const row = [el({ role: 'button', label: 'Order#1212' }), el({ role: 'text', label: 'Order#1212' })]
       expect(matchSelector(row, recordedSelector(obs({ element: { label: 'Order#1212', traits: 1 } }))!)).toEqual([row[0]])
       expect(recordedSelector(obs({ element: { identifier: 'row.7', label: 'x', traits: 1 } }))).toEqual({ id: 'row.7' })
+      expect(recordedSelector(obs({ element: { identifier: 'com.app:id/title', label: 'Item 37', traits: 0 } }))).toEqual({ id: 'com.app:id/title', label: 'Item 37', exact: true })
+      expect(recordedSelector(obs({ element: { identifier: 'form.email', traits: 0, input: true } }))).toEqual({ id: 'form.email' })
       // A button named only by its traits leaves the element's name to search by (CodeRabbit on #1167).
       expect(recordedSelector(obs({ button: { traits: 1 }, element: { label: 'Salty', traits: 0 } }))).toEqual({ label: 'Salty', exact: true })
     })
@@ -1551,5 +2010,151 @@ describe('touch reports', () => {
     const [up, slanted] = new Rec().touch([[0.5, 0.8], [0.5, 0.5], [0.5, 0.3]]).wait(300).touch([[0.2, 0.8], [0.4, 0.6], [0.6, 0.4]]).steps()
     expect(scrollDirectionOf(up!, {})).toBe('down')
     expect(scrollDirectionOf(slanted!, {})).toBeNull()
+  })
+})
+
+// #1214: the agent says where each touch went down. A landing settles its step; a step without one is judged as before.
+describe('the default range by where touches landed', () => {
+  const read = (r: Rec, keyboard: KeyboardState) => {
+    r.entries.push({ at: r.t + 20, kind: 'keyboard', requestedAt: r.t, keyboard, settled: false })
+    return r.wait(100)
+  }
+  const HOME: KeyboardState = { shown: false, onHome: true }
+  const APP: KeyboardState = { shown: false, onHome: false }
+  const FEED = 'com.google.android.googlequicksearchbox'
+
+  // The issue's recording: the app opened from its icon showed a permission dialog, the person allowed it, went home,
+  // and opened the app again before touching it. The reads alone left the Allow out with the trip home.
+  it('keeps a prompt the app raised, and the trip home after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.7]]).landed('alert', 'com.google.android.permissioncontroller')
+    read(r, HOME).touch([[0.5, 0.95], [0.5, 0.4]]).landed('app')
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 }).landed('app')
+    const steps = r.steps()
+    expect(defaultRange(steps)).toEqual({ start: 2, end: 6 })
+    // The same recording with no landings is what the issue reported: the Allow is left out.
+    const bare = new Rec().install()
+    read(bare, HOME).touch([[0.3, 0.4]])
+    read(bare, APP).touch([[0.5, 0.7]])
+    read(bare, HOME).touch([[0.5, 0.95], [0.5, 0.4]])
+    read(bare, HOME).touch([[0.3, 0.4]])
+    read(bare, APP).touch([[0.5, 0.4]]).touched({ moving: false, seq: 1 })
+    expect(defaultRange(bare.steps()).start).toBeGreaterThan(2)
+  })
+
+  it('places a step by its landing over the reads', () => {
+    const r = new Rec().install()
+    read(r, APP).touch([[0.3, 0.4]]).landed('home')
+    read(r, HOME).touch([[0.5, 0.4]]).landed('app')
+    read(r, HOME).touch([[0.5, 0.6]]).landed('alert', 'com.apple.springboard')
+    read(r, APP).touch([[0.5, 0.2]]).landed('other', 'com.apple.Spotlight')
+    const steps = r.steps()
+    expect(steps.map((s) => s.onHome)).toEqual([undefined, true, false, false, true])
+  })
+
+  // Neither the home screen nor the app: the reads say, so Match does not count the shade or another app as a step in
+  // the app (`stepsBeforeRange`), and a range starting there still warns.
+  it('leaves a system surface and another app to the reads', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.5, 0.01], [0.5, 0.5]]).landed('system', 'com.android.systemui')
+    read(r, HOME).touch([[0.9, 0.5], [0.2, 0.5]]).landed('other', FEED)
+    const steps = r.steps()
+    expect(steps.map((s) => s.onHome)).toEqual([undefined, true, true])
+    const off = new Rec().install()
+    read(off, { shown: null }).touch([[0.5, 0.5]]).landed('other', 'com.google.android.gms')
+    const offSteps = off.steps()
+    expect(offSteps[1]!.onHome).toBeUndefined()
+    expect(stepsBeforeRange(offSteps, { start: 2, end: 2 })).toEqual([])
+    expect(rangeWarnings(offSteps, { start: 1, end: 2 })).toEqual(['no-launch-at-start'])
+  })
+
+  // #1194 by landings: the swipe onto the feed starts on the launcher, the swipe back on the feed, then home and the icon.
+  it('skips the feed when the home screen comes after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.2, 0.5], [0.9, 0.5]]).landed('home')
+    read(r, APP).touch([[0.9, 0.5], [0.2, 0.5]]).landed('other', FEED)
+    read(r, HOME).touch([[0.5, 0.9], [0.5, 0.2]]).landed('home')
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 5, end: 6 })
+  })
+
+  // Design review: a sheet the app raised as it opened (a sign-in, a purchase) is another app's window, with the app
+  // after it, not the home screen: it stays.
+  it('keeps another app\'s sheet when the app comes after it', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, APP).touch([[0.5, 0.8]]).landed('other', 'com.google.android.gms')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
+  })
+
+  // iOS reads say the home screen for any app off the screen, a sheet another process shows over the app included: the
+  // landing outranks them (#1214, PR b), and the sheet with the app after it stays, with or without the app's report.
+  it('keeps another app\'s sheet the reads place on the home screen, when the app comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      const steps = r.steps()
+      expect(defaultRange(steps)).toEqual({ start: 2, end: 4 })
+      // As on Android, where the reads place the sheet in the app: the range starts in the app, no launch is missing.
+      expect(rangeWarnings(steps, defaultRange(steps))).toEqual([])
+      // A range ending on the sheet replays no step in the app: the app after it is not what it starts in.
+      expect(rangeWarnings(steps, { start: 2, end: 3 })).toEqual(['no-launch-at-start'])
+      // Nor does one whose app step after the sheet is left out: the replay does not send it (CodeRabbit on #1236).
+      const dropped = steps.map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+      expect(rangeWarnings(dropped, { start: 2, end: 4 })).toEqual(['no-launch-at-start'])
+    }
+  })
+
+  it('looks past a left-out step after the sheet for the app step the replay does send', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.AuthKitUIService')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    read(r, APP).touch([[0.5, 0.6]]).landed('app')
+    const steps = r.steps().map((s, i) => (i === 3 ? { ...s, dropped: 'stopped-scroll' as const } : s))
+    expect(rangeWarnings(steps, { start: 2, end: 5 })).toEqual([])
+  })
+
+  it('skips another app the reads place on the home screen when the home screen comes after it', () => {
+    for (const reported of [false, true]) {
+      const r = new Rec().install()
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      read(r, HOME).touch([[0.5, 0.8]]).landed('other', 'com.apple.Maps')
+      read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+      const app = read(r, APP).touch([[0.5, 0.4]]).landed('app')
+      if (reported) app.touched({ moving: false, seq: 1 })
+      expect(defaultRange(r.steps())).toEqual({ start: 4, end: 5 })
+    }
+  })
+
+  // Design review: a banner, Control Center or the shade before the app opened is skipped as the home screen is.
+  it('skips a system surface before the app', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.5, 0.01], [0.5, 0.5]]).landed('system', 'com.android.systemui')
+    read(r, APP).touch([[0.5, 0.1]]).landed('system', 'com.android.systemui')
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 3, end: 4 })
+  })
+
+  it('stops at a touch it cannot place, as before', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home')
+    read(r, { shown: null }).touch([[0.5, 0.8]])
+    read(r, APP).touch([[0.5, 0.4]]).landed('app')
+    expect(defaultRange(r.steps())).toEqual({ start: 2, end: 4 })
+  })
+
+  it('keeps the first landing of a gesture', () => {
+    const r = new Rec().install()
+    read(r, HOME).touch([[0.3, 0.4]]).landed('home').landed('app')
+    const step = r.steps()[1]!
+    expect('landed' in step ? step.landed : undefined).toEqual({ on: 'home' })
   })
 })

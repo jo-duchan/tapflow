@@ -13,7 +13,7 @@ interface AndroidDeviceScreenProps {
   /** A fold is in flight — the waiting label says so. A viewer that cannot fold passes `false`. */
   posturePending: boolean;
   surfaceHandlers?: SurfaceHandlers;
-  /** Drawn over the screen — the live cursor and the pinch hints. */
+  /** Drawn over the screen — the touch marks (`TouchMarksLayer`). */
   overlay?: ReactNode;
 }
 
@@ -54,7 +54,9 @@ export function AndroidDeviceScreen({ screen, deviceReady, posturePending, surfa
           <>
             <div
               ref={surfaceHostRef}
-              style={canvasStyle}
+              // The pointer is hidden only where it drives the device: the QA viewer draws its own disc there. A watch
+              // page or a run's video takes no input, and a cursor that vanished over it only got in the way (user).
+              style={surfaceHandlers ? { ...canvasStyle, cursor: 'none' } : canvasStyle}
               {...surfaceHandlers}
             />
             {!pictureVisible && (

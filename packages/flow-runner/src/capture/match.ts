@@ -2,7 +2,9 @@ import type { DevicePosture, ObservedElement, PointSpace, ReachResult, TouchObse
 import type { InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { ScrollDirection, Selector, Step } from '../schema.js'
 import type { StepExpect } from '../effect.js'
+import { progress } from '../scrollProgress.js'
 import { matchSelector } from '../selector.js'
+import { visible } from '../unseen.js'
 import { selectorFor } from '../suggest.js'
 import { modifierNames } from './keys.js'
 import { LONG_PRESS_MS, TAP_SLOP, type Point, type RawStep } from './segment.js'
@@ -20,6 +22,9 @@ export interface MatchContext {
    *  the screen Android draws, for a point sent in the frame's space (Android body mode). The chrome recorded beside
    *  the step lags a turn by up to 3.6 s and must not be used for this. */
   frameTurn?: 0 | 90 | 180 | 270
+  /** The height ÷ width of the space `tree`'s frames are fractions of, from the same read (`UiTreeResponse.aspect`).
+   *  Absent when the agent did not say: a phone held upright is assumed. */
+  screenAspect?: number
   /** The device's orientation once a rotate step has settled (`chromeOrientation` of its chrome). */
   orientationAfter?: 'portrait' | 'landscape' | 'upside-down'
   /** The device's postures, most closed first (`device:postures`). */
@@ -32,7 +37,12 @@ export interface MatchContext {
 
 export type SkipReason =
   | 'refused' | 'hold-drag' | 'held-button' | 'too-long' | 'no-pinch'
-  | 'orientation-unknown' | 'posture-between'
+  /** The device did not say which way a rotate left it: no chrome showed the turn in time, or its chrome cannot say
+   *  (a multi-panel iOS device, Android without a body turn). */
+  | 'orientation-unknown'
+  /** The device ended up upside down, which a flow's `setOrientation` cannot turn it to. */
+  | 'orientation-upside-down'
+  | 'posture-between'
   /** The run installs and resets the app itself (`--build`, and the reset it does by default). */
   | 'install'
   | 'network' | 'cut' | 'keyboard'
@@ -72,6 +82,10 @@ export interface CapturedStep {
   step: Step | null
   skipped?: SkipReason
   fragile?: FragileReason
+  /** Its screen was not compared, at the person's word: Match stopped on it as mostly different and they went on, then
+   *  or in an earlier Match of the same capture (#1178). Set by the dashboard's Match; nothing here reads it. Apart from
+   *  `fragile`, which holds one reason, since a step can be both. */
+  notCompared?: true
   /** Typed into a field that hides its text, or one whose kind could not be read: kept out of the flow as a secret. */
   secret?: { value: string; known: boolean }
   /** Turned into a step that says what the person meant (`scroll { until }`). */
@@ -81,6 +95,8 @@ export interface CapturedStep {
   /** On a swipe: the elements of `tree`, by index, that were on it but not wholly in view — partly off the screen, or
    *  their centre covered on the device (#1125). The scroll rule reads them as not yet brought into view. */
   notInView?: number[]
+  /** On a swipe: `tree`'s aspect (`MatchContext.screenAspect`), for the scroll rule's reading of a list's frame. */
+  screenAspect?: number
   /** On a touch: what Match's replay saw it do, from the screen before it to the screen the next step was read on.
    *  Export writes only what Verify saw it do as well (`agreedEffect`), since a number that changes by itself usually
    *  reads differently minutes apart (#1125). Absent where the replay could not read the screen after it. */
@@ -127,7 +143,7 @@ export function hitTest(tree: readonly UIElement[], point: Point): UIElement | n
   return best
 }
 
-const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2]
+export const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2]
 
 /**
  * A selector for what is at `point`, or why the point has to be kept. A selector is used only when the element's centre
@@ -136,7 +152,7 @@ const centre = (e: UIElement): Point => [e.frame.x + e.frame.width / 2, e.frame.
  * device answered, its word decides: reached at the centre, or the point is kept. Where it could not judge, the tree's
  * frames are all there is, as before reach.
  */
-function target(tree: UIElement[], point: Point, reach: ReachResult | undefined): { selector: Selector } | { fragile: FragileReason } {
+export function target(tree: UIElement[], point: Point, reach: ReachResult | undefined): { selector: Selector } | { fragile: FragileReason } {
   const hit = hitTest(tree, point)
   if (!hit) return { fragile: 'no-element' }
   if (hitTest(tree, centre(hit)) !== hit) return { fragile: 'not-centre' }
@@ -289,6 +305,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
         fragile: 'swipe',
         tree: ctx.tree,
         notInView: notInView(ctx.tree, ctx),
+        ...(ctx.screenAspect !== undefined ? { screenAspect: ctx.screenAspect } : {}),
       }
     case 'holdDrag': return { raw, step: null, skipped: 'hold-drag' }
     case 'pinch': {
@@ -324,6 +341,7 @@ function matchAction(raw: RawStep, ctx: MatchContext): CapturedStep {
       return { raw, step: { type: 'pressButton', name: raw.name } }
     case 'rotate': {
       const to = raw.to && 'orientation' in raw.to ? raw.to.orientation : ctx.orientationAfter
+      if (to === 'upside-down') return { raw, step: null, skipped: 'orientation-upside-down' }
       if (to !== 'portrait' && to !== 'landscape') return { raw, step: null, skipped: 'orientation-unknown' }
       return { raw, step: { type: 'setOrientation', orientation: to } }
     }
@@ -365,13 +383,29 @@ export function recordedTarget(tree: readonly UIElement[], touched: TouchObserva
   for (const named of [touched.button, touched.element]) {
     if (!named) continue
     const found = named.identifier
-      ? tree.filter((e) => e.identifier === named.identifier)
+      ? sameLabel(tree.filter((e) => e.identifier === named.identifier), named)
       : named.label && !named.input ? tree.filter((e) => e.label === named.label && e.secure !== true) : []
     const nearest = nearestTo(found, named)
     if (nearest) return nearest
   }
   return null
 }
+
+/**
+ * Of the elements one identifier names, those with the reported label too. An Android list gives every row's text the
+ * same resource id (`com.app:id/title`), and the nearest of them to the recorded frame is whichever row a fling left
+ * there, not the one tapped — and with the others scrolled away the one left is not it either (CodeRabbit on #1187).
+ * None left (the label changed) is none: the tap goes to its point, and is compared.
+ */
+function sameLabel(found: UIElement[], named: ObservedElement): UIElement[] {
+  if (!named.label) return found
+  // One element with an identifier no list shares is the one, whatever its label says now (a counter, a cart): only
+  // an Android resource id (`pkg:id/name`) is one that rows share, and needs the label even alone (review of #1187).
+  if (found.length === 1 && !RESOURCE_ID.test(named.identifier ?? '')) return found
+  return found.filter((e) => e.label === named.label)
+}
+
+const RESOURCE_ID = /^[\w.]+:id\//
 
 function nearestTo(found: UIElement[], named: ObservedElement): UIElement | null {
   if (found.length <= 1) return found[0] ?? null
@@ -420,11 +454,21 @@ export function recordedSelector(touched: TouchObservation | undefined): Selecto
   // The button first, then the element, as `recordedTarget` looks: a button the report names only by its traits
   // leaves the element's name to search by.
   for (const named of [touched.button, touched.element]) {
-    if (named?.identifier) return { id: named.identifier }
+    // With its label where rows share the identifier (an Android resource id): by the id alone the search stops at the
+    // first row it scrolls to. Anywhere else the id is the one element's, whose label may have changed (a counter).
+    // A label only a person can read: an icon font's glyph selects the element but reads as a box (`visible`).
+    const label = named?.label && visible(named.label) ? named.label : undefined
+    if (named?.identifier) {
+      // A shared resource id with a label nobody can read: by the id alone the search would stop at the first row, so
+      // not named at all, and the tap stays a point (adversarial review).
+      if (RESOURCE_ID.test(named.identifier) && named.label && !label && !named.input) return null
+      return label && !named.input && RESOURCE_ID.test(named.identifier)
+        ? { id: named.identifier, label, exact: true } : { id: named.identifier }
+    }
     // A button's label is usually its text's too, in the tree as a `button` and a `text` of one name (SwiftUI, measured
     // on Food Truck's order rows): by the label alone the search matched two and never settled, scrolling the list to
     // its end and back (the user's session ff5d3d3c). The trait says which one was touched.
-    if (named?.label && !named.input) return { label: named.label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
+    if (named && label && !named.input) return { label, exact: true, ...(named.traits & 1 ? { role: 'button' } : {}) }
   }
   return null
 }
@@ -478,9 +522,9 @@ const SAME_SPOT = 2 * TAP_SLOP
 
 /**
  * Whether `raw` is a tap made while the screen `previous` brought was still coming — a doubled tap's second touch, or a
- * touch that landed on a screen between two: iOS counted it a repeat (`tapCount` 2), or, at the same spot, the app named
+ * touch that landed on a screen between two: the agent counted it a repeat (`tapCount` 2), or, at the same spot, the app named
  * nothing under it or did not report it at all. Only after a tap the app reported, so that neither is a device that reports none
- * (Android), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
+ * (an older agent), where nothing says what either did. Its recorded picture is the screen from before `previous` acted, which
  * a replay that waits for that tap never sees: Match does not stop on it (part (d) of the Match repair plan).
  */
 export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): boolean {
@@ -497,7 +541,8 @@ export function madeMidTransition(raw: RawStep, previous: RawStep | undefined): 
 /**
  * The matched taps the app did not respond to when they were recorded (record-time observation, P2c): a stray tap on a
  * title, a retry of a dead button, the second of a doubled tap. Only a verdict of "no" counts — `acted` absent is
- * unknown (a web view, React Native, an older agent, Android) and the tap stays as it is. A step the replay added has no
+ * unknown (a web view, React Native on iOS, an older agent, an Android tap whose frames could be someone else's) and
+ * the tap stays as it is. A step the replay added has no
  * report, and a tap already skipped is out of the flow anyway. Two more are kept without asking, since leaving them out
  * would make Verify run something other than what Match did:
  * - one Match saw change the screen (`observed`): the record's "no" was wrong, or the replay tapped the element's centre
@@ -536,9 +581,67 @@ export interface CapturedFlow {
 }
 
 /**
+ * Whether a swipe began inside a scroll container the tree names, and the screen after it still has one there: the view
+ * a touch begins on takes the scroll, wherever the finger ends (a fling into the tab bar). The second half narrows a
+ * screen wrapped whole in a scroll view, where a drag that opens another screen began "inside" one too; a new screen
+ * with a list in the same place is not told apart.
+ */
+/** The smallest scroll container the tree names at a point: a carousel inside a vertical list is the carousel. */
+function innermostList(tree: readonly UIElement[], point: Point): UIElement | undefined {
+  const holds = (f: UIElement['frame']) => point[0] >= f.x && point[0] <= f.x + f.width && point[1] >= f.y && point[1] <= f.y + f.height
+  let best: UIElement | undefined
+  for (const e of tree) {
+    if (e.role !== 'list' || !holds(e.frame)) continue
+    if (!best || e.frame.width * e.frame.height < best.frame.width * best.frame.height) best = e
+  }
+  return best
+}
+
+/**
+ * The way a list scrolls, which the tree does not say: the way its items are laid out — stacked (one column) is
+ * vertical, side by side (one row) horizontal. A grid, or a list with one item, by its frame's shape in pixels: frames are
+ * in parts of the tree's space, whose height ÷ width the agent sends with the tree (`aspect`, #1196) — about 2 on a phone
+ * held upright, which is assumed when it did not say, 0.45 on one turned, 1.44 on an iPad.
+ */
+function listAxis(tree: readonly UIElement[], list: UIElement, aspect = 2): 'x' | 'y' {
+  const f = list.frame
+  // Its items: what lies within it, not a container around it whose centre happens to fall inside.
+  const within = (g: UIElement['frame']) => g.x >= f.x - 0.01 && g.y >= f.y - 0.01 && g.x + g.width <= f.x + f.width + 0.01
+    && g.y + g.height <= f.y + f.height + 0.01
+  // Trees are flat: a row's label and switch are its siblings, and counted as items they make every list a grid. Only
+  // the outermost count, and nothing thinner than a fiftieth of the screen (a scroll bar at the list's edge).
+  const inside = (a: UIElement['frame'], b: UIElement['frame']) => a !== b && a.x >= b.x - 0.001 && a.y >= b.y - 0.001
+    && a.x + a.width <= b.x + b.width + 0.001 && a.y + a.height <= b.y + b.height + 0.001
+  // Nothing around the list is one of its items: a window around a full-screen list lies within its frame too, and as
+  // the outermost element it would hide every card. A frame cannot tell what is around the list from a cell the list's
+  // size inside it, the order can: both agents flatten a parent before its children (Android's dump in document order,
+  // iOS's debugDescription line by line), so what holds the list and comes before it is around it.
+  const at = tree.indexOf(list)
+  const candidates = tree.filter((e, i) => e !== list && e.role !== 'list' && !(i < at && inside(f, e.frame))
+    && within(e.frame) && e.frame.width >= 0.02 && e.frame.height >= 0.02)
+  const centres = candidates.filter((e) => !candidates.some((o) => o !== e && inside(e.frame, o.frame)))
+    .map((e) => [e.frame.x + e.frame.width / 2, e.frame.y + e.frame.height / 2] as const)
+  const spread = (vs: number[]) => Math.max(...vs) - Math.min(...vs)
+  if (centres.length >= 2) {
+    const sx = spread(centres.map((c) => c[0]))
+    const sy = spread(centres.map((c) => c[1]))
+    if (sx < 0.02 && sy >= 0.02) return 'y'
+    if (sy < 0.02 && sx >= 0.02) return 'x'
+  }
+  return f.height * aspect >= f.width ? 'y' : 'x'
+}
+
+function insideList(before: readonly UIElement[], after: readonly UIElement[] | undefined, from: Point): boolean {
+  const holds = (f: UIElement['frame'], p: Point) => p[0] >= f.x && p[0] <= f.x + f.width && p[1] >= f.y && p[1] <= f.y + f.height
+  const same = (a: UIElement['frame'], b: UIElement['frame']) => Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01
+    && Math.abs(a.width - b.width) < 0.01 && Math.abs(a.height - b.height) < 0.01
+  return before.some((e) => e.role === 'list' && holds(e.frame, from) && !!after?.some((n) => n.role === 'list' && same(n.frame, e.frame)))
+}
+
+/**
  * The matched steps of a range as the flow's steps, with two decisions that need a neighbour:
  *
- * - **A swipe that brought a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
+ * - **A swipe that scrolled a tapped element into view becomes `scroll { until }`** — what the swipe was for, since its
  *   distance does not replay (a fling's length depends on its release). Only when the element was not wholly in view on
  *   the screen the swipe started from (absent, or there but in `notInView`: an iOS tree carries the rows under a tab
  *   bar, #1125), and the swipe could be the engine's own (straight, across the middle): a pager swiped to a page whose
@@ -557,7 +660,22 @@ export function toFlowSteps(matched: readonly CapturedStep[]): CapturedFlow {
     const hidden = new Set(swipe.notInView ?? [])
     const inView = matchSelector(swipe.tree, next.step.selector).some((e) => !hidden.has(swipe.tree!.indexOf(e)))
     if (!direction || inView) continue
-    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true }
+    // Only a swipe that scrolled. A drag-and-drop that completed a puzzle brought a Retry on a new screen, and as a
+    // scroll its piece was never dragged and Verify searched the puzzle for Retry (iOS, wdio demo app). Scrolled is what
+    // was on screen before it travelling with the finger by the tap after it, or — a fling past a whole screen leaves
+    // nothing in common — the swipe begun inside a scroll container (`list`: a table, collection or scroll view on iOS,
+    // a RecyclerView or ScrollView on Android; the puzzle has none). A Compose list is not a `list` in the tree, so a
+    // fling past a whole screen of one stays a swipe, replayed as it was made.
+    const axis = direction === 'up' || direction === 'down' ? 'y' : 'x'
+    const sign = Math.sign(axis === 'y' ? swipe.step.to[1] - swipe.step.from[1] : swipe.step.to[0] - swipe.step.from[0])
+    // Across the list it began in (sideways in a vertical list) is a row's own gesture — revealing its Delete — which the
+    // engine's swipe across the middle of the screen would make on another row, or none: it stays a swipe.
+    const list = innermostList(swipe.tree, swipe.step.from)
+    if (list && listAxis(swipe.tree, list, swipe.screenAspect) !== axis) continue
+    const moved = !!next.tree && progress(swipe.tree, next.tree, axis, sign, []) === 'moved'
+    if (!moved && !insideList(swipe.tree, next.tree, swipe.step.from)) continue
+    // A trace Match left on the swipe goes with it (#1178): the scroll is the same gesture, still not compared.
+    steps[i] = { raw: swipe.raw, step: { type: 'scroll', direction, until: next.step.selector }, auto: true, ...(swipe.notCompared ? { notCompared: true as const } : {}) }
   }
 
   const secrets: Record<string, string> = {}

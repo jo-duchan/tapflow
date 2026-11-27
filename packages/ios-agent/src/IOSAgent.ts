@@ -10,7 +10,7 @@ import type { RunResetStep } from '@tapflowio/agent-core/utils'
 import { createLogger, PlatformError, ValidationError, bootAbandonMessage, BOOT_NO_SESSION_STATE, SHUTDOWN_NO_SESSION_STATE, downloadBuild } from '@tapflowio/agent-core'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, InputErrorReason, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, AppLogsUnwatch, AppLogsWatch, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, FormFactor, ServiceTier, RunResetReport, RunResetRequest, ReachResult, ReachTarget, RelayAgentFeature, TouchLanding,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
 // Cross-platform button name → iOS device-chrome button name. Chrome uses hyphens and "power" (not "lock"); MCP's
@@ -19,6 +19,9 @@ import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflo
 import { IOS_BUTTON_ALIASES } from '@tapflowio/protocol/buttons'
 
 const logger = createLogger('ios-agent')
+/** A failed read of the watched app's path, asked again this many times this far apart. */
+export const APP_LOG_WATCH_REFRESH_RETRIES = 3
+export const APP_LOG_WATCH_REFRESH_RETRY_MS = 1_000
 
 /**
  * How long after the paste chord the pasteboard is put back (#1129). The chord is sent, not read: the app reads the
@@ -53,7 +56,27 @@ const TOUCH_REPORT_POLL_MS = 50
 const TOUCH_REPORT_KEEP_MS = 5_000
 const TOUCH_REPORT_SKEW_MS = 1_500
 const TOUCH_REPORT_NEAR = 0.03
-const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach']
+// A recorded device whose dispatch log, once it has spoken, places none of this many gestures in a row has likely met an
+// iOS that words the line differently: said once, since landings then simply stop, which is what they were before.
+const LANDING_SILENT_WARN = 10
+const TOUCH_STARTS_KEEP = 32
+
+/** A device whose touches are watched while a person is recorded (record-time observation). */
+interface TouchWatch {
+  since: number
+  /** The gestures sent there, newest last: a touch's and a pinch's down, and its up once sent. */
+  starts: Array<{ x: number; y: number } & GestureSpan>
+  /** The app's touch-down reports not yet paired with a gesture, and its verdicts by touch. */
+  reports: AppTouch[]
+  ends: Map<string, AppTouchEnd>
+  /** UIKit's dispatch log, for a relay that takes `capture:landed` (#1214); stopped with the watch. */
+  landings: DispatchLog | null
+  /** The last SpringBoard landing that was not its keyboard: the surface a SpringBoard field's keys type on. */
+  lastSpringBoard?: { landed: TouchLanding; at: number }
+  /** Gestures in a row the log placed nothing for, once it had spoken. */
+  misses: number
+}
+const AGENT_CAPABILITIES: AgentCapability[] = ['clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'launch-env', 'touch-cancel', 'field-value', 'keyboard-reset', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch', 'capture-observe']
 
 // Human prose for each reason. Not in `@tapflowio/protocol`: that package's main entry must stay
 // runtime-free so it erases under `import type` and never reaches the dashboard bundle — a lookup
@@ -113,6 +136,8 @@ import {
   type AgentCapability,
 } from '@tapflowio/agent-core'
 import { ScreenCaptureStreamer, type StreamFrame } from './ScreenCaptureStreamer.js'
+import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT, defaultAppLogStreamDeps, inertAppLogStreamDeps, type AppLogStreamDeps } from './AppLogStream.js'
+import { AppLogWatch, defaultAppLogWatchDeps, inertAppLogWatchDeps, type AppLogWatchDeps } from './AppLogWatch.js'
 import { AudioCaptureStreamer, readSimVolume, applyGain } from './AudioCaptureStreamer.js'
 import { ensureHelperApp, launchAudioHelper, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { enumerateSimPids } from './SimProcessTree.js'
@@ -128,6 +153,8 @@ import type { IntegratedScreen } from './panels.js'
 import { XCUITreeReader } from './XCUITreeReader.js'
 import { AppObserver, fieldOf, keyboardOf, type AppTouch, type AppTouchEnd, type AppTouchReport, type ObserverRead } from './AppObserver.js'
 import { AppAccessibility } from './AppAccessibility.js'
+import { DispatchLog } from './DispatchLog.js'
+import { landingOf, MAX_DISPATCH_LAG_MS, KEYBOARD_INHERIT_MS, pickDispatch, SPRINGBOARD, springBoardSurface, type GestureSpan } from './touchLanding.js'
 import { DeviceChromeLoader, type ChromeData, type ChromePanel } from './DeviceChromeLoader.js'
 import { TypePanels, panelFrame } from './TypePanels.js'
 import { KEY_CODE_MAP, MODIFIER_BITS } from './KeyCodeMap.js'
@@ -174,6 +201,19 @@ export interface IOSAgentOptions {
   /** The app observer's host side. Injectable for the same reason as `network`; under vitest the default asks in a
    *  directory under the OS temp folder rather than the simulators' /tmp. */
   appObserver?: AppObserver
+  /** UIKit's dispatch log for a recorded device (#1214). Under vitest the default reads nothing, so a suite never spawns
+   *  into a real simulator; a test passes its own. */
+  dispatchLog?: (udid: string) => DispatchLog | null
+  /** How the touch-report waits sleep between reads (every `TOUCH_REPORT_POLL_MS`). Injectable so a test can hold a wait
+   *  and end the watch inside it, rather than guess at real time. */
+  touchPollSleep?: (ms: number) => Promise<void>
+  /** How a launched app's log stream is spawned, and its orphans found (#1235). Under vitest the default spawns nothing. */
+  appLogStreamDeps?: AppLogStreamDeps
+  /** How a watched app's log stream is spawned and its runs read (`app:logs:watch`). Under vitest the default spawns
+   *  nothing. */
+  appLogWatchDeps?: AppLogWatchDeps
+  /** How long a failed refresh of the watched app's path waits before asking again. Injectable for tests. */
+  appLogWatchRefreshRetryMs?: number
   /** App accessibility for a recorded person's boot, and its markers. Injectable as `appObserver` is; under vitest the
    *  default keeps its markers in a directory under the OS temp folder. */
   appAccessibility?: AppAccessibility
@@ -261,6 +301,17 @@ interface DeviceState {
   // Device-booted flag for truthful input acks — set on device:boot, cleared on shutdown; false after a reconnect until the ack path re-verifies once via simctl.
   booted: boolean
   streamWs: WebSocket | null
+  appLogStream: AppLogStream | null
+  appLogGeneration: number
+  /** The app the relay asked to watch (`app:logs:watch`): wanted state, kept while the stream is down (a boot, a
+   *  shutdown) and raised again when the device is ready. */
+  appLogWatch: { watchId: string; bundleId: string } | null
+  appLogWatcher: AppLogWatch | null
+  appLogWatchGeneration: number
+  /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
+  appLogWatchRun: { watchId: string; pid: number } | null
+  /** Bumped by each raise, so only the latest one in flight starts a stream. */
+  appLogWatchRaise: number
   streamReader: ReadableStreamDefaultReader<StreamFrame> | null
   // Current capture streamer (ScreenCaptureStreamer path only) — lets the relay
   // request an on-demand IDR for drop-to-keyframe recovery. null on the MjpegStreamer path.
@@ -308,6 +359,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly token?: string
   private readonly handshakeTimeoutMs: number
   private ws: WebSocket | null = null
+  private relayFeatures: RelayAgentFeature[] = []
 
   /** Send on the control socket, if there is one. The `?.` is the point: 66 call sites relied on a send
    *  being a no-op between reconnects, and this preserves that exactly.
@@ -417,7 +469,15 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   private readonly installing = new Map<string, Map<string, number>>()
   // Devices whose app reports each touch-down, while a person is recorded on a relay that keeps them (record-time
   // observation): the gestures sent there, newest last, and the reports not yet paired with one.
-  private readonly touchWatch = new Map<string, { since: number; starts: Array<{ x: number; y: number; at: number }>; reports: AppTouch[]; ends: Map<string, AppTouchEnd> }>()
+  private readonly touchWatch = new Map<string, TouchWatch>()
+  /** `capture:observe` changes per device, run in order (L6a). */
+  private readonly observeChains = new Map<string, Promise<void>>()
+  /** Where each recorded touch landed is read from UIKit's dispatch log, one stream per device; null reads nothing. */
+  private readonly dispatchLog: (udid: string) => DispatchLog | null
+  private readonly touchPollSleep: (ms: number) => Promise<void>
+  private readonly appLogStreamDeps: AppLogStreamDeps
+  private readonly appLogWatchDeps: AppLogWatchDeps
+  private readonly appLogWatchRefreshRetryMs: number
   // Holds a macOS power assertion while connected so the host doesn't idle-throttle the
   // simulator capture/encode when the Mac is unattended. No-op off macOS.
   private readonly sleepBlocker: SleepBlocker
@@ -492,6 +552,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       { appRunning: (udid, bundleId) => this.simctl.appRunning(udid, bundleId) },
       process.env.VITEST ? { root: path.join(tmpdir(), 'tapflow-test-observe') } : {},
     )
+    this.dispatchLog = options.dispatchLog ?? (process.env.VITEST ? () => null : (udid) => new DispatchLog(udid))
+    this.touchPollSleep = options.touchPollSleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
+    this.appLogStreamDeps = options.appLogStreamDeps ?? (process.env.VITEST ? inertAppLogStreamDeps : defaultAppLogStreamDeps)
+    this.appLogWatchDeps = options.appLogWatchDeps ?? (process.env.VITEST ? inertAppLogWatchDeps : defaultAppLogWatchDeps)
+    this.appLogWatchRefreshRetryMs = options.appLogWatchRefreshRetryMs ?? APP_LOG_WATCH_REFRESH_RETRY_MS
     this.appAccessibility = options.appAccessibility ?? new AppAccessibility(
       this.simctl, process.env.VITEST ? path.join(tmpdir(), 'tapflow-test-app-accessibility') : undefined,
     )
@@ -582,6 +647,12 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         }
         if (msg.type === 'agent:registered') {
           registered = true
+          this.relayFeatures = Array.isArray(msg.features)
+            ? msg.features.filter(
+                (feature: unknown): feature is RelayAgentFeature =>
+                  feature === 'device-updates' || feature === 'app-logs' || feature === 'touch-landings' || feature === 'app-log-watch'
+              )
+            : []
           clearTimeout(timer)
           this.ws = ws
           this.sleepBlocker.acquire() // idempotent across reconnects
@@ -748,6 +819,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         touchHelper: null,
         booted: false,
         streamWs: null,
+        appLogStream: null,
+        appLogGeneration: 0,
+        appLogWatch: null,
+        appLogWatcher: null,
+        appLogWatchGeneration: 0,
+        appLogWatchRun: null,
+        appLogWatchRaise: 0,
         streamReader: null,
         captureStreamer: null,
         bootSeq: 0,
@@ -772,6 +850,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
 
 
   disconnect(): void {
+    this.relayFeatures = []
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
@@ -782,8 +861,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
     this.deviceStates.clear()
     // Nobody reads the app's touch reports once this agent is gone: off, and what is on disk removed.
-    for (const deviceId of this.touchWatch.keys()) void this.appObserver.stopTouches(deviceId).catch(() => {})
-    this.touchWatch.clear()
+    for (const deviceId of [...this.touchWatch.keys()]) {
+      this.endTouchWatch(deviceId)
+      void this.appObserver.stopTouches(deviceId).catch(() => {})
+    }
     for (const deviceId of [...this.guests.keys()]) this.stopGuest(deviceId)
     this.uiTreeReader.stop()
     // The liveness watcher outlives every device it was started for, so it is stopped here with the
@@ -871,8 +952,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     // Nobody records this device's touches once its session is gone: reports off, and what is on disk removed.
-    if (this.touchWatch.delete(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
+    if (this.endTouchWatch(state.deviceId)) void this.appObserver.stopTouches(state.deviceId).catch(() => {})
     // Drop this device out of the filter rule. The rule lives on the host and is keyed only by udid,
     // so a simulator that goes away while offline would otherwise keep its udid named there for the
     // rest of the Mac's uptime — and the next boot of that same device would come up offline with
@@ -889,6 +972,75 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.booted = false
     state.streamWs?.close()
     state.streamWs = null
+  }
+
+  /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
+  private stopAppLogWatcher(state: DeviceState): number {
+    const generation = ++state.appLogWatchGeneration
+    const watchId = state.appLogWatch?.watchId
+    const pid = state.appLogWatcher?.stop() ?? null
+    if (pid !== null && watchId) state.appLogWatchRun = { watchId, pid }
+    state.appLogWatcher = null
+    return generation
+  }
+
+  /**
+   * (Re)starts the stream for the session's watch, when there is one and the device is up. Called on the watch itself,
+   * when the device is ready, and after an install or a run reset (`refresh`). The stream is filtered by the app's
+   * executable path, which names its container: a reinstall moves it (measured), and two apps can share an executable
+   * name (every Flutter app is `Runner.app/Runner`), so after an install the path is read again and a stream on the old
+   * one is replaced. A stream already on the right path is left as it is, across every run of the app.
+   */
+  private raiseAppLogWatch(state: DeviceState, refresh = false, attempt = 0): void {
+    const wanted = state.appLogWatch
+    if (!wanted || !state.booted || (state.appLogWatcher && !refresh)) return
+    const raise = ++state.appLogWatchRaise
+    const generation = state.appLogWatchGeneration
+    const current = () =>
+      state.appLogWatchRaise === raise && state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(state.sessionId) === state
+    void Promise.resolve()
+      .then(() => this.simctl.getAppExecutablePath(state.deviceId, wanted.bundleId))
+      .then((processImagePath) => {
+        if (!current() || state.appLogWatcher?.processImagePath === processImagePath) return
+        this.stopAppLogWatcher(state)
+        const sessionId = state.sessionId
+        // A per-launch stream on this device would be taken for an orphan by the watch's sweep: ended here instead.
+        this.stopAppLogStream(state)
+        const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
+        state.appLogWatchRun = null
+        const watcher: AppLogWatch = new AppLogWatch(
+          state.deviceId,
+          processImagePath,
+          (item) => {
+            if (state.appLogWatcher !== watcher || this.deviceStates.get(sessionId) !== state) return true
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT) return false
+            if (item.kind === 'text') this.sendMsg({ type: 'app:log', sessionId, watchId: wanted.watchId, text: item.text })
+            else this.sendMsg({ type: 'app:log:run', sessionId, watchId: wanted.watchId, event: item.event, pid: item.pid })
+            return true
+          },
+          (error) => logger.warn('app log watch:', error.message),
+          this.appLogWatchDeps,
+          Date.now,
+          previous,
+        )
+        state.appLogWatcher = watcher
+        return watcher.start()
+      })
+      .catch((error: unknown) => {
+        // Not installed yet, most often, and the install's own call raises it once the app is there. But a read can fail
+        // with the app there (the watch of a first install arrives after its install-done), and then nothing else would
+        // ask again: a few more tries, whichever call this was.
+        logger.debug('app log watch not started:', (error as Error).message)
+        if (attempt >= APP_LOG_WATCH_REFRESH_RETRIES || !current()) return
+        setTimeout(() => { if (current()) this.raiseAppLogWatch(state, refresh, attempt + 1) }, this.appLogWatchRefreshRetryMs).unref()
+      })
+  }
+
+  private stopAppLogStream(state: DeviceState): number {
+    const generation = ++state.appLogGeneration
+    state.appLogStream?.stop()
+    state.appLogStream = null
+    return generation
   }
 
   private stopAudioCapture(state: DeviceState): void {
@@ -1141,6 +1293,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     state.acceptH264 = acceptH264
     if (tier) { state.secureContext = tier.secureContext; state.external = tier.external }
     const seq = this.bumpBootSeq(state, 'superseded')
+    this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     state.bootsInFlight.add(seq)
 
     // **The teardown runs inside the try, and that is a fix rather than tidying.** It ran before it, so a
@@ -1280,28 +1434,11 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       })
       // A boot a shutdown or a newer boot replaced since the prepare must not turn anything on (correctness review).
       if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
-      // App accessibility, before any app launches (a running app keeps what it started with): on for a person Flow
-      // Capture records, so the observer can name what each touch hit; put back for anyone else, which also undoes
-      // what an earlier recorded person's boot left. Best-effort: without it a touch is recorded as before, unnamed.
-      // Decided at the boot only: a person who turns capturing on mid-session, or a boot inside a replay's pause, is
-      // observed from their next boot (design review).
-      await (observed ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
-        logger.warn(`could not ${observed ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
-      })
-      // The write above can take seconds (`defaults`, up to 5 s): a shutdown or disconnect in it already stopped the
-      // reports, and this boot must not turn them back on with nobody left to read them (CodeRabbit, #1166).
-      if (seq !== state.bootSeq) { this.abandonBoot(state, seq, sessionId, requestId); return }
-      // What each touch hits, reported by the app while this person is recorded — only to a relay that keeps it.
-      const observeTouches = observed && touchObservations
-      if (observeTouches) this.touchWatch.set(deviceId, { since: Date.now(), starts: [], reports: [], ends: new Map() })
-      else this.touchWatch.delete(deviceId)
-      await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
-        logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
-      })
-      // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
-      // read it. A newer boot is still waiting for its device here, so this stop cannot land on its watch.
-      if (observeTouches && seq !== state.bootSeq) {
-        await this.appObserver.stopTouches(deviceId).catch(() => {})
+      // App accessibility and touch reports, before any app launches (a running app keeps what it started with): on for
+      // a person Flow Capture records or an MCP client that armed it, put back for anyone else (`applyObservation`).
+      // Decided at the boot for a person: one who turns capturing on mid-session, or a boot inside a replay's pause, is
+      // observed from their next boot (design review). An MCP client arms a running device with `capture:observe`.
+      if (!(await this.applyObservation(deviceId, observed, touchObservations, () => seq !== state.bootSeq))) {
         this.abandonBoot(state, seq, sessionId, requestId); return
       }
       // **Where it is held, before the first frame says so** (#910). The orientation is the device's, shared with
@@ -1385,6 +1522,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
       // that device unowned and put the resolvers back to refusing between two live simulators.
       this.ownedDevices.add(deviceId)
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId, cold, serviceTier: this.reportedTier(target), ...(runResetReport ? { runReset: runResetReport } : {}) } })
+      this.raiseAppLogWatch(state)
       // The unsolicited report the protocol names on `device:ready`. It follows the ready rather than
       // riding inside it: a tester whose device just came up can arm the toggle in the same breath, and
       // a boot that armed nothing still has to say so rather than leaving the control blank.
@@ -1529,7 +1667,139 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         return
       }
       if (Date.now() >= until || this.touchWatch.get(deviceId) !== watch) return
-      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
+      if (this.touchWatch.get(deviceId) !== watch) return
+    }
+  }
+
+  /**
+   * Record-time observation on or off for a device: app accessibility, the touch watch and its landings, and the app
+   * observer's touch reports. Run by a boot (its `observed`) and by `capture:observe` (MCP Flow Capture, L6a), which arms
+   * a device that is already running: the app reports touches from the moment its flag is written, and only the names of
+   * its elements wait for a new process (app accessibility is read at launch). `false` when `isStale` turned true
+   * midway (a newer boot, a shutdown): whatever this turned on is turned off again.
+   */
+  private async applyObservation(deviceId: string, observed: boolean, touchObservations: boolean, isStale: () => boolean, keepWatch = false): Promise<boolean> {
+    // A request queued behind a newer boot sets nothing: that boot has set the device, and a late `on` would leave app
+    // accessibility on with no restore to come, a late `off` turn off what the boot turned on (CodeRabbit, #1243).
+    if (isStale()) return false
+    // Best-effort: without it a touch is recorded as before, unnamed.
+    await (observed ? this.appAccessibility.enable(deviceId) : this.appAccessibility.restore(deviceId)).catch((e: unknown) => {
+      logger.warn(`could not ${observed ? 'turn on' : 'restore'} app accessibility:`, (e as Error).message)
+    })
+    // The write above can take seconds (`defaults`, up to 5 s): a shutdown or disconnect in it already stopped the
+    // reports, and this must not turn them back on with nobody left to read them (CodeRabbit, #1166).
+    if (isStale()) return false
+    // What each touch hits, reported by the app while observed — only to a relay that keeps it.
+    const observeTouches = observed && touchObservations
+    // Where each touch lands, for a relay that takes it: read from outside the device, so a device already up (picked up
+    // as it was, or from DeviceHub) is read the same as one a boot started.
+    // A relay from before #1214 logs every `capture:landed` as unknown: read only for one that said it takes them.
+    // A boot starts a new watch. Arming again (`keepWatch`) keeps one already on: it must not drop the downs a landing
+    // is still being paired with.
+    const current = keepWatch ? this.touchWatch.get(deviceId) : undefined
+    const landings = observeTouches && !current && this.relayFeatures.includes('touch-landings') ? this.dispatchLog(deviceId) : null
+    const watched: TouchWatch | null = !observeTouches ? null
+      : current ?? { since: Date.now(), starts: [], reports: [], ends: new Map(), landings, misses: 0 }
+    if (watched && watched !== current) this.replaceTouchWatch(deviceId, watched)
+    else if (!watched) this.endTouchWatch(deviceId)
+    void landings?.start()
+    await this.appObserver.watchTouches(deviceId, observeTouches).catch((e: unknown) => {
+      logger.warn('could not set the app observer\'s touch reports:', (e as Error).message)
+    })
+    // A teardown inside that write ran its stop first, and the late flag would leave the app reporting with nobody to
+    // read it.
+    if (observeTouches && isStale()) {
+      // Its own stream, unless a newer boot has replaced the watch already.
+      if (watched && this.touchWatch.get(deviceId) === watched) this.endTouchWatch(deviceId)
+      // The flag is the device's, not this request's: a newer boot's watch wrote it for itself and keeps it (CodeRabbit,
+      // #1243 — a queued `capture:observe` is not ordered against a boot).
+      if (!this.touchWatch.get(deviceId)) await this.appObserver.stopTouches(deviceId).catch(() => {})
+      return false
+    }
+    return true
+  }
+
+  /**
+   * A recorded gesture's down, in the timeline its report and its landing are paired by. Kept well past what a landing
+   * waits for: a tap every 100 ms for `MAX_DISPATCH_LAG_MS` is 30, and one dropped from here is never placed.
+   */
+  private noteDown(deviceId: string, x: number, y: number): void {
+    const watch = this.touchWatch.get(deviceId)
+    if (!watch) return
+    watch.starts.push({ x, y, down: Date.now() })
+    if (watch.starts.length > TOUCH_STARTS_KEEP) watch.starts.shift()
+  }
+
+  /** A gesture the log could not place though it should have: said once at `LANDING_SILENT_WARN` in a row. */
+  private missLanding(deviceId: string, watch: TouchWatch): void {
+    if (++watch.misses === LANDING_SILENT_WARN) {
+      logger.warn(`the dispatch log for ${deviceId} placed none of the last ${LANDING_SILENT_WARN} touches: its format or window names may have changed on this iOS`)
+    }
+  }
+
+  /** The watch a boot sets, stopping the stream of the one it replaces: a device picked up again must not read twice. */
+  private replaceTouchWatch(deviceId: string, watch: TouchWatch): void {
+    const old = this.touchWatch.get(deviceId)
+    if (old !== watch) old?.landings?.stop()
+    this.touchWatch.set(deviceId, watch)
+  }
+
+  /** No watch for the device any more, and its stream stopped. Whether there was one. */
+  private endTouchWatch(deviceId: string): boolean {
+    const old = this.touchWatch.get(deviceId)
+    if (!old) return false
+    this.touchWatch.delete(deviceId)
+    old.landings?.stop()
+    return true
+  }
+
+  /**
+   * Where the gesture `requestId` ended went down (#1214), from UIKit's dispatch log: the first event delivered for it,
+   * named by the process and the window that took it (`pickDispatch`, `landingOf`). Waited for up to the longest lag
+   * measured, sent as soon as it is known, and not at all when it is not — a step without a landing is judged as before.
+   */
+  private async landTouch(sessionId: string, deviceId: string, requestId: string, span: TouchWatch['starts'][number]): Promise<void> {
+    const watch = this.touchWatch.get(deviceId)
+    const log = watch?.landings
+    if (!watch || !log) return
+    const until = span.down + MAX_DISPATCH_LAG_MS
+    for (;;) {
+      if (this.touchWatch.get(deviceId) !== watch) return
+      const i = watch.starts.indexOf(span)
+      if (i < 0) return
+      const pick = pickDispatch(log.lines(), watch.starts, i)
+      if (pick.kind === 'found') {
+        span.first = pick.line.at
+        const bundle = await log.bundleOf(pick.line.image)
+        if (!bundle) { this.missLanding(deviceId, watch); return }
+        const target = this.lastBundleIds.get(deviceId)
+        const surface = bundle === SPRINGBOARD ? springBoardSurface(pick.line.window) : null
+        // Asked only where it decides something, and directly: a read through the observer can wait behind others.
+        // As the app was when the touch was delivered, not when this asks: Home pressed meanwhile is not the alert's.
+        const away = surface === 'alert' || surface === 'keyboard'
+          ? (target ? await this.appObserver.isAway(deviceId, target, pick.line.at).catch(() => false) : true)
+          : false
+        // The landing before this one in time, whichever gesture finished placing first.
+        const last = watch.lastSpringBoard
+        const age = last ? pick.line.at - last.at : -1
+        const previous = last && age >= 0 && age <= KEYBOARD_INHERIT_MS ? last.landed : undefined
+        const landed = landingOf(bundle, pick.line.window, { ...(target ? { target } : {}), away, ...(previous ? { previous } : {}) })
+        if (landed && bundle === SPRINGBOARD && surface !== 'keyboard' && !(last && last.at > pick.line.at)) {
+          watch.lastSpringBoard = { landed, at: pick.line.at }
+        }
+        // A SpringBoard window not in the table is what a renamed one looks like; one placed nowhere on purpose (its
+        // keyboard over the app, an app with no target known) is not.
+        if (landed) watch.misses = 0
+        else if (bundle === SPRINGBOARD && surface === null) this.missLanding(deviceId, watch)
+        if (landed && this.touchWatch.get(deviceId) === watch) this.sendMsg({ type: 'capture:landed', sessionId, requestId, landed })
+        return
+      }
+      if (Date.now() >= until) {
+        if (pick.kind === 'none' && log.attached) this.missLanding(deviceId, watch)
+        return
+      }
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
     }
   }
 
@@ -1567,7 +1837,10 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         return
       }
       if (Date.now() >= until) return
-      await new Promise((r) => setTimeout(r, TOUCH_REPORT_POLL_MS))
+      await this.touchPollSleep(TOUCH_REPORT_POLL_MS)
+      // Ended during the wait (a disconnect, a shutdown): nothing is left to read reports for, and a take now would drain
+      // them from under whoever watches the device next.
+      if (!this.touchWatch.get(deviceId)) return
       const taken = await this.appObserver.takeTouches(deviceId).catch(() => [] as AppTouchReport[])
       // Into the watch current now: a boot during the wait replaced it, and what was taken off disk is the new one's
       // (CodeRabbit, #1168). With none left, they go as they would at teardown.
@@ -1618,6 +1891,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     }
 
     this.bumpBootSeq(state, 'shut-down')
+    this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
     // **Said here as well as in `cleanupDeviceState`, because this path does not go through it.**
     // The teardown below is a copy of that method's, and the copy is older than the network rule —
     // so a device shut down from the dashboard while offline kept its udid in the host filter for
@@ -1642,7 +1917,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
     // Each device has its own tree runner; stop this one's, never another device's.
     this.uiTreeReader.stopIfDevice(deviceId)
 
-    this.touchWatch.delete(deviceId)
+    this.endTouchWatch(deviceId)
     void this.appObserver.stopTouches(deviceId).catch(() => { /* swept at the next boot's prepare */ })
     // While it still runs: the setting is written inside the device. A shutdown that fails leaves it for the next boot.
     await this.appAccessibility.restore(deviceId).catch((e: unknown) => {
@@ -2341,6 +2616,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           respond({ type: 'app:install-error', message: 'No booted device' })
           break
         }
+        this.stopAppLogStream(installState)
         const installingHere = this.installing.get(installState.deviceId) ?? new Map<string, number>()
         if (bundleId) {
           installingHere.set(bundleId, (installingHere.get(bundleId) ?? 0) + 1)
@@ -2364,6 +2640,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
               await this.observeApp(installState.deviceId, bundleId)
             }
             respond({ type: 'app:install-done' })
+            this.raiseAppLogWatch(installState, true)
           })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -2395,6 +2672,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const appLogGeneration = this.stopAppLogStream(launchState)
         // The target is named BEFORE the launch, and the order is the whole point: dyld reads the
         // environment when the process starts, so naming it afterwards arms the next launch and leaves
         // this one unhooked while `available` would still say true.
@@ -2410,6 +2688,65 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
             this.network.markLaunched(launchState.deviceId, pid)
             // Track the foreground app so ui:tree:request can query it via XCUITest.
             this.lastBundleIds.set(launchState.deviceId, bundleId)
+            if (
+              this.relayFeatures.includes('app-logs') &&
+              // A watched app's output comes from the watch, whichever way the app was opened.
+              launchState.appLogWatch?.bundleId !== bundleId &&
+              typeof pid === 'number' &&
+              Number.isSafeInteger(pid) &&
+              pid > 0 &&
+              launchState.appLogGeneration === appLogGeneration &&
+              this.deviceStates.get(sessionId!) === launchState
+            ) {
+              // This setup is optional and must not turn a successful launch into an error. Starting
+              // with Promise.resolve also captures a synchronous throw from an older/test SimctlWrapper.
+              void Promise.resolve()
+                .then(() => this.simctl.getAppExecutablePath(launchState.deviceId, bundleId))
+                .then(async (processImagePath) => {
+                  // A stream an earlier agent left in this simulator would otherwise run until it shuts down (#1235).
+                  // Not for a launch already superseded: the sweep cannot tell a newer launch's live stream from an orphan.
+                  const current = () =>
+                    launchState.appLogGeneration === appLogGeneration && this.deviceStates.get(sessionId!) === launchState
+                  if (!current()) return processImagePath
+                  const orphans = await this.appLogStreamDeps.findOrphans(launchState.deviceId)
+                  for (const orphan of orphans) {
+                    if (!current()) break
+                    logger.warn(`killing a leftover app log stream (pid ${orphan}) for ${launchState.deviceId}`)
+                    this.appLogStreamDeps.killPid(orphan)
+                  }
+                  return processImagePath
+                })
+                .then((processImagePath) => {
+                  if (
+                    launchState.appLogGeneration !== appLogGeneration ||
+                    this.deviceStates.get(sessionId!) !== launchState
+                  ) return
+                  launchState.appLogStream?.stop()
+                  launchState.appLogStream = new AppLogStream(
+                    launchState.deviceId,
+                    pid,
+                    processImagePath,
+                    (text) => {
+                      if (
+                        launchState.appLogGeneration !== appLogGeneration ||
+                        this.deviceStates.get(sessionId!) !== launchState
+                      )
+                        return true
+                      if (
+                        !this.ws ||
+                        this.ws.readyState !== WebSocket.OPEN ||
+                        this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                      )
+                        return false
+                      this.sendMsg({ type: 'app:log', sessionId: sessionId!, launchId: requestId, text })
+                      return true
+                    },
+                    (error) => logger.warn('app log stream failed:', error.message),
+                    this.appLogStreamDeps.spawn
+                  )
+                })
+                .catch((error: unknown) => logger.warn('could not resolve app log process image:', (error as Error).message))
+            }
             // Audio: the whole-sim tap's poll picks up the launched app process within one interval;
             // no per-launch helper needed.
             respond(options ? { type: 'app:launch-done', applied: appliedKeys(options) } : { type: 'app:launch-done' })
@@ -2427,11 +2764,7 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { x, y } = msg.payload as { x: number; y: number }
         state.touchHelper?.touchStart(x, y)
-        const watch = this.touchWatch.get(state.deviceId)
-        if (watch) {
-          watch.starts.push({ x, y, at: Date.now() })
-          if (watch.starts.length > 8) watch.starts.shift()
-        }
+        this.noteDown(state.deviceId, x, y)
         break
       }
       case 'input:touch:move': {
@@ -2457,7 +2790,13 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           .then((sent) => this.ackInput(state, sent ? 'delivered' : this.refusalReason(state.touchHelper, 'continuation'), requestId))
         // The gesture ending is the one that started last.
         const start = this.touchWatch.get(state.deviceId)?.starts.at(-1)
-        if (start) void this.reportTouch(msg.sessionId, state.deviceId, requestId, start)
+        if (start) {
+          start.up ??= Date.now()
+          void this.reportTouch(msg.sessionId, state.deviceId, requestId, { x: start.x, y: start.y, at: start.down })
+          void this.landTouch(msg.sessionId, state.deviceId, requestId, start).catch((e: unknown) => {
+            logger.warn('could not place a touch:', (e as Error).message)
+          })
+        }
         break
       }
       // A client leaving mid-gesture (#1115). No ack: the client is leaving, and the end it sends next is answered.
@@ -2471,6 +2810,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         this.ensureTouchHelper(state)
         const { f0, f1 } = msg.payload as { f0: { x: number; y: number }; f1: { x: number; y: number } }
         state.touchHelper?.pinchStart(f0.x, f0.y, f1.x, f1.y)
+        // In the timeline though a pinch is not placed: its events must not be taken for the gesture before it.
+        this.noteDown(state.deviceId, f0.x, f0.y)
         break
       }
       case 'input:pinch:move': {
@@ -2487,6 +2828,8 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const pinchHelper = state.touchHelper
         void this.ackInput(state, pinchHelper?.pinchEnd() ? 'delivered' : this.refusalReason(pinchHelper, 'continuation'), requestId)
+        const pinch = this.touchWatch.get(state.deviceId)?.starts.at(-1)
+        if (pinch) pinch.up ??= Date.now()
         break
       }
       case 'input:rotate': {
@@ -3043,13 +3386,35 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           : this.replayPrep(deviceId, () => this.setKeyboard(deviceId, typeof keyboard === 'string' ? keyboard : undefined)))).then(respond)
         break
       }
+      case 'capture:observe': {
+        // MCP Flow Capture (L6a): arm or disarm observation on a device that may be running already, with no boot. The
+        // relay sends it only from an MCP holder, again when this agent comes back, and `off` when the holder goes.
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state) break
+        const seq = state.bootSeq
+        const on = (msg.payload as { on?: unknown } | undefined)?.on === true
+        const deviceId = state.deviceId
+        // One at a time per device, in arrival order: an `off` right after an `on` must not finish first and leave the
+        // later-finishing `on` to turn it all back on (each writes app accessibility, up to 5 s; pre-PR review).
+        const next = (this.observeChains.get(deviceId) ?? Promise.resolve())
+          .then(() => this.applyObservation(deviceId, on, true, () => seq !== state.bootSeq, true))
+          .then(() => undefined, (e: unknown) => logger.warn('could not change touch observation:', (e as Error).message))
+        this.observeChains.set(deviceId, next)
+        void next.finally(() => { if (this.observeChains.get(deviceId) === next) this.observeChains.delete(deviceId) })
+        break
+      }
       case 'device:run-reset': {
         const requestId = this.correlatorOf(msg)
         if (requestId === null) break
         const sessionId = msg.sessionId
         const apps = (msg.payload as { apps?: unknown } | undefined)?.apps
         void this.runResetHeld(sessionId, Array.isArray(apps) ? apps.filter((a): a is string => typeof a === 'string') : [])
-          .then((body) => this.sendMsg({ ...body, sessionId, requestId }))
+          .then((body) => {
+            this.sendMsg({ ...body, sessionId, requestId })
+            // A run reset reinstalls in place, which moves the app's container.
+            const state = this.deviceStates.get(sessionId)
+            if (state && body.type === 'device:run-reset-done') this.raiseAppLogWatch(state, true)
+          })
         break
       }
       case 'ui:reach:request': {
@@ -3064,6 +3429,27 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
         // The app the tree is read for: the last launched or installed (`lastBundleIds`), as `/tree` and `/field` are.
         void this.uiTreeReader.reach(state.deviceId, this.lastBundleIds.get(state.deviceId) ?? '', targets)
           .then(answer, (e: unknown) => answer(targets.map(() => ({ state: 'unknown', reason: firstLine(e) }))))
+        break
+      }
+      case 'app:logs:watch': {
+        const { watchId, bundleId } = msg as unknown as Partial<AppLogsWatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || typeof watchId !== 'string' || !watchId || typeof bundleId !== 'string' || !bundleId) break
+        const same = state.appLogWatch?.watchId === watchId && state.appLogWatch?.bundleId === bundleId
+        if (same && state.appLogWatcher) break
+        if (!same) {
+          this.stopAppLogWatcher(state)
+          state.appLogWatch = { watchId, bundleId }
+        }
+        this.raiseAppLogWatch(state)
+        break
+      }
+      case 'app:logs:unwatch': {
+        const { watchId } = msg as unknown as Partial<AppLogsUnwatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || state.appLogWatch?.watchId !== watchId) break
+        state.appLogWatch = null
+        this.stopAppLogWatcher(state)
         break
       }
       case 'device:keyboard-reset': {
@@ -3083,8 +3469,9 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
           break
         }
         this.readUITreeWithTurn(state)
-          .then(({ elements, interfaceTurn }) => this.sendMsg({
-            type: 'ui:tree:response', sessionId, requestId, elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}),
+          .then(({ elements, interfaceTurn, aspect }) => this.sendMsg({
+            type: 'ui:tree:response', sessionId, requestId, elements,
+            ...(interfaceTurn !== undefined ? { interfaceTurn } : {}), ...(aspect !== undefined ? { aspect } : {}),
           }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
@@ -3157,13 +3544,16 @@ export class IOSAgent implements DeviceAgent, NetworkControlCapability, Posturab
    * multi-panel device: its panels are drawn with their own turn and touched by another path, and turning a point by
    * the app's turn there is unmeasured (#1116), so it gets the absent value every client already handles.
    */
-  private async readUITreeWithTurn(state: DeviceState): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270 }> {
+  private async readUITreeWithTurn(state: DeviceState): Promise<{ elements: UIElement[]; interfaceTurn?: 0 | 90 | 180 | 270; aspect?: number }> {
     const bundleId = this.lastBundleIds.get(state.deviceId)
     if (!bundleId) {
       throw new PlatformError('no app launched — launch an app before querying the UI tree')
     }
     const read = await this.uiTreeReader.readWithTurn(state.deviceId, bundleId)
-    return this.multiPanelDevices.has(state.deviceId) ? { elements: read.elements } : read
+    if (!this.multiPanelDevices.has(state.deviceId)) return read
+    // The turn only: the aspect is of the tree's own space, which a multi-panel device's turn is not (#1116, #1196).
+    const { interfaceTurn: _turn, ...rest } = read
+    return rest
   }
 
   /**

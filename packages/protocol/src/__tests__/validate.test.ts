@@ -71,6 +71,37 @@ describe('the door rejects what it cannot name', () => {
   })
 })
 
+describe('app log frames', () => {
+  it('keeps the app text unchanged in the agent direction', () => {
+    const text = 'first line\n\u0000\ud83d\ude80'
+    const parsed = ok({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
+    expect(directionOf(parsed.msg.type)).toBe('agent')
+    expect(parsed.msg).toEqual({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text })
+  })
+
+  it('rejects app log chunks over the wire limit', () => {
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: 'x'.repeat(8193) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: 'launch-1', text: '🚀'.repeat(2049) }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', text: 'unscoped' }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 'session-1', launchId: '', text: 'unscoped' }).reason).toBe('bad-shape')
+  })
+
+  it('takes a watch-owned chunk, and refuses one naming both owners or an empty watch', () => {
+    expect(ok({ type: 'app:log', sessionId: 's', watchId: 'w-1', text: 'x' }).msg).toEqual({ type: 'app:log', sessionId: 's', watchId: 'w-1', text: 'x' })
+    expect(fail({ type: 'app:log', sessionId: 's', launchId: 'l', watchId: 'w', text: 'x' }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log', sessionId: 's', watchId: '', text: 'x' }).reason).toBe('bad-shape')
+  })
+
+  it('takes a run boundary from the agent, and refuses an unknown event or a bad pid', () => {
+    const parsed = ok({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'started', pid: 4521 })
+    expect(directionOf(parsed.msg.type)).toBe('agent')
+    for (const event of ['started', 'running', 'exited']) ok({ type: 'app:log:run', sessionId: 's', watchId: 'w', event, pid: 1 })
+    expect(fail({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'crashed', pid: 1 }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log:run', sessionId: 's', watchId: 'w', event: 'started', pid: 0 }).reason).toBe('bad-shape')
+    expect(fail({ type: 'app:log:run', sessionId: 's', event: 'started', pid: 1 }).reason).toBe('bad-shape')
+  })
+})
+
 describe('an empty correlator is not a correlator', () => {
   // The predicates this replaced (`isAddressed` / `isCorrelated`) rejected `''` as well as absence,
   // and a bare `z.string()` accepts it. Losing that half is invisible to every type-level assertion:
@@ -388,6 +419,49 @@ describe('a payload failure the caller can be told about', () => {
   })
 })
 
+describe('shutdown payload failures preserve optional lifecycle correlation', () => {
+  const payloads = [{}, { deviceId: 7 }, null, undefined]
+
+  it.each(payloads.flatMap((payload) => [undefined, 'rq-shutdown'].map((requestId) => ({ payload, requestId }))))(
+    'answers malformed payload $payload with requestId $requestId',
+    ({ payload, requestId }) => {
+      const r = fail({
+        type: 'device:shutdown', sessionId: 'sess-1',
+        ...(requestId === undefined ? {} : { requestId }),
+        ...(payload === undefined ? {} : { payload }),
+      })
+      expect(r).toMatchObject({ reason: 'bad-payload', type: 'device:shutdown', sessionId: 'sess-1' })
+      if (r.reason !== 'bad-payload') throw new Error(`Expected bad-payload, got ${r.reason}`)
+      expect(Object.hasOwn(r, 'requestId')).toBe(requestId !== undefined)
+      expect(r.requestId).toBe(requestId)
+      expect(r.detail).toContain('payload')
+    },
+  )
+
+  it.each(['', null, 7])('drops a supplied invalid shutdown requestId %p', (requestId) => {
+    expect(fail({ type: 'device:shutdown', sessionId: 's', requestId, payload: {} }).reason).toBe('bad-shape')
+  })
+
+  it.each(['', null, 7, undefined])('drops an invalid shutdown sessionId %p', (sessionId) => {
+    expect(fail({ type: 'device:shutdown', sessionId, requestId: 'r', payload: {} }).reason).toBe('bad-shape')
+  })
+
+  it.each([undefined, 'rq-valid'])('accepts a valid shutdown with requestId %p', (requestId) => {
+    const raw = {
+      type: 'device:shutdown', sessionId: 's', payload: { deviceId: 'd' },
+      ...(requestId === undefined ? {} : { requestId }),
+    }
+    expect(ok(raw).msg).toEqual(raw)
+  })
+
+  it('keeps a required requestId typed as string on other payload failures', () => {
+    const r = fail({ type: 'open-url', sessionId: 's', requestId: 'required', payload: {} })
+    if (r.reason !== 'bad-payload' || r.type === 'device:shutdown') throw new Error('Expected a required-correlator failure')
+    const requestId: string = r.requestId
+    expect(requestId).toBe('required')
+  })
+})
+
 describe('a client newer than this relay still joins', () => {
   // `session:start` has no answerable reply, so a refused one is silence and the client waits out its join
   // deadline. A `clientKind` this relay does not know therefore goes — the session is simply not
@@ -534,5 +608,33 @@ describe('a keyboard read carries whether the home screen was in front', () => {
 
   it('reads an onHome that is not a boolean as absent, keeping the keyboard', () => {
     expect(read({ shown: false, onHome: 'yes' })).toEqual({ shown: false })
+  })
+})
+
+// #1214: where a recorded touch went down. A landing the relay cannot read is none, so the touch is judged as before.
+describe('a touch landing', () => {
+  const msg = (landed: unknown) => ({ type: 'capture:landed', sessionId: 's', requestId: 'r', landed })
+
+  it('keeps each place it can be, and what took it', () => {
+    for (const on of ['app', 'home', 'system', 'alert', 'other']) {
+      expect((ok(msg({ on })).msg as { landed: unknown }).landed).toEqual({ on })
+    }
+    expect((ok(msg({ on: 'other', id: 'com.google.android.googlequicksearchbox' })).msg as { landed: unknown }).landed)
+      .toEqual({ on: 'other', id: 'com.google.android.googlequicksearchbox' })
+  })
+
+  it('refuses a place it does not know, rather than guess one', () => {
+    expect(fail(msg({ on: 'lockscreen' })).reason).toBeDefined()
+    expect(fail(msg({})).reason).toBeDefined()
+  })
+
+  it('drops an id it cannot use and keeps the place', () => {
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(257) })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: '' })).msg as { landed: unknown }).landed).toEqual({ on: 'other' })
+    expect((ok(msg({ on: 'other', id: 'x'.repeat(256) })).msg as { landed: { id: string } }).landed.id).toHaveLength(256)
+  })
+
+  it('is an agent message', () => {
+    expect(directionOf('capture:landed')).toBe('agent')
   })
 })

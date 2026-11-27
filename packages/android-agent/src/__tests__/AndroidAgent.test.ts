@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events'
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -147,7 +148,7 @@ import { hasEnvelope, readEnvelopeFlags, CODEC_H264, CODEC_JPEG } from '@tapflow
 import { AndroidAgent, pickAndroidBackend, parseSpsFromNal, toNaturalPoint } from '../AndroidAgent'
 import { isPosturable, SHUTDOWN_NO_SESSION_STATE } from '@tapflowio/agent-core'
 import type { SkinRotation } from '../emulator/EmulatorGrpcClient'
-import { AdbWrapper, StorageFullError } from '../AdbWrapper'
+import { AdbWrapper, DumpNoXmlError, StorageFullError } from '../AdbWrapper'
 import { ScrcpySession } from '../scrcpy/ScrcpySession'
 import { EmulatorVideo } from '../emulator/EmulatorVideo'
 import { EmulatorGrpcClient } from '../emulator/EmulatorGrpcClient'
@@ -223,6 +224,9 @@ interface AndroidAgentInternals {
   prepareBody(state: TestState, serial: string, upright: boolean): Promise<void>
   sendChrome(state: TestState): void
   reconcileSerial(state: TestState, serial: string, w: number, h: number, skin: SkinRotation | null): Promise<boolean>
+  startAppLogStreamAfterLaunch(
+    sessionId: string, state: TestState, serial: string, bundleId: string, launchId: string, logStartTime: string | undefined, generation: number
+  ): Promise<void>
 }
 const internals = (agent: AndroidAgent): AndroidAgentInternals =>
   agent as unknown as AndroidAgentInternals
@@ -2802,6 +2806,107 @@ describe('AndroidAgent', () => {
       scrcpyStreamController = null
     })
 
+    // Flow Capture P4: what a recorded person's touches hit, asked off the touch's path, only for a boot the relay
+    // marked as theirs and that keeps observations.
+    describe('record-time observation', () => {
+      const bootWith = async (payload: Record<string, unknown>) => {
+        const ready = waitForType(browser, 'device:ready')
+        inject({ type: 'device:boot', requestId: `rq-${Object.keys(payload).join('-')}`, payload: { deviceId: 'avd:Pixel_8_API_34', ...payload } })
+        await ready
+        await vi.waitFor(() => expect(getState().scrcpySession).not.toBeNull(), { timeout: 1000 })
+      }
+
+      it('is off for a boot that is not a recorded person\'s, or a relay that keeps no observations', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off' })
+        await bootWith({ observed: true })
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        inject({ type: 'input:touch:end', requestId: 'rq-off-2' })
+        expect(hold).not.toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+
+      it('asks what each touch hit on a recorded boot, and lets go of the connection when the device goes', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        agent.disconnect()
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
+      // MCP Flow Capture (L6a): a running device gets no boot, so `capture:observe` arms it; arming again keeps the
+      // watch (a gesture in flight keeps its report), and off lets go of the connection.
+      it('arms observation on a booted device with capture:observe, keeps it when armed again, and disarms it', async () => {
+        const hold = vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ touchObservations: true })
+        expect(hold).not.toHaveBeenCalled()
+        const watches = () => (agent as unknown as { touchWatches: Map<string, unknown> }).touchWatches
+        inject({ type: 'capture:observe', requestId: 'o1', payload: { on: true } })
+        expect(hold).toHaveBeenCalledWith('emulator-5554', true)
+        const armed = watches().get('avd:Pixel_8_API_34')
+        expect(armed).toBeDefined()
+        inject({ type: 'capture:observe', requestId: 'o2', payload: { on: true } })
+        expect(watches().get('avd:Pixel_8_API_34')).toBe(armed)
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect(hit).toHaveBeenCalledWith('emulator-5554', 0.25, 0.75)
+        inject({ type: 'capture:observe', requestId: 'o3', payload: { on: false } })
+        expect(watches().has('avd:Pixel_8_API_34')).toBe(false)
+        expect(hold).toHaveBeenLastCalledWith('emulator-5554', false)
+      })
+
+      // CodeRabbit on #1187: the app under test is the one that launched, not the one a failed launch named.
+      it('takes the app under test from a launch that succeeded, and keeps the one before when it fails', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        const launch = vi.spyOn(adb, 'launchApp').mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('not installed'))
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a'))
+        const failed = waitForType(browser, 'app:launch-error')
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await failed
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.a')
+      })
+
+      // CodeRabbit on #1187: two launches at once, the earlier one answering last.
+      it('does not let a launch overtaken by a later one name the app under test', async () => {
+        const packages = () => (agent as unknown as { appPackages: Map<string, string> }).appPackages
+        let finishA: () => void = () => {}
+        vi.spyOn(adb, 'launchApp')
+          .mockImplementationOnce(() => new Promise((r) => { finishA = () => r(undefined) }))
+          .mockResolvedValueOnce(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rq-a', payload: { bundleId: 'dev.tapflow.a' } })
+        inject({ type: 'app:launch', requestId: 'rq-b', payload: { bundleId: 'dev.tapflow.b' } })
+        await done
+        await vi.waitFor(() => expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b'))
+        const second = waitForType(browser, 'app:launch-done')
+        finishA()
+        await second
+        expect(packages().get('avd:Pixel_8_API_34')).toBe('dev.tapflow.b')
+      })
+
+      // Review of P4: the adb fallback plays a gesture only once its end arrives, so its down's time is not the app's.
+      it('does not observe a touch that goes through the adb fallback', async () => {
+        vi.spyOn(adb, 'holdConnection').mockResolvedValue(undefined)
+        const hit = vi.spyOn(adb, 'hitTest').mockResolvedValue(null)
+        vi.spyOn(adb, 'pingFocusedServer').mockResolvedValue(undefined)
+        await bootWith({ observed: true, touchObservations: true })
+        const state = getState()
+        state.videoWidth = 0
+        state.touchHelper = { touchStart: vi.fn(), touchMove: vi.fn(), touchEnd: vi.fn(async () => 'delivered'), touchCancel: vi.fn(), pinchEnd: vi.fn(), pressButton: vi.fn(), stop: vi.fn() } as unknown as TestState['touchHelper']
+        inject({ type: 'input:touch:start', payload: { x: 0.25, y: 0.75 } })
+        expect((state.touchHelper as unknown as { touchStart: ReturnType<typeof vi.fn> }).touchStart).toHaveBeenCalled()
+        expect(hit).not.toHaveBeenCalled()
+      })
+    })
+
     describe('input — touch', () => {
       it('maps normalized touch:start to device px via scrcpy control', () => {
         const control = getState().scrcpySession!.control
@@ -3200,6 +3305,20 @@ describe('AndroidAgent', () => {
         })
       })
 
+      // #1196: the tree goes out with the height ÷ width its frames were divided by, so a list's frame reads in pixels.
+      it('answers ui:tree:request with the tree\'s aspect beside its elements', async () => {
+        vi.spyOn(adb, 'dumpUiHierarchy').mockResolvedValue(
+          `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<hierarchy rotation="1">\n` +
+          `<node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="a" content-desc="" bounds="[0,0][2400,1080]" />\n</hierarchy>`,
+        )
+        const out = sent()
+        inject({ type: 'ui:tree:request', requestId: 'rq-t1' })
+        await vi.waitFor(() => expect(out.find((m) => m['type'] === 'ui:tree:response')).toBeDefined())
+        expect(out.find((m) => m['type'] === 'ui:tree:response')).toEqual({
+          type: 'ui:tree:response', sessionId: agent.sessionId, requestId: 'rq-t1', elements: [], aspect: 0.45,
+        })
+      })
+
       it('answers ui:field:request with no value for a password', async () => {
         vi.spyOn(adb, 'readFocused').mockResolvedValue({
           identifier: 'form.password', frame: { x: 0, y: 0, width: 10, height: 10 }, secure: true, value: 'leaked', reason: 'secure',
@@ -3255,6 +3374,42 @@ describe('AndroidAgent', () => {
         expect(out.find((m) => m['type'] === 'ui:keyboard:response')).toMatchObject({ requestId: 'rq-k3', keyboard: { shown: false } })
         expect((out.find((m) => m['type'] === 'ui:keyboard:response')!['keyboard'] as { onHome?: boolean }).onHome).toBeUndefined()
       })
+    })
+
+    // What the device printed can be on-screen text: the caller gets it, the log does not (CodeRabbit, #1242).
+    it('logs a dump that produced no XML without what the device printed', async () => {
+      vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new DumpNoXmlError('no XML within 10s (<node text="Jane Doe 010-1234") — retry', 'no XML within 10s — retry'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        inject({ type: 'ui:tree:request', requestId: 'rq-t2' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-t2')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-t2')!['message']).toContain('Jane Doe')
+        const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+        expect(logged).toMatch(/ui:tree on emulator-5554 failed: no XML within 10s — retry/)
+        expect(logged).not.toContain('Jane Doe')
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // The relay hands a failed tree read's reason to its HTTP caller and logs none: the agent's log is where it is kept.
+    it('logs why a tree read failed, and still answers the error', async () => {
+      vi.spyOn(adb, 'dumpUiHierarchy').mockRejectedValue(new Error('uidump: another UiAutomation is connected'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out: Array<Record<string, unknown>> = []
+        const real = (agent as unknown as { sendMsg(m: unknown): void }).sendMsg.bind(agent)
+        vi.spyOn(agent as unknown as { sendMsg(m: unknown): void }, 'sendMsg').mockImplementation((m) => { out.push(m as Record<string, unknown>); real(m) })
+        inject({ type: 'ui:tree:request', requestId: 'rq-t1' })
+        await vi.waitFor(() => expect(out.find((m) => m['requestId'] === 'rq-t1')).toBeDefined())
+        expect(out.find((m) => m['requestId'] === 'rq-t1')).toMatchObject({ type: 'ui:tree:error', message: 'uidump: another UiAutomation is connected' })
+        expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toMatch(/ui:tree on emulator-5554 failed: uidump: another UiAutomation is connected/)
+      } finally {
+        warn.mockRestore()
+      }
     })
 
     // #1125: where a touch meant for an element lands, from the jar; unknown, never a guess, when the jar cannot say.
@@ -4197,7 +4352,138 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-1', payload: { bundleId: 'com.example.app' } })
         await done
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', undefined, false, expect.any(Function))
+      })
+
+      it('streams a watched app with its runs, and starts no per-launch stream for it', async () => {
+        const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn(), pause: vi.fn(), resume: vi.fn() })
+        const child = Object.assign(new EventEmitter(), { stdout, kill: vi.fn(), exitCode: null, killed: false })
+        const spawnSpy = vi.fn(() => child)
+        ;(agent as unknown as { appLogWatchDeps: unknown }).appLogWatchDeps = { spawn: spawnSpy, adbPath: () => 'adb' }
+        vi.spyOn(adb, 'getAppUid').mockResolvedValue(10193)
+        vi.spyOn(adb, 'getPackagesForUid').mockResolvedValue(['com.example.app'])
+        vi.spyOn(adb, 'processesForUid').mockResolvedValueOnce([]).mockResolvedValue([{ pid: 5344, name: 'com.example.app' }])
+        vi.spyOn(adb, 'deviceTime').mockResolvedValue('11-24 20:00:00.000')
+        const sent: Array<Record<string, unknown>> = []
+        const internal = agent as unknown as { sendMsg(msg: Record<string, unknown>): void }
+        const real = internal.sendMsg.bind(agent)
+        internal.sendMsg = (msg) => { sent.push(msg); real(msg) }
+
+        inject({ type: 'app:logs:watch', watchId: 'w-1', bundleId: 'com.example.app' })
+        await vi.waitFor(() => expect(spawnSpy).toHaveBeenCalledWith('adb', ['-s', 'emulator-5554', 'logcat', '--uid=10193', '-T', '11-24 20:00:00.000', '-v', 'process'], expect.anything()))
+        stdout.emit('data', 'I( 5344) hello  (Tag)\n')
+        await vi.waitFor(() => expect(sent.filter((m) => m['type'] === 'app:log' || m['type'] === 'app:log:run')).toEqual([
+          { type: 'app:log:run', sessionId: agent.sessionId, watchId: 'w-1', event: 'started', pid: 5344 },
+          { type: 'app:log', sessionId: agent.sessionId, watchId: 'w-1', text: 'hello\n' },
+        ]))
+
+        // An install stops the watch's stream (the uid may change); one that fails raises it again all the same.
+        vi.spyOn(adb, 'installApp').mockRejectedValueOnce(new Error('INSTALL_FAILED_INVALID_APK'))
+        vi.spyOn(adb, 'clearAppData').mockResolvedValue(undefined)
+        const failed = waitForType(browser, 'app:install-error')
+        inject({ type: 'app:install', requestId: 'rqi-bad', payload: { filePath: '/tmp/app.apk', bundleId: 'com.example.app' } })
+        await failed
+        await vi.waitFor(() => expect(spawnSpy).toHaveBeenCalledTimes(2))
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+
+        const perLaunch = vi.spyOn(internals(agent), 'startAppLogStreamAfterLaunch')
+        vi.spyOn(adb, 'launchApp').mockResolvedValue(undefined)
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rqi-watched', payload: { bundleId: 'com.example.app' } })
+        await done
+        expect(perLaunch).not.toHaveBeenCalled()
+        expect(spawnSpy).toHaveBeenCalledTimes(2)
+      })
+
+      it('answers app:launch before process discovery completes', async () => {
+        let releaseUidLookup!: (uid: number | null) => void
+        vi.spyOn(adb, 'launchApp').mockImplementation(async (...args) => {
+          args[4]?.('11-22 12:34:56.789')
+          return undefined
+        })
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(() => new Promise((resolve) => {
+          releaseUidLookup = resolve
+        }))
+        const done = waitForType(browser, 'app:launch-done')
+        inject({ type: 'app:launch', requestId: 'rqi-log', payload: { bundleId: 'com.example.app' } })
+
+        expect((await done)['requestId']).toBe('rqi-log')
+        await vi.waitFor(() => expect(getAppUidSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', expect.any(Number)))
+        releaseUidLookup(null)
+      })
+
+      it('does not continue UID-scoped discovery after its deadline', async () => {
+        let now = 10_000
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        let packageTimeoutMs = 0
+        const getAppUidSpy = vi.spyOn(adb, 'getAppUid').mockImplementation(async (_serial, _bundleId, timeoutMs = 2_000) => {
+          expect(timeoutMs).toBe(2_000)
+          now = 14_900
+          return 10_123
+        })
+        const getPackagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockImplementation(async (_serial, _uid, timeoutMs = 2_000) => {
+          packageTimeoutMs = timeoutMs
+          now = 15_000
+          return ['com.example.app']
+        })
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'launch-deadline', '11-22 12:34:56.789', 1
+          )
+
+          expect(getAppUidSpy).toHaveBeenCalledOnce()
+          expect(getPackagesSpy).toHaveBeenCalledOnce()
+          expect(packageTimeoutMs).toBe(100)
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+          clock.mockRestore()
+        }
+      })
+
+      it('does not stream logs for a UID shared by another package', async () => {
+        const state = getState() as TestState & {
+          appLogGeneration: number
+          appLogStream: { stop(): void } | null
+        }
+        state.appLogGeneration = 1
+        state.appLogStream = null
+        const previousAdbPath = process.env['ADB_PATH']
+        process.env['ADB_PATH'] = process.execPath
+        vi.spyOn(adb, 'getAppUid').mockResolvedValue(10_123)
+        const packagesSpy = vi.spyOn(adb, 'getPackagesForUid').mockResolvedValue([
+          'com.example.app', 'com.example.helper'
+        ])
+        const hasProcessSpy = vi.spyOn(adb, 'hasAppProcessForUid').mockResolvedValue(true)
+
+        try {
+          await internals(agent).startAppLogStreamAfterLaunch(
+            agent.sessionId!, state, 'emulator-5554', 'com.example.app', 'shared-uid', '11-22 12:34:56.789', 1
+          )
+
+          expect(packagesSpy).toHaveBeenCalledOnce()
+          expect(hasProcessSpy).not.toHaveBeenCalled()
+          expect(state.appLogStream).toBeNull()
+        } finally {
+          const stream = (state as unknown as { appLogStream: { stop(): void } | null }).appLogStream
+          stream?.stop()
+          if (previousAdbPath === undefined) delete process.env['ADB_PATH']
+          else process.env['ADB_PATH'] = previousAdbPath
+        }
       })
 
       it('passes launch arguments through and reports their names', async () => {
@@ -4205,7 +4491,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-2', payload: { bundleId: 'com.example.app', arguments: { flag: true } } })
         expect((await done)['applied']).toEqual({ arguments: ['flag'], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, false, expect.any(Function))
       })
 
       // The relay's defaults the device could not take are reported as not applied, which is what a run record shows.
@@ -4214,7 +4500,7 @@ describe('AndroidAgent', () => {
         const done = waitForType(browser, 'app:launch-done')
         inject({ type: 'app:launch', requestId: 'rqi-5', payload: { bundleId: 'com.example.app', arguments: { flag: true }, defaultsOnly: true } })
         expect((await done)['applied']).toEqual({ arguments: [], env: [] })
-        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true)
+        expect(launchSpy).toHaveBeenCalledWith('emulator-5554', 'com.example.app', { arguments: { flag: true } }, true, expect.any(Function))
       })
 
       it('refuses options the shared check refuses, without launching', async () => {
@@ -4289,11 +4575,10 @@ describe('AndroidAgent', () => {
         expect(sent['data']).toBe(Buffer.from('PNGDATA').toString('base64'))
       })
 
-      it('answers png for a jpeg request, because that is what it produced (#508)', async () => {
-        // `screencap -p` produces PNG and takes no format argument, so the request is a preference
-        // this platform cannot honour (see `ScreenshotRequest` in protocol). Echoing it sent PNG
-        // bytes out under `format: 'jpeg'`, which the relay wrote into the HTTP Content-Type — and
-        // `mcp-server` then picked a JPEG parser for the dimensions it feeds to `tap` as divisors.
+      it('answers png for a jpeg request it could not convert, because that is what it produced (#508)', async () => {
+        // A JPEG request is converted with `sips`; bytes it cannot convert (these are not an image) go out as the PNG
+        // they are. Echoing the request sent PNG bytes out under `format: 'jpeg'`, which the relay wrote into the HTTP
+        // Content-Type — and `mcp-server` then picked a JPEG parser for the dimensions it feeds to `tap` as divisors.
         vi.spyOn(adb, 'screenshot').mockResolvedValue(Buffer.from('PNGDATA'))
         const sendSpy = vi.spyOn(internals(agent).ws!, 'send')
 
@@ -5417,7 +5702,7 @@ describe('what a rotation does on each backend', () => {
 
   const rotate = async (backend: 'grpc' | 'scrcpy') => {
     const adb = mockAdb(true)
-    vi.spyOn(adb, 'setRotation').mockResolvedValue(undefined)
+    const setRotation = vi.spyOn(adb, 'setRotation').mockResolvedValue(undefined)
     const metrics = vi.spyOn(adb, 'getDisplayMetrics').mockResolvedValue({
       natural: { width: 1080, height: 2400 },
       current: { width: 2400, height: 1080 },
@@ -5427,10 +5712,11 @@ describe('what a rotation does on each backend', () => {
     const state = stateOn(backend)
     internals(agent).deviceStates.set('s1', state)
     internals(agent).handleRelayMessage({ type: 'input:rotate', sessionId: 's1' })
-    // The gRPC path samples `dumpsys` until it settles (3 reads, `TAPFLOW_METRICS_GAP_MS=1`
-    // in this suite), so a microtask drain is not enough — wait real time for both branches.
+    // A microtask drain is not enough: the gRPC path turns the body and reads it back after a real 50 ms poll
+    // (`BODY_TURN_POLL_MS`), then samples `dumpsys` (`TAPFLOW_METRICS_GAP_MS=1` here). A floor, not a promise: the gRPC
+    // test waits for its outcome on top of this, and the scrcpy test first waits for its rotation to have been sent.
     await new Promise((r) => setTimeout(r, 60))
-    return { metrics, state }
+    return { metrics, setRotation, state }
   }
 
   // Settling the display after a rotation samples it until it holds still — up to 3.6s. That ran in
@@ -5457,7 +5743,9 @@ describe('what a rotation does on each backend', () => {
     // see landscape content, switch its CSS quarter off — the only thing that rotates this
     // backend — and then find the frame no longer matches the screen it was told about. The
     // picture goes blank with no way back but pressing rotate again.
-    const { metrics, state } = await rotate('scrcpy')
+    const { metrics, setRotation, state } = await rotate('scrcpy')
+    // The rotation was sent, so what follows is an absence after it ran, not because nothing did.
+    await vi.waitFor(() => expect(setRotation).toHaveBeenCalledWith(expect.any(String), 3))
     expect(metrics).not.toHaveBeenCalled()
     // And `toDevicePx` says this backend must never carry a rotation: its frames are natural
     // already, so applying one double-maps every tap.
@@ -5468,8 +5756,10 @@ describe('what a rotation does on each backend', () => {
   it('does re-describe it on gRPC, which is what makes the button feel immediate', async () => {
     // The pair that stops the test above passing because nothing ran.
     const { metrics, state } = await rotate('grpc')
+    // Waited for, not timed: the body's 50 ms poll left the helper's 60 ms about 7 ms to spare, and a slow CI runner
+    // used it up (the Node 22 job on #1230).
+    await vi.waitFor(() => expect(state.rotation).toBe(270))
     expect(metrics).toHaveBeenCalled()
-    expect(state.rotation).toBe(270)
     expect(state.displayWidth).toBe(2400)
   })
 })

@@ -1,6 +1,6 @@
 {
   "name": "tapflow",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Self-hosted iOS/Android simulator streaming for the whole team",
   "keywords": [
     "ios",
@@ -54,14 +54,14 @@
     "postinstall": "node bin/postinstall.js"
   },
   "dependencies": {
-    "@clack/prompts": "^1.8.1",
+    "@clack/prompts": "^1.9.0",
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/android-agent": "workspace:*",
     "@tapflowio/flow-runner": "workspace:*",
     "@tapflowio/ios-agent": "workspace:*",
     "@tapflowio/relay": "workspace:*",
     "cac": "^6.7.14",
-    "ws": "^8.22.2",
+    "ws": "^8.23.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

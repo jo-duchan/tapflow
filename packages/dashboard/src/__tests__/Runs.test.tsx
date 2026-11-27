@@ -399,6 +399,25 @@ describe('Run detail', () => {
     expect(screen.queryByRole('img')).toBeNull()
   })
 
+  // Where the screenshot would be, why it is not — for a failed flow and a passed one alike; nothing when there is one or
+  // no reason is known. The runner's warning reached only its terminal (2026-11-22). Mutations: drop the line, show it
+  // beside a screenshot, or for one flow kind only.
+  it('says why a flow has no screenshot where the picture would be', async () => {
+    stubRelay((url) => (url.endsWith('/screenshot') ? new Response(new Uint8Array([0xff, 0xd8]), { headers: { 'content-type': 'image/jpeg' } }) : Response.json(detail({
+      status: 'failed', exitCode: 1, failureKind: 'product',
+      flows: [
+        { idx: 0, name: 'login', file: null, status: 'passed', device: null, failureKind: null, failureMessage: null, durationMs: 10, steps: [], hasScreenshot: false, screenshotNote: 'too-large' },
+        { idx: 1, name: 'pay', file: null, status: 'failed', device: null, failureKind: 'product', failureMessage: 'no element "Pay"', durationMs: 10, steps: [], hasScreenshot: false, screenshotNote: 'not-taken' },
+        { idx: 2, name: 'home', file: null, status: 'passed', device: null, failureKind: null, failureMessage: null, durationMs: 10, steps: [], hasScreenshot: true, screenshotNote: null },
+        { idx: 3, name: 'old', file: null, status: 'passed', device: null, failureKind: null, failureMessage: null, durationMs: 10, steps: [], hasScreenshot: false },
+      ],
+    }))))
+    renderAt('/automation/runs/r1')
+    expect(await screen.findByText('Screenshot not kept: it was larger than the relay\'s 5 MB limit.')).toBeTruthy()
+    expect(screen.getByText('No screenshot: the device did not return one.')).toBeTruthy()
+    expect(screen.getAllByText(/^(Screenshot not kept|No screenshot)/)).toHaveLength(2)
+  })
+
   it('marks a run and a flow that failed only on the environment as such, not as the app failing', async () => {
     stubRelay(() => Response.json(detail({
       status: 'failed', exitCode: 2, failureKind: 'environment', errorMessage: 'no booted device',

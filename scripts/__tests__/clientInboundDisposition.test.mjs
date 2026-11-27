@@ -117,8 +117,10 @@ describe('both clients declare what they do with every browser-inbound message',
         // the coverage one. Pinned from the measurement: 29 as of #542, which added `device:shutdown-error`;
         // 32 by the next count, 36 once the four `watch:*` replies arrived, 37 with `watch:action` (A2), and 38 with
         // `device:boot-waiting` (L2, the relay holding a person's boot behind another on the same Mac). 40 with the lease
-        // pair (S5). 42 with the keyboard-set pair (#1135), 44 with the run-reset pair (#1139).
-        expect(table.size).toBe(44)
+        // pair (S5). 42 with the keyboard-set pair (#1135), 44 with the run-reset pair (#1139). 45 adds
+        // `app:log` for the QA log viewer, 46 `app:log:run`, its watch's run boundaries. 49 with MCP Flow Capture's
+        // observation (L6a): `capture:observe-done`, `-error` and `capture:observation`.
+        expect(table.size).toBe(49)
       })
 
       it('every entry is exactly one of settles / does / ignored', () => {
@@ -180,12 +182,14 @@ describe('both clients declare what they do with every browser-inbound message',
     // for the buttons a flow's `pressButton` is checked against before it runs. The paste pair differs since Flow
     // Capture: its replay pastes what the person pasted (`pasteText`), and nothing in `mcp-server` pastes. So does the
     // keyboard-set pair (#1135): the dashboard's replay asks for it through this package's channel, `run_flow` resets nothing.
+    // And MCP Flow Capture's (L6a): only an MCP client arms observation, reads what it saw, and resets for its Verify.
     const [mcp, flow] = PACKAGES.map(({ dir }) =>
       entries(readFileSync(join(root, dir, 'inboundDisposition.ts'), 'utf8')))
     const differing = [...mcp].filter(([t, v]) => HANDLED.test(v) !== HANDLED.test(flow.get(t) ?? ''))
     expect(differing.map(([t]) => t).sort()).toEqual([
+      'capture:observation', 'capture:observe-done', 'capture:observe-error',
       'clipboard:error', 'clipboard:write-done', 'device:keyboard-set-done', 'device:keyboard-set-error',
-      'device:lease-refused', 'device:leased', 'device:shutdown-done',
+      'device:lease-refused', 'device:leased', 'device:run-reset-done', 'device:run-reset-error', 'device:shutdown-done',
       'device:shutdown-error', 'session:deviceInfo',
     ])
   })

@@ -16,6 +16,7 @@ const SESSION_FAILURES = [
 ]
 import { buttonAvailability } from '@tapflowio/protocol/buttons'
 import { IME_ACTION, SELECT_ALL, SELECT_ALL_REFUSED, unavailableButton, unavailableButtonMessage } from './platformCheck.js'
+import { changedTwice, progress, selfChange, type Progress } from './scrollProgress.js'
 
 /** Two fingers, each `[x, y]` normalized 0-1. */
 export type PinchFingers = [[number, number], [number, number]]
@@ -27,7 +28,9 @@ export interface FlowDriver {
   // Optional AbortSignal so a stalled query can't block the poll loop past the step deadline.
   queryUITree(signal?: AbortSignal): Promise<UIElement[]>
   tap(x: number, y: number): Promise<void>
-  swipe(from: [number, number], to: [number, number], durationMs: number): Promise<void>
+  /** `holdMs`: the finger stays at `to` before it lifts, so the content stops there instead of gliding on (a drag).
+   *  A driver that ignores it swipes as before. */
+  swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number): Promise<void>
   inputText(text: string): Promise<void>
   /** `modifiers` are held while the key is pressed; absent for a plain press. */
   pressKey(code: string, modifiers?: KeyModifier[]): Promise<void>
@@ -149,6 +152,12 @@ export interface FlowResult {
   failureScreenshot?: Uint8Array
   /** The screen a passed flow ended on, when `captureLastScreen` asked for it and it could be taken. */
   lastScreenshot?: Uint8Array
+  /**
+   * A screenshot was tried — at the failure, or the last screen asked for — and none came (it timed out or the read
+   * failed). Absent when none was tried (a flow refused before its first step), so a record never says "the device
+   * did not take one" of a flow that never asked.
+   */
+  screenshotMissed?: true
   /** With `observeEffects`, on a flow that touches points: the screen it ran on, for Flow Capture to pin them to. */
   viewport?: Viewport
   /**
@@ -493,6 +502,65 @@ async function touchPoint(
   }
 }
 
+/** Steps that touch where the flow says rather than where an element is. */
+function touchesAPoint(step: Step): boolean {
+  return step.type === 'swipe' || step.type === 'tapPoint' || step.type === 'longPressPoint'
+    || (step.type === 'pinch' && Array.isArray(step.on)) || (step.type === 'scroll' && !step.until)
+}
+
+const STILL_CAP_MS = 3000
+const STILL_SPAN_MS = 250
+const STILL_GAP_MS = 100
+
+/**
+ * Where everything on the screen is, to a thousandth of it: a hundredth let a spring's slow tail read as still. Not what
+ * it says: a clock or a progress label changes without moving, and would make every point step wait out the cap.
+ */
+function stillShape(tree: UIElement[]): string {
+  const k = (n: number) => Math.round(n * 1000)
+  return JSON.stringify(tree.map((e) => [e.role, e.identifier ?? '', k(e.frame.x), k(e.frame.y), k(e.frame.width), k(e.frame.height)]))
+}
+
+/**
+ * Read until two reads at least a quarter of a second apart (from the first's answer to the second's asking) find
+ * everything where it was, and answer the last read — or answer nothing after 3 s, or on a read that cannot be made, and let the
+ * step go on as it always did: this is never why a step fails. The span, because two reads close together can both
+ * land on a spring's turning point; Android's own quiet wait does not cover it, since a native-driver animation sends
+ * no accessibility events. A screen that never stops (a carousel) costs the cap.
+ */
+async function waitForStill(driver: FlowDriver, pollIntervalMs: number): Promise<UIElement[] | undefined> {
+  const deadline = Date.now() + STILL_CAP_MS
+  // Scaled down with the poll interval, so a test's fast poll is not a quarter-second wait; at the default 500 ms, 250.
+  const span = Math.min(STILL_SPAN_MS, pollIntervalMs / 2)
+  let shape: string | undefined
+  let since = 0
+  for (;;) {
+    const started = Date.now()
+    if (started >= deadline) return undefined
+    let tree: UIElement[]
+    try {
+      // Bounded: a read that never returns (a driver that ignores the signal) must not hold the run.
+      tree = await Promise.race([
+        driver.queryUITree(AbortSignal.timeout(Math.max(1, deadline - started))),
+        delay(Math.max(1, deadline - started)).then(() => { throw new Error('still: read took the whole wait') }),
+      ])
+    } catch (e) {
+      // "Not up yet" (a screen mid-transition) is when the wait matters most: read again, from scratch, to the cap.
+      // Anything else — a session gone, a device that cannot read its tree — leaves the step to go on as it did.
+      if (!(e instanceof TransientQueryError)) return undefined
+      shape = undefined
+      await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
+      continue
+    }
+    const next = stillShape(tree)
+    // From when the first matching read came back to when this one was asked: a slow first read must not count
+    // towards the span, or two observations 100 ms apart would pass it (CodeRabbit on #1193).
+    if (next === shape && started - since >= span) return tree
+    if (next !== shape) { shape = next; since = Date.now() }
+    await delay(Math.min(pollIntervalMs, STILL_GAP_MS))
+  }
+}
+
 /** One read of the screen within `timeoutMs`, or `undefined`: the effect of a touch is then judged without it. */
 async function readScreen(driver: FlowDriver, timeoutMs: number): Promise<UIElement[] | undefined> {
   const deadline = Date.now() + timeoutMs
@@ -727,10 +795,22 @@ export async function waitForStableScreen<T extends { elements: UIElement[] }>(
 
 // A dump takes ~2.5 s on an emulator, so the default step timeout would allow about three swipes; a list is longer than
 // that. The end of the list stops it sooner (below), so the wider default costs time only when the element is missing.
-const SCROLL_UNTIL_MS = 30_000
-// Two, not one: a swipe sent while the screen is still changing can be acknowledged and dropped (see `waitForScreen`),
-// and one unchanged read after it would end the step at the top of a list that scrolls fine.
-const SCROLL_END_READS = 2
+/** A search step moves the content a bounded distance (a drag, below), so a long list takes more steps than the
+ *  flings it took before (45 rows on iOS: 9.6 → 13.3 s). The list's end stops a search sooner, so the longer wait is
+ *  spent only on a list that is long and holds the element far down. */
+const SCROLL_UNTIL_MS = 60_000
+/** How long a search step holds still before it lifts: from 100 ms no list measured glided on (150 for a margin). */
+const SEARCH_HOLD_MS = 150
+// Counted in gestures that moved nothing (`progress`). A swipe sent while the screen is still changing can be
+// acknowledged and dropped (see `waitForScreen`), so one is no end. Search steps are drags, and only two in a row make
+// the next one a fling (for a pager that snaps a held drag back): after a single dropped drag the search drags again,
+// and a fling's glide cannot carry the list past the element. The end is the gesture after that fling, still too.
+const FLING_AFTER_STILL_READS = 2
+const SCROLL_END_READS = 3
+// A match that holds its place across swipes cannot be brought further in (a button fixed to the bottom).
+const MATCH_STILL_READS = 2
+// How many polls a confirming read waits (`scrollUntil`): enough for a clock ticking each second to change in it.
+const CONFIRM_WAIT_POLLS = 3
 
 // Both agents clip a frame to the screen and drop what is wholly off it, so an element cut by the edge the list
 // scrolls in from reaches that edge exactly. Such a sliver is not arrived: under a translucent bar its center is the
@@ -767,8 +847,9 @@ const REACH_FLOOR_MS = 2_000
 const MAX_REACH_TARGETS = 64
 
 /**
- * The element `scrollUntil` found, read again until it is where it was the read before: the last swipe's fling is
- * still carrying the list when it comes into view. A tap read off a moving list lands a row further on, and on iOS a
+ * The element `scrollUntil` found, read again until it is where it was the read before: a list can still be moving
+ * when it comes into view — bouncing at an end, snapping to a page, or carried by the fling a still step is followed
+ * by. A tap read off a moving list lands a row further on, and on iOS a
  * tap on a scrolling list only stops it — the step after passed with nothing tapped (iOS E2E, `tapOn("Row 17")`).
  * Bounded; past the bound, or on a failed read, the step goes on as before.
  */
@@ -807,17 +888,18 @@ async function inView(driver: FlowDriver, matches: UIElement[]): Promise<boolean
   return false
 }
 
-/** What the end-of-list check compares: the structure and where it is, since one long text scrolls by moving alone. */
+/** Where the matches are: one that keeps this across swipes cannot be brought further in. */
 function scrolledShape(tree: UIElement[]): string {
   return JSON.stringify(tree.map((e) => [e.role, e.label, e.identifier ?? '', Math.round(e.frame.x * 100), Math.round(e.frame.y * 100)]))
 }
 
 /**
- * Swipe the way `scroll` does until an element matching `sel` is on screen. How far one swipe goes differs from run to
- * run (a fling's length depends on its speed and the platform), so a flow that means "the row is now in view" says
- * that rather than a number of swipes. Reads before the first swipe, so an element already in view costs none. At the
- * end of the list — the screen stops changing — any match on screen is taken, cut or not; none fails as the product's,
- * as does the selector's timeout.
+ * Drag the way `scroll` swipes until an element matching `sel` is on screen. How far a fling goes differs from run to
+ * run (its length depends on its speed and the platform), so a flow that means "the row is now in view" says that
+ * rather than a number of swipes; and the search steps are drags, held still before the lift, so none carries the
+ * list past the element between two reads. Reads before the first swipe, so an element already in view costs none. At the
+ * end of the list — three gestures that moved nothing (`progress`) — a match on screen is taken, cut or not, where the
+ * device reaches it at its centre; none, or a covered one, fails as the product's, as does the selector's timeout.
  *
  * No selector suggestions on failure, for `assertVisible`'s reason (see `suggest.ts`): a `tapOn` line offered in place
  * of a check that something is there would turn a regression green.
@@ -830,20 +912,32 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
   const spans = SPANS_SCROLL_AXIS[direction]
   let lastError: TransientQueryError | undefined
   let sawTree = false
-  let shape: string | undefined
-  // A screen read without the element is followed by one swipe and a failed read by none, so between any two screens
-  // read lies exactly one swipe: a screen equal to the last one is a swipe that moved nothing.
-  let unchanged = 0
-  // A match that stays where it is across swipes cannot be brought further in, even while something else on the screen
-  // keeps changing (a clock, a spinner) and so keeps the screen from ever reading unchanged.
+  // A match that stays where it is across swipes cannot be brought further in (a button fixed to the bottom), once a
+  // fling was tried where nothing else moved either.
   let matchShape: string | undefined
   let matchStill = 0
+  // Gestures in a row that moved nothing (`progress`, scrollProgress.ts). A read without the element is followed by one
+  // swipe and a failed read by none, so `before` — the last read a gesture was judged from — and the next read have
+  // exactly one gesture between them. A read that cannot tell is followed by reads with no gesture (`confirming`), which
+  // learn what changes by itself (`volatile`: a region seen changing in two windows running) and count nothing of their
+  // own. A learned region stays where it is on the screen for the rest of the search; it explains a change only by
+  // containing all of it, so a row it was learned from that scrolled away explains nothing larger than itself.
+  let still = 0
+  let before: UIElement[] | undefined
+  let gestured = false
+  // The read being confirmed, and what changed by itself in the first window after it.
+  let confirming: { post: UIElement[]; seen?: UIElement['frame'][] } | undefined
+  const volatile: UIElement['frame'][] = []
+  const axis = gesture.from[0] === gesture.to[0] ? 'y' : 'x'
+  const sign = Math.sign(axis === 'y' ? gesture.to[1] - gesture.from[1] : gesture.to[0] - gesture.from[0])
+  let flung = false
   let swiped = false
   for (;;) {
     const q = await queryOrRetry(driver, deadline)
     // Swipe only after a screen was read and the element was not on it: a failed read says nothing about where the
     // list is, and a blind swipe could carry the element past.
     let read = false
+    let confirm = false
     if ('tree' in q) {
       sawTree = true
       read = true
@@ -854,25 +948,66 @@ async function scrollUntil(driver: FlowDriver, direction: ScrollDirection, sel: 
       if (matches.some((m) => clear(m.frame)) && await inView(driver, matches.filter((m) => clear(m.frame)))) {
         return swiped ? settleMatch(driver, sel, q.tree, deadline, pollIntervalMs) : undefined
       }
-      const pinned = matches.filter((m) => !spans(m.frame))
-      const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
-      matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
-      matchShape = at
-      if (matchStill >= SCROLL_END_READS) return
-      const next = scrolledShape(q.tree)
-      unchanged = next === shape ? unchanged + 1 : 0
-      shape = next
-      if (unchanged >= SCROLL_END_READS) {
-        if (matches.length > 0) return
-        throw new StepFailure(`scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
+      let judged: Progress | undefined
+      const settled = (p: Progress): Progress => (p === 'ambiguous' ? 'moved' : p)
+      if (confirming) {
+        const self = selfChange(confirming.post, q.tree)
+        // Still travelling: the gesture's change was the gesture's. Nothing changing by itself (any more): judged with
+        // what is already learned, and still ambiguous is moved — content that changed once and stopped arrived.
+        if (self === undefined) judged = 'moved'
+        else if (self.length === 0) judged = settled(progress(before!, q.tree, axis, sign, volatile))
+        else if (!confirming.seen) { confirming = { post: q.tree, seen: self }; confirm = true }
+        else {
+          volatile.push(...changedTwice(confirming.seen, self))
+          judged = settled(progress(before!, q.tree, axis, sign, volatile))
+        }
+        if (judged !== undefined) confirming = undefined
+      } else if (gestured && before) {
+        judged = progress(before, q.tree, axis, sign, volatile)
+        if (judged === 'ambiguous') { confirming = { post: q.tree }; confirm = true; judged = undefined }
+      }
+      // The first read is judged against nothing, and counts as a screen of its own.
+      const counted = judged !== undefined || before === undefined
+      if (counted) {
+        before = q.tree
+        gestured = false
+        still = judged === 'still' ? still + 1 : 0
+        const pinned = matches.filter((m) => !spans(m.frame))
+        const at = pinned.length > 0 ? scrolledShape(pinned) : undefined
+        matchStill = at !== undefined && at === matchShape ? matchStill + 1 : 0
+        matchShape = at
+        // Where nothing else moved either, a pager may have snapped the drags back: the fling comes first. And like any
+        // other arrival, it must be reached at its centre where the device can judge.
+        if (matchStill >= MATCH_STILL_READS && (still === 0 || flung) && await inView(driver, pinned)) return
+        if (still >= SCROLL_END_READS) {
+          if (matches.length > 0 && await inView(driver, matches)) return
+          throw new StepFailure(matches.length > 0
+            ? `scrolled ${direction} to the end, where ${describeSelector(sel)} is on screen but the device does not reach it at its centre (covered)`
+            : `scrolled ${direction} to the end without ${describeSelector(sel)} coming on screen`)
+        }
       }
     } else {
       lastError = latestError(lastError, q.transient)
     }
     const base = `no element matched ${describeSelector(sel)} on screen after scrolling ${direction} for ${waitMs / 1000}s`
     if (Date.now() >= deadline) throw deadlineError(base, lastError, sawTree)
-    if (read) { await driver.swipe(gesture.from, gesture.to, 300); swiped = true }
-    await waitForNextPoll(deadline, pollIntervalMs, base, lastError, sawTree)
+    // A drag, not a fling: a fling's glide carried the list past the element between two reads, and the search ended
+    // at the list's end without it (iOS, measured). Held still, each step moves the content as far as the finger (0.4
+    // of the screen up and down, 0.6 across) and no further, on every list measured (SwiftUI, UIKit, Compose,
+    // RecyclerView). That reduces overshoot rather than ruling it out: a list seen through a region shorter than the
+    // step can still be stepped past, and the search falls back to a fling. A step after which nothing moved twice in a
+    // row is followed by one: a pager whose page is taller than the drag snaps a held drag back to where it was. Twice,
+    // not once: a drag the device dropped mid-list also moves nothing, and a fling after it could glide past the
+    // element (pre-PR review). The cost is one more read at the end of a search that fails.
+    if (read && !confirm) {
+      flung = still >= FLING_AFTER_STILL_READS
+      await driver.swipe(gesture.from, gesture.to, 300, flung ? 0 : SEARCH_HOLD_MS)
+      swiped = true
+      gestured = true
+    }
+    // A confirming read waits long enough for a clock to tick: three polls, 1.5 s at the default, so a countdown read
+    // twice inside one second is not taken for a screen that holds still while it changes with every gesture.
+    await waitForNextPoll(deadline, confirm ? pollIntervalMs * CONFIRM_WAIT_POLLS : pollIntervalMs, base, lastError, sawTree)
   }
 }
 
@@ -1082,7 +1217,8 @@ const sameViewport = (a: Viewport, b: Viewport): boolean =>
   Math.abs(Math.min(a.width, a.height) - b.width) < 0.5 && Math.abs(Math.max(a.width, a.height) - b.height) < 0.5
 
 /** The first step that touches a point the flow wrote, which lands where that fraction of the screen is, or -1. */
-function firstPointStep(flow: Flow): number {
+/** The first step that touches a point a flow wrote, or -1: what makes a flow's `viewport` matter. */
+export function firstPointStep(flow: Pick<Flow, 'steps'>): number {
   return flow.steps.findIndex((s) => s.type === 'tapPoint' || s.type === 'longPressPoint' || s.type === 'swipe'
     || (s.type === 'pinch' && Array.isArray(s.on)))
 }
@@ -1113,6 +1249,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   let failureKind: 'environment' | 'product' | undefined
   let deviceLacks = false
   let failureScreenshot: Uint8Array | undefined
+  let screenshotMissed = false
   // What earlier touches brought, kept across steps that changed nothing — a toast outlives a step or two (review of #1125).
   const effects = new EffectWatch()
 
@@ -1132,8 +1269,11 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
     const expect = EXPECTING_STEPS.has(step.type) ? (step as { expect?: StepExpect }).expect : undefined
     const watch = EXPECTING_STEPS.has(step.type) && (expect !== undefined || options.observeEffects === true)
     try {
-      // A point is touched without reading the screen, so its effect needs a read of its own first.
-      if (watch && (step.type === 'tapPoint' || step.type === 'longPressPoint')) report.screen = await readScreen(driver, timeoutMs)
+      // A point names no element to wait for, so it waits for the screen to stop moving (a piece springing back from a
+      // missed drop was still travelling home when the next swipe grabbed at it; Verify, Android 16).
+      const still = touchesAPoint(step) ? await waitForStill(driver, pollIntervalMs) : undefined
+      // A point is touched without reading the screen, so its effect needs a read of its own first: the still one.
+      if (watch && (step.type === 'tapPoint' || step.type === 'longPressPoint')) report.screen = still ?? await readScreen(driver, timeoutMs)
       const applied = await executeStep(step, flow, driver, timeoutMs, pollIntervalMs, options.secrets, report)
       if (expect) await confirmEffect(driver, expect, report, timeoutMs, pollIntervalMs)
       if (watch && options.observeEffects) {
@@ -1156,6 +1296,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
       steps.push({ index, name, status: 'failed', durationMs: Date.now() - stepStart, message, ...(suggestions ? { suggestions } : {}), ...touched() })
       options.onStep?.({ index, name, phase: 'end', status: 'failed' })
       failureScreenshot = await captureScreenshot(driver, FAILURE_SCREENSHOT_TIMEOUT_MS)
+      if (failureScreenshot === undefined) screenshotMissed = true
     }
   }
 
@@ -1169,6 +1310,7 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   if (failureMessage === undefined && options.captureLastScreen) {
     const shot = await captureScreenshot(driver, LAST_SCREEN_TIMEOUT_MS)
     if (shot !== undefined) result.lastScreenshot = shot
+    else screenshotMissed = true
   }
   if (flow.file !== undefined) result.file = flow.file
   if (options.observeEffects && viewport) result.viewport = viewport
@@ -1176,5 +1318,6 @@ export async function runFlow(flow: Flow, driver: FlowDriver, options: EngineOpt
   if (failureKind !== undefined) result.failureKind = failureKind
   if (deviceLacks) result.deviceLacks = true
   if (failureScreenshot !== undefined) result.failureScreenshot = failureScreenshot
+  if (screenshotMissed) result.screenshotMissed = true
   return result
 }

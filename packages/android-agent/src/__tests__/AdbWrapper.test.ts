@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { PlatformError, ValidationError } from '@tapflowio/agent-core'
-import { AdbWrapper } from '../AdbWrapper'
+import { AdbWrapper, DumpNoXmlError } from '../AdbWrapper'
 import type { AdbRunner } from '../adb'
 
 function mockRunner(responses: {
@@ -270,6 +270,132 @@ describe('AdbWrapper', () => {
     })
   })
 
+  describe('getAppUid', () => {
+    it('reads the exact package UID and ignores similarly named packages', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.application uid:10002\npackage:com.example.app uid:10123\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(10123)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('package:com.example.application uid:10002\n')
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
+
+    it('bounds the package UID lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app uid:10123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app', 900)).resolves.toBe(10123)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '-U', 'com.example.app'
+      )
+    })
+
+    it('resolves the UID for the current user when multiple are returned', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n') // First call: package list
+        .mockResolvedValueOnce('10\n') // Second call: get-current-user
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBe(1010123)
+    })
+
+    // Falling back to the first uid would stream another user's copy of the app.
+    it.each([
+      ['the current user is not in the list', '11\n'],
+      ['the current user cannot be read', 'Error: unknown command\n'],
+    ])('returns null when %s', async (_case, currentUser) => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce('package:com.example.app uid:10123,1010123\n')
+        .mockResolvedValueOnce(currentUser)
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getAppUid('emulator-5554', 'com.example.app')).resolves.toBeNull()
+    })
+  })
+
+  describe('getPackagesForUid', () => {
+    it('returns the package names assigned to the UID', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        'package:com.example.app\npackage:com.example.helper\n'
+      )
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123)).resolves.toEqual([
+        'com.example.app', 'com.example.helper'
+      ])
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+
+    it('bounds the package lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('package:com.example.app\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.getPackagesForUid('emulator-5554', 10123, 900)).resolves.toEqual(['com.example.app'])
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'cmd', 'package', 'list', 'packages', '--uid', '10123'
+      )
+    })
+  })
+
+  describe('processesForUid', () => {
+    it('names each of the uid\'s processes, and reads ps\'s exit 1 with only its header as none', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('  PID NAME                       \n 5344 com.example.app\n 5350 com.example.app:remote\n')
+      const wrapper = new AdbWrapper(runner)
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).resolves.toEqual([
+        { pid: 5344, name: 'com.example.app' }, { pid: 5350, name: 'com.example.app:remote' },
+      ])
+      expect(runner.exec).toHaveBeenCalledWith('-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID,NAME', '-u', '10193')
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockRejectedValueOnce(Object.assign(new Error('exit 1'), { stdout: '  PID NAME                       \n' }))
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).resolves.toEqual([])
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockRejectedValueOnce(Object.assign(new Error('device offline'), { stdout: '' }))
+      await expect(wrapper.processesForUid('emulator-5554', 10193)).rejects.toThrow('device offline')
+    })
+  })
+
+  describe('hasAppProcessForUid', () => {
+    it('detects any process using the app UID and rejects a header-only result', async () => {
+      const runner = mockRunner()
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n123\n456\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(true)
+      expect(runner.exec).toHaveBeenCalledWith(
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+
+      ;(runner.exec as ReturnType<typeof vi.fn>).mockResolvedValueOnce('PID\n')
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123)).resolves.toBe(false)
+    })
+
+    it('bounds the process lookup when the runner supports a command timeout', async () => {
+      const runner = mockRunner()
+      runner.execBounded = vi.fn().mockResolvedValue('PID\n123\n')
+      const wrapper = new AdbWrapper(runner)
+
+      await expect(wrapper.hasAppProcessForUid('emulator-5554', 10123, 900)).resolves.toBe(true)
+      expect(runner.execBounded).toHaveBeenCalledWith(
+        900,
+        '-s', 'emulator-5554', 'shell', 'ps', '-A', '-o', 'PID', '-u', '10123'
+      )
+    })
+  })
+
   describe('launchApp', () => {
     const PKG = 'com.example.app'
     const START_FIELDS = ['-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000']
@@ -317,9 +443,11 @@ describe('AdbWrapper', () => {
         if (args.includes('am')) throw killed
         return ''
       })
-      await new AdbWrapper(runner).launchApp('emulator-5554', PKG)
-      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : 'resolve'])
-      expect(bounds).toEqual([[5_000, 'resolve'], [12_000, 'am']])
+      const onStart = vi.fn()
+      await new AdbWrapper(runner).launchApp('emulator-5554', PKG, undefined, false, onStart)
+      const bounds = vi.mocked(runner.execBounded).mock.calls.map((c) => [c[0], c.includes('am') ? 'am' : c.includes('date') ? 'date' : 'resolve'])
+      expect(bounds).toEqual([[5_000, 'resolve'], [2_000, 'date'], [12_000, 'am']])
+      expect(onStart).toHaveBeenCalledWith(undefined)
       expect(ran(runner, 'monkey')).toHaveLength(0)
     })
 
@@ -963,9 +1091,11 @@ describe('AdbWrapper', () => {
     })
 
     // With uiautomator dump after it, both must fit the relay's 15 s tree deadline.
+    // A clock that stands still: what the server spent comes off the dump's cap in whole seconds, rounded up, so on the
+    // real clock a runner slow enough to take 1 ms there made it 9 (CI, PR #1220).
     it('gives the jar a shorter cap than the dump it falls back to', async () => {
       const runner = dumper({ tree: '', stock: XML })
-      await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554', 10)
+      await new AdbWrapper(runner, () => 1_000_000).dumpUiHierarchy('emulator-5554', 10)
       expect(ran(runner, 'app_process')[0]).toContain('4')
       expect(ran(runner, 'uiautomator')[0]).toContain('10')
     })
@@ -978,7 +1108,7 @@ describe('AdbWrapper', () => {
 
     it('runs uiautomator dump under the device-side timeout command', async () => {
       const runner = dumper({ tree: UNSUPPORTED, stock: XML })
-      await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554')
+      await new AdbWrapper(runner, () => 1_000_000).dumpUiHierarchy('emulator-5554')
       expect(ran(runner, 'uiautomator')[0]).toEqual([
         '-s', 'emulator-5554', 'exec-out',
         'timeout', '10', 'uiautomator', 'dump', '/dev/tty',
@@ -999,6 +1129,17 @@ describe('AdbWrapper', () => {
       const cut = `<?xml version='1.0'?>\n<hierarchy rotation="0"><node `
       const runner = dumper({ tree: cut, stock: cut })
       await expect(new AdbWrapper(runner).dumpUiHierarchy('emulator-5554')).rejects.toThrow(PlatformError)
+    })
+
+    // The cut-off output can be on-screen text: the caller's message keeps it, the log's does not (CodeRabbit, #1242).
+    it('keeps what a cut-off dump printed out of the error\'s text for a log', async () => {
+      const cut = `<?xml version='1.0'?>\n<hierarchy rotation="0"><node text="Jane Doe" `
+      const runner = dumper({ tree: cut, stock: cut })
+      const e = await new AdbWrapper(runner).dumpUiHierarchy('emulator-5554').catch((x: unknown) => x)
+      expect(e).toBeInstanceOf(DumpNoXmlError)
+      expect((e as DumpNoXmlError).message).toContain('Jane Doe')
+      expect((e as DumpNoXmlError).logged).not.toContain('Jane Doe')
+      expect((e as DumpNoXmlError).logged).toContain('produced no XML')
     })
   })
 
@@ -1137,6 +1278,21 @@ describe('AdbWrapper focused field', () => {
 
   it('answers unavailable with no way to write stdin', async () => {
     expect(await new AdbWrapper(runnerWith('')).setFocusedText('emulator-5554', 'x')).toBe('unavailable')
+  })
+
+  // A failed set used to say nothing about why (Android 16, four in one evening): the jar's exception is logged, and
+  // never the text, which can be a password.
+  it('logs the jar\'s error when a set fails, and never the text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const runner = runnerWith('', async () => '{"error":"java.lang.IllegalStateException: no window"}\n')
+      expect(await new AdbWrapper(runner).setFocusedText('emulator-5554', 'hunter2')).toBe('failed')
+      const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).toMatch(/field set failed: java\.lang\.IllegalStateException: no window/)
+      expect(logged).not.toMatch(/hunter2/)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('reads the keyboard window from dumpsys', async () => {

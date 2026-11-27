@@ -109,3 +109,25 @@ describe('the agent slot', () => {
     expect(results.map((r) => r.held)).toEqual([false, false, false])
   })
 })
+
+// The claim on Windows is a named pipe: Node binds IPC servers there only under `\\.\pipe\`.
+// Path shape only — binding one needs a Windows host.
+describe('claimPath on Windows', () => {
+  it('names a machine-wide pipe for the default location', () => {
+    expect(claimPath('android', undefined, 'win32')).toBe('\\\\.\\pipe\\tapflow-agent-android')
+  })
+
+  it('gives a non-default directory its own pipe, so test runs do not share the real claim', () => {
+    const a = claimPath('android', 'C:\\temp\\a', 'win32')
+    const b = claimPath('android', 'C:\\temp\\b', 'win32')
+    expect(a).toMatch(/^\\\\\.\\pipe\\tapflow-agent-android-[0-9a-f]{12}$/)
+    expect(a).not.toBe(b)
+  })
+
+  it('keeps the socket file everywhere else', () => {
+    // Built with join so the expectation follows the host's separators, as claimPath does — on a
+    // native-Windows test run join('/tmp', …) yields backslashes, and a literal string would not match.
+    expect(claimPath('android', '/tmp', 'darwin')).toBe(join('/tmp', 'tapflow-agent-android.sock'))
+    expect(claimPath('ios', '/tmp', 'linux')).toBe(join('/tmp', 'tapflow-agent-ios.sock'))
+  })
+})

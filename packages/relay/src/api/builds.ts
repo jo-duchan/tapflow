@@ -6,10 +6,11 @@ import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import busboy from 'busboy'
+import { androidSdkCandidates, findOnPath, hostExecutableName } from '@tapflowio/agent-core/utils'
 import { getDb } from '../db.js'
 import { assertCanWrite, requireAuth, requireBuildAuth } from '../middleware/auth.js'
 import { json, readJson } from '../router.js'
-import { pipeUpload, unlinkSafe } from '../lib/uploads.js'
+import { pipeUpload, unlinkSafe, StorageFullError, assertDiskRoom } from '../lib/uploads.js'
 import { deliverWebhooks } from '../lib/webhooks.js'
 import { deleteBuildsWithDependents, type BuildFileDirs } from '../lib/buildDeletion.js'
 import { clampLabel, cleanBuildText, overrideOf, withBinary, MAX_BUILD_TEXT } from '../lib/buildVersion.js'
@@ -159,12 +160,9 @@ export function extractAppInfo(filePath: string): AppInfo | null {
 
 /** Resolve aapt from the SDK build-tools (any version). Candidate list mirrors `tapflow doctor` so the two agree; falls back to PATH. */
 export function findAapt(): string | null {
-  const candidates = [
-    process.env['ANDROID_HOME'],
-    process.env['ANDROID_SDK_ROOT'],
-    `${process.env['HOME']}/Library/Android/sdk`, // macOS
-    `${process.env['HOME']}/Android/Sdk`,          // Linux
-  ].filter(Boolean) as string[]
+  // ANDROID_HOME, ANDROID_SDK_ROOT, then the host default (%LOCALAPPDATA%\Android\Sdk on Windows, #1100).
+  const candidates = androidSdkCandidates()
+  const aaptName = hostExecutableName('aapt')
 
   for (const androidHome of candidates) {
     const buildToolsDir = path.join(androidHome, 'build-tools')
@@ -177,12 +175,14 @@ export function findAapt(): string | null {
         return bm - am || bi - ai || bp - ap
       })
     for (const v of versions) {
-      const aapt = path.join(buildToolsDir, v, 'aapt')
+      const aapt = path.join(buildToolsDir, v, aaptName)
       if (fs.existsSync(aapt)) return aapt
     }
   }
 
   // PATH fallback — relay 프로세스가 ANDROID_HOME을 상속받지 못한 경우
+  // Windows has no `which`.
+  if (process.platform === 'win32') return findOnPath('aapt')
   const which = spawnSync('which', ['aapt'], { encoding: 'utf8' })
   if (which.status === 0) return (which.stdout as string).trim()
 
@@ -270,6 +270,9 @@ function nullBundleMessage(aaptFound: boolean): string {
  * lipo 미설치(Linux relay) 시 null 반환 → 검증 skip.
  */
 function lipoHasSimSlice(binaryBuf: Buffer): boolean | null {
+  // The executable can be 256 MB, written while the upload itself is still on disk. Below the floor the check is
+  // skipped, as it is with no lipo: the install reports a device-only build anyway.
+  try { assertDiskRoom(tmpdir(), binaryBuf.length) } catch { return null }
   const tmpBin = path.join(tmpdir(), `tapflow-lipo-${randomUUID()}`)
   fs.writeFileSync(tmpBin, binaryBuf)
   try {
@@ -637,7 +640,8 @@ export function handleUploadBuild(
     // `pipeUpload` has already removed the file.
     try {
       await writePromise
-    } catch {
+    } catch (err) {
+      if (err instanceof StorageFullError) return json(res, 507, { error: err.message })
       return json(res, 500, { error: 'Upload failed' })
     }
     if (fileError) {

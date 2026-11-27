@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { parseFlow, type CapturedFlow, type CapturedStep, type FlowResult, type RawStep } from '@tapflowio/flow-runner/browser'
-import { askedReady, canGoTo, initialState, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
+import { askedReady, canGoTo, initialState, reachedStep, reduce, stepIndex, withAsked, type CaptureState } from '@/lib/flowCapture/machine'
 import { editedCapture, exportedFlow, fileNameOf, flowOf, moveEdge, withEffects, yamlOf } from '@/lib/flowCapture/flow'
-import { addMark, markOf } from '@/lib/flowCapture/marks'
-import { NO_MARKS } from '@/lib/watchActions'
+import { markOf, mirrorMark, touchOfMark } from '@/lib/flowCapture/marks'
+import type { ChromePayload } from '@tapflowio/protocol'
 
 // Flow Capture's dialog (#1125), the parts with no screen: the order of its states, and what Edit makes of the flow.
 const raw = {} as CapturedStep['raw']
@@ -49,6 +49,51 @@ describe('the dialog\'s states', () => {
 })
 
 // #1140: a password typed on the soft keyboard, its value given by the person before Match.
+// #1170: a step left out before Match by a heuristic (a tap that only stopped a list, the first of a retried pair) can be
+// put back, and left out again with the reason it had.
+describe('a step put back in the replay', () => {
+  const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
+  const steps = [
+    { ...base, kind: 'launch', buildId: 1 },
+    { ...base, kind: 'tap', point: [0.5, 0.5], dropped: 'retried' },
+    { ...base, kind: 'tap', point: [0.5, 0.5] },
+  ] as unknown as RawStep[]
+  const loaded = reduce(initialState, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: 'x' })
+
+  it('replays it, and remembers why it was left out', () => {
+    const back = reduce(loaded, { type: 'replay-dropped', index: 1 })
+    expect(back.steps[1]!.dropped).toBeUndefined()
+    expect(back.putBack).toEqual({ 1: 'retried' })
+    expect(back.steps[2]).toBe(loaded.steps[2])
+  })
+
+  it('leaves it out again with that reason', () => {
+    const out = reduce(reduce(loaded, { type: 'replay-dropped', index: 1 }), { type: 'drop-again', index: 1 })
+    expect(out.steps[1]!.dropped).toBe('retried')
+    expect(out.putBack).toEqual({})
+  })
+
+  it('changes nothing for a step that was not left out, or one never put back', () => {
+    expect(reduce(loaded, { type: 'replay-dropped', index: 2 })).toBe(loaded)
+    expect(reduce(loaded, { type: 'drop-again', index: 1 })).toBe(loaded)
+  })
+
+  // CodeRabbit on #1228: the last Match is of another flow once what it replays changes, with the range where it was.
+  it('takes Edit, Verify and Export away until the next Match, either way', () => {
+    const matched = { ...loaded, matchedRange: loaded.range, reached: 4 }
+    expect(reachedStep(matched)).toBe(4)
+    const back = reduce(matched, { type: 'replay-dropped', index: 1 })
+    expect(reachedStep(back)).toBe(0)
+    const out = reduce({ ...back, matchedRange: back.range, reached: 4 }, { type: 'drop-again', index: 1 })
+    expect(reachedStep(out)).toBe(0)
+  })
+
+  it('forgets what was put back when a capture loads', () => {
+    const back = reduce(loaded, { type: 'replay-dropped', index: 1 })
+    expect(reduce(back, { type: 'loaded', steps, range: { start: 0, end: 3 }, name: 'x' }).putBack).toEqual({})
+  })
+})
+
 describe('the passwords the person gives', () => {
   const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
   const steps = [
@@ -235,11 +280,85 @@ describe('the touches drawn', () => {
   const base = { at: 0, endAt: 0, outcome: 'landed', messages: [] }
 
   it('marks a tap, a key, a long press and a swipe, and nothing else', () => {
-    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.2, y: 0.3 })
-    expect(markOf({ ...base, kind: 'keyboardKey', point: [0.5, 0.9] } as unknown as RawStep)).toEqual({ kind: 'tap', x: 0.5, y: 0.9 })
+    expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+    expect(markOf({ ...base, kind: 'keyboardKey', point: [0.5, 0.9] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.5, y: 0.9 } })
     expect(markOf({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200 } as unknown as RawStep))
-      .toEqual({ kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2] })
+      .toEqual({ kind: 'swipe', from: { x: 0.1, y: 0.8 }, to: { x: 0.1, y: 0.2 }, durationMs: 200 })
     expect(markOf({ ...base, kind: 'text', text: 'a' } as unknown as RawStep)).toBeNull()
+  })
+
+  // A captured pinch has its fingers' start and end; drawn as both. Mutations: drop the pinch case, swap start and end.
+  it('marks a pinch with both fingers', () => {
+    const pinch = { ...base, kind: 'pinch', start: [[0.4, 0.45], [0.6, 0.55]], end: [[0.2, 0.35], [0.8, 0.65]], durationMs: 300 }
+    expect(markOf(pinch as unknown as RawStep)).toEqual({
+      kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300,
+    })
+  })
+
+  // An Android body-mode holder's step is in the video frame's own points (`space: 'frame'`), and none was drawn: every
+  // Android replay showed no touch. Over the replay's mirror, which is that frame, it is drawn as it is, however the
+  // body is turned; on a screenshot, turned into the screen by the recorded frame-to-screen map, and not without one.
+  // Mutations: draw the mirror's turned, skip the turn on a screenshot, or drop the no-map case.
+  describe('a step in the frame\'s own points', () => {
+    const chrome = (streamRotation: number | undefined, bodyRotation = 0) => ({ bodyRotation, ...(streamRotation === undefined ? {} : { streamRotation }) })
+    const tap = (c: object) => ({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame', chrome: c }) as unknown as RawStep
+    const swipe = (c: object) => ({ ...base, kind: 'swipe', from: [0.1, 0.8], to: [0.1, 0.2], durationMs: 200, space: 'frame', chrome: c }) as unknown as RawStep
+    const pinch = (c: object) => ({ ...base, kind: 'pinch', start: [[0.4, 0.45], [0.6, 0.55]], end: [[0.2, 0.35], [0.8, 0.65]], durationMs: 300, space: 'frame', chrome: c }) as unknown as RawStep
+
+    it('draws it as it is over the mirror, marked as the frame\'s, even with the body turned', () => {
+      expect(markOf(tap(chrome(0)), 'frame')).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(tap(chrome(90, 90)), 'frame')).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(swipe(chrome(0)), 'frame')).toEqual({ kind: 'swipe', from: { x: 0.1, y: 0.8 }, to: { x: 0.1, y: 0.2 }, durationMs: 200, inFrame: true })
+      expect(markOf(pinch(chrome(0)), 'frame')).toEqual({
+        kind: 'pinch', from: [{ x: 0.4, y: 0.45 }, { x: 0.6, y: 0.55 }], to: [{ x: 0.2, y: 0.35 }, { x: 0.8, y: 0.65 }], durationMs: 300, inFrame: true,
+      })
+    })
+
+    // The mirror copies the frame: a frame's mark goes over it however the body is turned; a screen's is carried into
+    // the frame by the inverse of Android's frame-to-screen map, and with none, drawn only upright.
+    // Mutations: skip the conversion, turn it the wrong way, or drop the upright check.
+    it('is drawn over the mirror whatever the turn, and a screen\'s mark carried into the frame', () => {
+      const turned = { bodyRotation: 90, streamRotation: 90 } as unknown as ChromePayload
+      const frameMark = markOf(tap(turned), 'frame')!
+      expect(mirrorMark(frameMark, turned)).toBe(frameMark)
+      const screenTap = { kind: 'tap', point: { x: 0.2, y: 0.3 } } as const
+      expect(mirrorMark(screenTap, { bodyRotation: 0 } as unknown as ChromePayload)).toBe(screenTap)
+      expect(mirrorMark(screenTap, null)).toBe(screenTap)
+      // Upright, but the frame a quarter off the screen (an unfolded foldable): the screen's (0.2, 0.3) is the frame's
+      // (0.3, 0.8), which the screenshot path turns back (`toScreen`, frame turn 90: (1 - y, x)).
+      const foldable = { bodyRotation: 0, streamRotation: 90 } as unknown as ChromePayload
+      expect(mirrorMark(screenTap, foldable)).toEqual({ kind: 'tap', point: { x: 0.3, y: 0.8 }, inFrame: true })
+      expect(markOf({ ...tap(foldable), point: [0.3, 0.8] } as unknown as RawStep)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark({ kind: 'swipe', from: { x: 0.2, y: 0.3 }, to: { x: 0.5, y: 0.5 }, durationMs: 100 }, foldable))
+        .toEqual({ kind: 'swipe', from: { x: 0.3, y: 0.8 }, to: { x: 0.5, y: 0.5 }, durationMs: 100, inFrame: true })
+      expect(mirrorMark({ kind: 'pinch', from: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.2, y: 0.3 }, { x: 0.5, y: 0.5 }], durationMs: 100 }, foldable))
+        .toEqual({ kind: 'pinch', from: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], to: [{ x: 0.3, y: 0.8 }, { x: 0.5, y: 0.5 }], durationMs: 100, inFrame: true })
+      // Turned, with the app turning too: a map of 0, the frame is the screen, and the mark is drawn as it is.
+      expect(mirrorMark(screenTap, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload))
+        .toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      // A recorded screen-space step: over the mirror, `mirrorMark` decides by the map, not `markOf` by the turn; on a
+      // screenshot the upright check stays.
+      const turnedStep = { ...base, kind: 'tap', point: [0.2, 0.3], chrome: { bodyRotation: 90, streamRotation: 0 } } as unknown as RawStep
+      const recorded = markOf(turnedStep, 'frame')
+      expect(recorded).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      expect(mirrorMark(recorded!, { bodyRotation: 90, streamRotation: 0 } as unknown as ChromePayload)).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 }, inFrame: true })
+      expect(markOf(turnedStep)).toBeNull()
+      // Turned with no map from the frame (an older agent): the screen may not be the frame, and nothing is drawn.
+      expect(mirrorMark(screenTap, { bodyRotation: 90 } as unknown as ChromePayload)).toBeNull()
+    })
+
+    it('turns it into the screen on a screenshot, and draws none with no map', () => {
+      expect(markOf(tap(chrome(0)))).toEqual({ kind: 'tap', point: { x: 0.2, y: 0.3 } })
+      // A folded foldable: upright body, frame a quarter off the screen.
+      expect(markOf(tap(chrome(90)))).toEqual({ kind: 'tap', point: { x: 0.7, y: 0.2 } })
+      expect(markOf(swipe(chrome(270)))).toEqual({ kind: 'swipe', from: { x: 0.8, y: 0.9 }, to: { x: 0.2, y: 0.9 }, durationMs: 200 })
+      expect(markOf(tap(chrome(undefined)))).toBeNull()
+      expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], space: 'frame' } as unknown as RawStep)).toBeNull()
+      // The replay turns the device to the range's start before its screenshots, so a turned body's step is turned too.
+      expect(markOf(tap(chrome(90, 90)))).toEqual({ kind: 'tap', point: { x: 0.7, y: 0.2 } })
+      // A screen's step on a turned body is still not drawn: its points are not the picture's.
+      expect(markOf({ ...base, kind: 'tap', point: [0.2, 0.3], chrome: chrome(0, 90) } as unknown as RawStep)).toBeNull()
+    })
   })
 
   it('marks nothing on a turned device, whose points are in another frame than its picture', () => {
@@ -247,12 +366,10 @@ describe('the touches drawn', () => {
     expect(markOf(turned as unknown as RawStep)).toBeNull()
   })
 
-  // User, session ff5d3d3c: the last few strokes left on the replay read as a swipe made again and again.
-  it('moves the cursor to each touch and keeps only that touch\'s trail', () => {
-    let m = NO_MARKS
-    for (let i = 1; i <= 6; i++) m = addMark(m, i, { kind: 'tap', x: i / 10, y: 0.5 })
-    expect(m.cursor).toEqual({ x: 0.6, y: 0.5 })
-    expect(m.trails.map((t) => t.id)).toEqual([6])
-    expect(addMark(m, 7, { kind: 'swipe', from: [0, 0], to: [1, 1] }).cursor).toEqual({ x: 1, y: 1 })
+  // A swipe's own length is what the replay draws it over, so a quick fling is not drawn as a slow drag.
+  it('plays a replayed step\'s touch from when it was sent, with the swipe\'s own length', () => {
+    const swipe = { kind: 'swipe' as const, from: { x: 0, y: 0 }, to: { x: 1, y: 1 }, durationMs: 250 }
+    expect(touchOfMark(7, swipe, 1000)).toEqual({ id: 7, at: 1000, ...swipe })
+    expect(touchOfMark(8, { kind: 'tap', point: { x: 0.2, y: 0.3 } }, 5)).toEqual({ id: 8, at: 5, kind: 'tap', point: { x: 0.2, y: 0.3 } })
   })
 })

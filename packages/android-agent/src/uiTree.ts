@@ -16,7 +16,7 @@ const ROLE_RULES: Array<[RegExp, UIElementRole]> = [
   [/TextView/, 'text'],
 ]
 
-function toRole(className: string): UIElementRole {
+export function toRole(className: string): UIElementRole {
   for (const [re, role] of ROLE_RULES) {
     if (re.test(className)) return role
   }
@@ -50,7 +50,7 @@ const round4 = (n: number): number => Math.round(n * 10000) / 10000
 // The window's own decor. Android gives almost every view an id, the framework's included, so "an id keeps a
 // node" would otherwise put these full-width layers in every tree — noise for an agent reading it, and nothing a
 // flow selects. Only these: `android:id/` as a whole also covers real targets such as `android:id/progress`.
-const DECOR_IDS = new Set(['android:id/content', 'android:id/statusBarBackground', 'android:id/navigationBarBackground'])
+export const DECOR_IDS = new Set(['android:id/content', 'android:id/statusBarBackground', 'android:id/navigationBarBackground'])
 /** Down, for a far edge: `x + width` must not reach past 1 by a rounding step. Same rule as the iOS parser. */
 const floor4 = (n: number): number => Math.max(0, Math.floor(n * 10000 + 1e-9) / 10000)
 
@@ -67,6 +67,11 @@ export function dumpRootFloats(xml: string): boolean {
 }
 
 export function parseUiAutomatorDump(xml: string, screen?: { width: number; height: number } | null): UIElement[] {
+  return parseUiAutomatorTree(xml, screen).elements
+}
+
+/** The dump's elements, and the height ÷ width of the size their frames are fractions of (`UiTreeResponse.aspect`). */
+export function parseUiAutomatorTree(xml: string, screen?: { width: number; height: number } | null): { elements: UIElement[]; aspect?: number } {
   if (!xml.includes('<hierarchy')) {
     throw new PlatformError(`uiautomator dump did not return a UI hierarchy: ${xml.slice(0, 200).trim() || '(empty output)'}`)
   }
@@ -79,7 +84,7 @@ export function parseUiAutomatorDump(xml: string, screen?: { width: number; heig
     }
     nodes.push({ attrs, bounds: parseBounds(attrs['bounds']) })
   }
-  if (nodes.length === 0) return []
+  if (nodes.length === 0) return { elements: [] }
 
   // The root node spans the current display, so dumps normalize correctly in
   // any orientation without a separate `wm size` round-trip — unless a window floats over it (`dumpRootFloats`), when
@@ -157,5 +162,5 @@ export function parseUiAutomatorDump(xml: string, screen?: { width: number; heig
     if (attrs['selected'] === 'true') element.selected = true
     elements.push(element)
   }
-  return elements
+  return { elements, aspect: height / width }
 }

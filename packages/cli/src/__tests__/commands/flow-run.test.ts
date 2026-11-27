@@ -46,7 +46,9 @@ vi.mock('@tapflowio/flow-runner', async (importOriginal) => ({
     activity = mocks.activity
   },
   RelayDriver: class {
-    constructor(..._args: unknown[]) {}
+    /** What the run built it with: the fourth is where each sent touch goes (a flow's video). */
+    readonly args: unknown[]
+    constructor(...args: unknown[]) { this.args = args }
   },
 }))
 
@@ -422,6 +424,26 @@ describe('cmdFlowRun records the run on the relay (A3)', () => {
     expect(errLines()).toContain('  try: tapOn: "Sign in"')
     const report = relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body as { steps: { suggestions?: unknown[] }[] }
     expect(report.steps[0]!.suggestions).toEqual([suggestion])
+  })
+
+  // A run asks the device for JPEG, and an older agent answers PNG: the failure's file is named by what it holds, so
+  // a viewer opens it, and the other extension's file from an earlier run goes, or it would pass as this failure's
+  // evidence. And a screenshot the engine tried and missed is on the report, for the card to say so.
+  // Mutations: name every file .png, keep the earlier file, or drop the report's field.
+  it('names the failure screenshot by its bytes, and reports a missed one', async () => {
+    fakeRelay()
+    const artifacts = path.join(dir, 'artifacts')
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('failed', 'product'), failureScreenshot: Buffer.from([0xff, 0xd8, 0xff, 0xe0]) })
+    await cmdFlowRun([file], { token: 'tflw_pat_x', artifacts })
+    expect(fs.readdirSync(artifacts).map((f) => f.slice(f.lastIndexOf('-')))).toEqual(['-failure.jpg'])
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('failed', 'product'), failureScreenshot: Buffer.from([0x89, 0x50, 0x4e, 0x47]) })
+    await cmdFlowRun([file], { token: 'tflw_pat_x', artifacts })
+    expect(fs.readdirSync(artifacts).map((f) => f.slice(f.lastIndexOf('-')))).toEqual(['-failure.png'])
+
+    const relay = fakeRelay()
+    mocks.runFlow.mockResolvedValueOnce({ ...resultOf('passed'), screenshotMissed: true })
+    await cmdFlowRun([file], { token: 'tflw_pat_x' })
+    expect(relay.calls.find((c) => c.url.endsWith('/flows/0'))!.body).toMatchObject({ screenshotMissed: true })
   })
 
   it('creates the run with the runner id and the planned flows, reports each flow, and finishes it', async () => {
@@ -919,10 +941,11 @@ describe('cmdFlowRun keeps each flow\'s video beside the record (A4)', () => {
 
   it('sends each flow\'s frames as its video, with the step marks, and ends it', async () => {
     const relay = fakeRelay()
-    mocks.runFlow.mockImplementation(async (_flow: unknown, _driver: unknown, opts: { onStep?: (m: unknown) => void }) => {
+    mocks.runFlow.mockImplementation(async (_flow: unknown, driver: { args: unknown[] }, opts: { onStep?: (m: unknown) => void }) => {
       const tap = streamListener()
       tap.frame(IDR)
       opts.onStep?.({ index: 0, name: 'tap', phase: 'start' })
+      ;(driver.args[3] as (t: unknown) => void)({ kind: 'tap', point: [0.1, 0.2] })
       tap.frame(PFRAME)
       return { ...resultOf('failed', 'product'), failureScreenshot: Buffer.from('png') }
     })
@@ -938,6 +961,8 @@ describe('cmdFlowRun keeps each flow\'s video beside the record (A4)', () => {
     expect(open).toMatchObject({ formatVersion: 1, codec: 'h264', platform: 'ios' })
     const chunk = relay.calls.find((c) => c.url.endsWith('/0/video/chunks/0'))!.body as Uint8Array
     expect(Buffer.from(chunk).includes(Buffer.from('"type":"step"'))).toBe(true)
+    // Each touch the driver sends is in the video too, for the player to draw. Mutation: build the driver without it.
+    expect(Buffer.from(chunk).includes(Buffer.from('"type":"touch","kind":"tap","point":[0.1,0.2]'))).toBe(true)
     expect(relay.calls.find((c) => c.url.endsWith('/0/video/end'))!.body).toEqual({ lastSeq: 0, reason: 'done' })
     // The record is unchanged by its video.
     expect(relay.calls.filter((c) => !c.url.includes('/video')).map((c) => c.url.replace('http://localhost:4000', ''))).toEqual([

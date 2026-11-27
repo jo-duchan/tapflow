@@ -940,6 +940,7 @@ Body (JSON):
   failureKind     string               optional  "product" | "environment"
   failureMessage  string               optional  For a skipped flow, why it was skipped, in words
   deviceId, deviceName, platform  string  optional
+  screenshotMissed  boolean           optional  true when the runner tried to take a screenshot and got none
 ```
 
 `skipped` is a flow the runner did not run: `app-mismatch` when its `appId` differs from the build's, `tag-filter` when the tag options left it out. A skipped flow takes no screenshot (`409`), and a flow already reported as `passed` or `failed` cannot be reported as skipped (`409`).
@@ -948,7 +949,7 @@ Body (JSON):
 
 ### `POST /api/v1/runs/:id/flows/:idx/screenshot`
 
-Upload the screenshot of a reported flow: the screen it failed on, or the screen a passed flow ended on. The body is the image bytes as they are; the relay tells PNG from JPEG by the first bytes. Over 5 MB gets `413`, anything that is not an image gets `415`.
+Upload the screenshot of a reported flow: the screen it failed on, or the screen a passed flow ended on. The body is the image bytes as they are; the relay tells PNG from JPEG by the first bytes. Over 5 MB gets `413`, anything that is not an image gets `415`, and a full relay disk gets `507`. In those three cases the relay records the reason on the flow as `screenshotNote`.
 
 **Response `200`** `{ "ok": true }`
 
@@ -1020,7 +1021,7 @@ A `build`, `before` or `after` that is not a non-negative integer gets `400`. An
 One run with each flow's result. It has the list item's fields plus:
 
 - `deviceReset`: whether the run reset its device; `null` for a run from a runner that predates resets. `requested` says whether it asked, and once the boot is reported `booted`, `cold` and `report` are added. When the runner names its sessions, `devices` holds `sessionId`, `deviceId`, `deviceName`, `cold` and `report` for each device; with several, the fields beside it are the first device's. List items carry this field too.
-- `flows`: in the planned order. A reported flow carries `status` (`passed` or `failed`), `steps`, `device`, `durationMs` and `hasScreenshot`. A skipped flow carries `status: "skipped"`, `skipReason` and a `failureMessage` that says why. A flow with a video carries `video` with `ended`, `endReason`, `evicted`, `notRecorded` and `bytes`, and `null` when it has none; `notRecorded` says why the runner could not keep one (`jpeg`, `no-keyframe`). A flow not reported yet is `running` (in progress now) or `pending` on a run in progress, and `not-run` on a finished one. A `running` flow whose start the runner reported carries `device` (`id`, `name`, `sessionId`). On a run from a runner that does not report starts, the first flow not reported yet is shown as `running`.
+- `flows`: in the planned order. A reported flow carries `status` (`passed` or `failed`), `steps`, `device`, `durationMs` and `hasScreenshot`. A flow with no screenshot carries the reason in `screenshotNote`: `too-large`, `not-image` or `storage-full` when the relay refused the upload, `not-taken` when the runner tried to take one and got none, and `null` when no reason is known. A skipped flow carries `status: "skipped"`, `skipReason` and a `failureMessage` that says why. A flow with a video carries `video` with `ended`, `endReason`, `evicted`, `notRecorded` and `bytes`, and `null` when it has none; `notRecorded` says why the runner could not keep one (`jpeg`, `no-keyframe`). A flow not reported yet is `running` (in progress now) or `pending` on a run in progress, and `not-run` on a finished one. A `running` flow whose start the runner reported carries `device` (`id`, `name`, `sessionId`). On a run from a runner that does not report starts, the first flow not reported yet is shown as `running`.
 - `watchSessionId`: the session the runner holds now. Set only while the run is in progress; it goes in the [watch page](/automation/mcp-server#watch-the-device) address.
 - `watchSessionIds`: every session the runner holds now, one per device on a run across several, and empty on a finished run.
 
@@ -1202,13 +1203,16 @@ Return the UI elements on the session device's current screen.
       "enabled": true
     }
   ],
-  "interfaceTurn": 90
+  "interfaceTurn": 90,
+  "aspect": 0.46
 }
 ```
 
 `frame` is a 0–1 fraction of the screen size, measured on the screen as the app draws it. The error status codes match the screenshot endpoint, with a 15-second timeout.
 
 `interfaceTurn` is how many degrees clockwise the device's portrait screen has to turn for the app's interface to stand upright: `0`, `90`, `180` or `270`. It is present only when the agent can read the app's orientation, which today is iOS only. When it is absent, there is no information about the turn.
+
+`aspect` is the height divided by the width, in pixels, of the area the `frame` fractions are measured in: about `2.2` for a phone held upright and `0.46` for one turned sideways. Multiply a frame's height by it to compare its height with its width. When it is absent, the agent did not send it, which is the case for agents from before this field.
 
 Text fields (`role: "input"`) carry `secure`: `true` for a field that hides what is typed, such as a password, and `false` otherwise. Any other element that reports hiding its text has `secure: true` too. A text field without `secure` means the agent could not tell, so treat it as a password field. The field that is taking typing now has `focused: true`.
 
@@ -1267,7 +1271,7 @@ Keep a picture of the screen as an input began: a JPEG of at most 16 KB, for an 
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 
-Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none.
+Return the picture of a step in the copy, as `image/jpeg`. The copy's `thumbnails` lists the steps that have one. Returns `404` when there is none. The copy's `thumbnailRefusals` says, by `requestId`, why a step has none: `keyboard` for a touch the keyboard reads do not place off the on-screen keyboard, `typed` for an input begun right after typing. A relay that does not say leaves it out.
 
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 

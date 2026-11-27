@@ -84,6 +84,13 @@ describe('TapflowClient run records', () => {
     expect(JSON.stringify(run)).not.toMatch(/watchSessionId|"video"/)
   })
 
+  // An agent reading a failed flow with no screenshot learns why, as the page says it. Mutation: drop the field.
+  it('says why a flow has no screenshot', async () => {
+    stubRelay(() => Response.json({ ...summary, watchSessionId: null, flows: [{ ...failedFlow(0, false), screenshotNote: 'too-large' }] }))
+    const run = await new TapflowClient(RELAY, TOKEN).getRun('run-1')
+    expect(run.flows[0]).toMatchObject({ hasScreenshot: false, screenshotNote: 'too-large' })
+  })
+
   it('names the run that is missing, and the token the relay refused', async () => {
     stubRelay(() => Response.json({ error: 'Run not found' }, { status: 404 }))
     await expect(new TapflowClient(RELAY, TOKEN).getRun('nope')).rejects.toThrow('no run with id "nope" on this relay')

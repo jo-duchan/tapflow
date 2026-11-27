@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/relay",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "WebSocket relay server for tapflow — NAT traversal, session routing, JWT auth, bundled dashboard",
   "keywords": [
     "tapflow",
@@ -47,7 +47,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b && rm -rf dist/migrations && cp -r src/migrations dist/migrations",
+    "build": "tsc -b && node ../../scripts/fs-copy.mjs replace src/migrations dist/migrations",
     "typecheck": "tsc -b && tsc -p src/__tests__/tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
@@ -60,8 +60,8 @@
     "better-sqlite3": "^12.11.1",
     "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^10.4.0",
-    "ws": "^8.22.2",
+    "nodemailer": "^10.6.0",
+    "ws": "^8.23.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -83,8 +83,9 @@ describe('the dialog\'s state at a step that looked different', () => {
 
 describe('Match stopped at a step that looked different', () => {
   const handlers = () => ({
-    tap: { surface: () => null } as never, marks: { cursor: null, trails: [] }, onStop: vi.fn(), onRestart: vi.fn(),
+    tap: { surface: () => null } as never, touch: null, onStop: vi.fn(), onRestart: vi.fn(),
     onTakeWhatMatched: vi.fn(), onBackToRange: vi.fn(), onContinueAnyway: vi.fn(), stopRef: { current: null }, onContinueToEdit: vi.fn(), onKeep: vi.fn(), thumbnailOf: () => null,
+    onPutBackAndMatch: vi.fn(),
   })
 
   it('shows both pictures, where they differ, the facts, and the three buttons in their places', () => {
@@ -127,6 +128,27 @@ describe('Match stopped at a step that looked different', () => {
     const state = reduce(reduce(initialState, { type: 'loaded', steps: withDrops, range: { start: 3, end: 7 }, name: 'f' }), { type: 'match-started', total: 4 })
     render(<MatchScreen state={reduce(state, { type: 'diverged', ...divergence, index: 6 })} {...handlers()} />)
     expect(screen.getByText(/#4, #6 were not replayed:/)).toBeInTheDocument()
+  })
+
+  // #1170: the sentence that names the taps left out has the button that puts them back, grouped apart from the rest.
+  it('puts back the taps it names and matches again, from a button under that sentence', () => {
+    const drop = () => step('tap', { onHome: false, dropped: 'stopped-scroll' })
+    const withDrops = [...steps.slice(0, 3), drop(), step('tap', { onHome: false }), drop(), step('tap', { onHome: false })]
+    const state = reduce(reduce(initialState, { type: 'loaded', steps: withDrops, range: { start: 3, end: 7 }, name: 'f' }), { type: 'match-started', total: 4 })
+    const props = handlers()
+    render(<MatchScreen state={reduce(state, { type: 'diverged', ...divergence, index: 6 })} {...props} />)
+    const sentence = screen.getByText(/#4, #6 were not replayed:/)
+    const button = screen.getByRole('button', { name: 'Put back and match again' })
+    // One group: the sentence and its button share a parent, apart from the paragraph on how to go on.
+    expect(button.parentElement).toBe(sentence.parentElement)
+    expect(sentence.parentElement!.textContent).not.toMatch(/continue anyway/i)
+    fireEvent.click(button)
+    expect(props.onPutBackAndMatch).toHaveBeenCalledWith([3, 5])
+  })
+
+  it('offers no Put back when no tap before the step was left out', () => {
+    render(<MatchScreen state={stopped(matching)} {...handlers()} />)
+    expect(screen.queryByRole('button', { name: 'Put back and match again' })).not.toBeInTheDocument()
   })
 
   it('offers Edit what matched only when something matched, moving nothing else', () => {

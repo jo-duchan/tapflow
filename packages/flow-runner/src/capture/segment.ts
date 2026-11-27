@@ -1,6 +1,6 @@
 import type { PointSpace } from '@tapflowio/protocol'
 import type { CaptureEntry, CapturedMessage } from '@tapflowio/protocol/capture'
-import type { FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
+import type { FocusedField, KeyboardState, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import { keyChar } from './keys.js'
 import { judgeTouch, keyboardTimeline, type KeyboardTimeline } from './keyboard.js'
 
@@ -59,10 +59,17 @@ type KeyboardRect = NonNullable<KeyboardState['rect']>
 type Touch = {
   space?: PointSpace
   keyboard?: 'unknown'
-  /** What the app reported of this touch's touch-down (`capture:touched`, iOS): whether a list was moving, the element
-   *  and button it hit. Absent where no report came — Android, an older agent, a touch outside the app. */
+  /** What the agent reported of this touch's touch-down (`capture:touched`): whether a list was moving, the element
+   *  and button it hit. Absent where no report came — an older agent, a touch outside the app, a hit read too late. */
   touched?: TouchObservation
+  /** Where the agent saw it go down (#1214): the app, the home screen, a system surface, a prompt the app raised, or
+   *  another app. Absent from an agent that does not say, or where it could not; the reads judge such a touch. */
+  landed?: TouchLanding
 }
+
+/** A step the agent placed on the home screen (#1214): the launcher's own surface, or Spotlight, which searches from it
+ *  in a process of its own. */
+export const landedHome = (l: TouchLanding | undefined): boolean => l?.on === 'home' || (l?.on === 'other' && l.id === 'com.apple.Spotlight')
 
 export type RawStep = StepBase & (
   | { kind: 'tap'; point: Point } & Touch
@@ -293,16 +300,21 @@ const TOUCH_KINDS = new Set<RawStep['kind']>(['tap', 'longPress', 'swipe', 'hold
  */
 function withTouches(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reports = new Map<string, TouchObservation>()
+  const landings = new Map<string, TouchLanding>()
   // The later of two for one gesture: the agent repeats the report once the app's verdict (`acted`) is in.
   for (const e of entries) if (e.kind === 'touched') reports.set(e.requestId, e.touched)
-  if (reports.size === 0) return steps
+  // One landing per gesture: the relay keeps the first (#1214).
+  for (const e of entries) if (e.kind === 'landed' && !landings.has(e.requestId)) landings.set(e.requestId, e.landed)
+  if (reports.size === 0 && landings.size === 0) return steps
   return steps.map((s) => {
     if (!TOUCH_KINDS.has(s.kind)) return s
     const end = s.messages.find((m) => m.msg.type === 'input:touch:end')?.msg
-    const touched = end && 'requestId' in end && end.requestId ? reports.get(end.requestId) : undefined
-    if (!touched) return s
-    const stopped = s.kind === 'tap' && touched.moving && s.outcome !== 'refused'
-    return { ...s, touched, ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
+    const id = end && 'requestId' in end && end.requestId ? end.requestId : undefined
+    const touched = id ? reports.get(id) : undefined
+    const landed = id ? landings.get(id) : undefined
+    if (!touched && !landed) return s
+    const stopped = s.kind === 'tap' && touched?.moving === true && s.outcome !== 'refused'
+    return { ...s, ...(touched ? { touched } : {}), ...(landed ? { landed } : {}), ...(stopped ? { dropped: 'stopped-scroll' as const } : {}) }
   })
 }
 
@@ -345,25 +357,62 @@ function union(a: KeyboardRect, b: KeyboardRect): KeyboardRect {
  */
 function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[] {
   const reads = entries.flatMap((e) => (e.kind === 'keyboard' ? [e] : [])).sort((a, b) => a.at - b.at)
-  if (reads.length === 0) return steps
+  if (reads.length === 0 && !steps.some((s) => 'landed' in s && s.landed)) return steps
   let i = 0
-  let lastRead: (typeof reads)[number] | undefined
   let previousEnd = -Infinity
+  // The step before stayed on the home screen: not a tap, placed there, and the first read asked after it ended, and
+  // before the next step began, says home too — a page turned. Answered late is fine (the measured case's was, 18 ms
+  // after the tap lifted); asked late is not: a read after a later trip home would vouch for the icon's tap. Never a
+  // tap: an app takes a moment to come up, so the read right after the icon's tap still says home, and the tap after it
+  // could be a permission alert's Allow (CodeRabbit on #1225, twice). A folder opened by a tap leaves its icon's tap
+  // unknown, as before this rule: the range warns, and the person moves the start.
+  let stayedHome = false
   return steps.map((s, n) => {
-    while (i < reads.length && reads[i]!.at <= s.at) lastRead = reads[i++]
+    const placed = place(s, n)
+    const nextAt = steps[n + 1]?.at ?? Infinity
+    stayedHome = placed.onHome === true && s.kind !== 'tap'
+      && reads.find((r) => r.requestedAt >= s.endAt && r.requestedAt < nextAt)?.keyboard.onHome === true
+    return placed
+  })
+
+  function place(s: RawStep, n: number): RawStep {
     const sinceLast = previousEnd
     previousEnd = s.endAt
-    // The app reported this touch (iOS): it went down in the app, whatever a read trailing the icon's tap says. No app
-    // reports a touch on the home screen; the observer runs only in the app under test.
+    // The agent saw where it went down (#1214): settled, whatever the reads around it say. A system surface or another
+    // app is neither the home screen nor the app, so `onHome` is left to the reads there — Match counts a step placed
+    // off the home screen as one taken in the app (`stepsBeforeRange`), and the range reads the landing itself.
+    const landed = 'landed' in s ? s.landed : undefined
+    if (landedHome(landed)) return { ...s, onHome: true }
+    if (landed?.on === 'app' || landed?.on === 'alert') return { ...s, onHome: false }
+    // A report says this touch went down in the app, whatever a read trailing the icon's tap says. No touch on the home
+    // screen is reported: iOS's observer runs only in the app under test, and Android's agent reports only a touch whose
+    // topmost window is that app's.
     if ('touched' in s && s.touched) return { ...s, onHome: false }
     // A read asked for before the step ahead ended, and answered after it, is about the screen that step left: the icon
-    // tap's would place the first tap in the app on the home screen.
+    // tap's would place the first tap in the app on the home screen. A touch changes what is in front only once it lifts
+    // (an icon opens its app, a swipe up goes home), so a read answered before it lifted still tells where it began: a
+    // read takes about half a second, and a person turning home-screen pages faster than that left a swipe with none
+    // answered before it began (iOS 26.5). Still one asked before it began: that is the read the measured case had, and
+    // a later one is asked about a screen the touch is already on. A button acts as it goes down, so for one only a read
+    // before it counts. What this cannot tell: a swipe home made within a read of opening the app reads as made on the
+    // home screen.
+    const until = TOUCH_KINDS.has(s.kind) ? s.endAt : s.at
+    // Reads are asked one at a time, so in answer order they are in asking order too.
+    while (i < reads.length && reads[i]!.at <= until) i++
+    let k = i - 1
+    while (k >= 0 && reads[k]!.requestedAt > s.at) k--
+    const lastRead = k >= 0 ? reads[k] : undefined
     const last = lastRead && lastRead.requestedAt >= sinceLast ? lastRead.keyboard.onHome : undefined
-    if (last === undefined) return s
+    // No read placed it — the person moved faster than the reads, one before it asked during the step ahead and the
+    // next answered just after it lifted (#1224, iOS 26.5) — yet the step before stayed home: the app's first report
+    // still says whether this tap is the one that opened it, on the same evidence as below. Not after a step that left
+    // home: a permission alert's Allow, tapped as the app came up, sits right before the app's first touch as well
+    // (pre-PR review), and the replay would launch into an alert nobody taps.
+    if (last === undefined) return stayedHome && openedTheApp(steps, n) ? { ...s, onHome: true } : s
     const after = last ? reads.find((r) => r.requestedAt >= s.endAt)?.keyboard.onHome : undefined
     if (last && after === false) return openedTheApp(steps, n) ? { ...s, onHome: true } : s
     return { ...s, onHome: last }
-  })
+  }
 }
 
 /**
@@ -371,6 +420,11 @@ function withHome(steps: RawStep[], entries: readonly CaptureEntry[]): RawStep[]
  * app reported, followed straight by a touch the app reports as the first in its process (`seq` 1).
  * A missing report alone cannot say it: an app just started may report its first tap too late to be paired, and that
  * tap looks the same (design review). Anything else stays unknown, which stops the default range's skip there.
+ *
+ * It need not be the icon: a widget, a Spotlight result or a notification of the app opens it the same way, and the
+ * replay's own launch stands for each. Another app's icon would open that app, and coming back takes a touch of its own,
+ * so the next step would not be the app's first. What this cannot tell: another app opening this one by a link with no
+ * touch between, whose screen the replay's plain launch may not reach.
  */
 function openedTheApp(steps: readonly RawStep[], n: number): boolean {
   const s = steps[n]!

@@ -1,4 +1,5 @@
 import type { WatchActionKind } from '@tapflowio/protocol'
+import type { MachineTouch } from '@/lib/touchMarks'
 
 /** A holder's action as the watch page keeps it (A2): when the relay saw it, and an id for lists and timers. */
 export interface WatchedAction {
@@ -9,28 +10,29 @@ export interface WatchedAction {
 
 /** The list keeps this many; older ones fall off. Nothing is stored anywhere — a reload starts empty. */
 export const MAX_ACTIONS = 100
-/** How long the trail of a move stays drawn on the device; the cursor itself stays. */
-export const MARK_MS = 900
 
 /**
- * The agent's pointer on the device, as the watch page draws it — the way computer-use views do: a cursor that stays
- * at the last tap and glides to the next, leaving a short-lived trail of where it came from.
+ * An action's touch, to draw over the device from `at` (the page's clock when it arrived). Only the latest is drawn:
+ * the motion is the same one a person's pointer makes (`lib/touchMarks`), so a touch the page has not drawn yet is
+ * not queued behind one it is drawing.
  */
-export interface WatchMarks {
-  cursor: { x: number; y: number } | null
-  trails: Trail[]
+export function touchOfAction(id: number, a: DrawnAction, at: number): MachineTouch {
+  const pt = ([x, y]: [number, number]) => ({ x, y })
+  const space = a.space ? { space: a.space } : {}
+  switch (a.kind) {
+    case 'tap': return { id, at, ...space, kind: 'tap', point: { x: a.x, y: a.y }, ...(a.holdMs !== undefined ? { holdMs: a.holdMs } : {}) }
+    case 'swipe': return { id, at, ...space, kind: 'swipe', from: pt(a.from), to: pt(a.to), ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}) }
+    case 'pinch': return {
+      id, at, ...space, kind: 'pinch', from: [pt(a.from[0]), pt(a.from[1])], to: [pt(a.to[0]), pt(a.to[1])],
+      ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
+    }
+  }
 }
-/** A move to show for a moment: a tap's path from the previous cursor, or a swipe's from its start. */
-export interface Trail { id: number; kind: 'tap' | 'swipe'; from: [number, number] | null; to: [number, number] }
 
-export const NO_MARKS: WatchMarks = { cursor: null, trails: [] }
-
-/** The trail an action leaves, given where the cursor was. */
-export function trailOf(id: number, a: Extract<WatchActionKind, { kind: 'tap' | 'swipe' }>, cursor: WatchMarks['cursor']): Trail {
-  return a.kind === 'tap'
-    ? { id, kind: 'tap', from: cursor ? [cursor.x, cursor.y] : null, to: [a.x, a.y] }
-    : { id, kind: 'swipe', from: a.from, to: a.to }
-}
+/** An action the page can draw: a tap, a swipe, or a pinch whose relay told its fingers. */
+export type DrawnAction =
+  | Extract<WatchActionKind, { kind: 'tap' | 'swipe' }>
+  | (Extract<WatchActionKind, { kind: 'pinch' }> & Required<Pick<Extract<WatchActionKind, { kind: 'pinch' }>, 'from' | 'to'>>)
 
 /** A line for the Actions list. Positions as percentages of the screen, which is what they are on the wire. */
 export function actionText(a: WatchActionKind): string {
@@ -57,14 +59,14 @@ function direction(from: [number, number], to: [number, number]): string {
   return dy > 0 ? 'down' : 'up'
 }
 
-/** Whether an action is drawn on the device. */
-export function isMark(a: WatchActionKind): a is Extract<WatchActionKind, { kind: 'tap' | 'swipe' }> {
-  return a.kind === 'tap' || a.kind === 'swipe'
+/** Whether an action is drawn on the device. A pinch from an older relay carries no fingers: it is a row only. */
+export function isMark(a: WatchActionKind): a is DrawnAction {
+  return a.kind === 'tap' || a.kind === 'swipe' || (a.kind === 'pinch' && a.from !== undefined && a.to !== undefined)
 }
 
 /**
  * A point on an iOS screen (0–1) as a position in the whole device frame, which is the box the iOS screen's overlay
- * spans — the same conversion as the QA viewer's pinch hints. `layout` is `iosScreenLayout(chrome)`.
+ * spans — the same conversion as the QA viewer's touch marks. `layout` is `iosScreenLayout(chrome)`.
  */
 export function placeOnIosFrame(layout: { screenPctLeft: number; screenPctTop: number; screenPctW: number; screenPctH: number }) {
   return (x: number, y: number) => ({

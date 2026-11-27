@@ -3,7 +3,7 @@ import {
   recordedTarget, replayStep, runFlow, scrollDirectionOf, segment, selectorFor, SocketFlowDriver, statusBarRect,
   diffAreas, SCREEN_DIFF_THRESHOLD, withoutAreas, type ScreenCells,
   toFlowSteps, waitForStableScreen, madeMidTransition, type CapturedStep, type Flow, type FlowResult, type KeyModifier, type MatchContext,
-  type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
+  type PinchFingers, type RawStep, type ScreenRect, type ScrollDirection, type Selector, type Step, type StepExpect, type StepRange,
 } from '@tapflowio/flow-runner/browser'
 import { chromeOrientation, type InterfaceTurn } from '@tapflowio/protocol/screen'
 import type { AndroidChrome, ChromePayload, UIElement } from '@tapflowio/protocol'
@@ -174,6 +174,80 @@ async function chromeNow(channel: DashboardSessionChannel, tap: CaptureTap): Pro
   return channel.chrome(tap.sessionId, 1)
 }
 
+/** How long Match waits for the chrome to show a replayed rotate: Android re-sends it once the display settles, which
+ *  takes 0.6–3.6 s after the turn (`AndroidAgent`, `input:rotate`) — twice that when a turn queues behind the last one's
+ *  pass, as two rotates in a row do (review). */
+export const ROTATE_SETTLE_MS = 8_000
+const ROTATE_POLL_MS = 200
+
+/** The time a wait is counted on, given so a test can run an 8 s wait without spending it (AGENTS.md "Test Hygiene"). */
+export interface Clock {
+  now: () => number
+  sleep: (ms: number) => Promise<void>
+}
+const realClock: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }
+
+/** The turn a chrome says the device is held at — iOS's `streamRotation`, Android's `bodyRotation` — by value, since a
+ *  turn from one landscape to the other changes no orientation's name. */
+function heldTurn(chrome: ChromePayload | null): number | undefined {
+  if (!chrome) return undefined
+  return 'framePng' in chrome ? chrome.streamRotation : (chrome as AndroidChrome).bodyRotation
+}
+
+/** What a recorded rotate asked for: a quarter turn, as both agents turn it — clockwise adds 90 (`AndroidAgent`'s body
+ *  turn, iOS's `PhysicalOrientation.turned`) — or an older viewer's target orientation. */
+type Turn = { direction: 'clockwise' | 'counterclockwise' } | { orientation: 'portrait' | 'landscape' }
+function turnAskedFor(raw: RawStep): Turn | undefined {
+  return raw.kind === 'rotate' && raw.to ? raw.to : undefined
+}
+
+/**
+ * The chrome once it shows the turn a rotate made, or `null` if it never does in `ROTATE_SETTLE_MS`. A recorded rotate
+ * is a quarter turn, not a target, so its orientation is read after it — and read at once, it was the one before it,
+ * on every turn of an Android emulator. Waited for is the turn it should reach from `from`, not any other: a chrome the
+ * reset sent late (standing the device up) differs from a stale `from` too, and taken it named the wrong orientation
+ * (review). A target is waited for as itself, so a device already holding it is not waited on (CodeRabbit on #1221);
+ * with nothing asked, any turn away from `from`; with no `from` (an agent that sends no turn), the chrome as it is.
+ */
+async function chromeAfterTurn(
+  channel: DashboardSessionChannel, tap: CaptureTap, from: number | undefined, asked: Turn | undefined, signal: AbortSignal,
+  clock: Clock,
+): Promise<ChromePayload | null> {
+  if (from === undefined) return chromeNow(channel, tap)
+  const want = asked && 'direction' in asked ? (from + (asked.direction === 'clockwise' ? 90 : 270)) % 360 : undefined
+  const target = asked && 'orientation' in asked ? asked.orientation : undefined
+  const until = clock.now() + ROTATE_SETTLE_MS
+  for (;;) {
+    signal.throwIfAborted()
+    const now = await chromeNow(channel, tap)
+    const turn = heldTurn(now)
+    // A target on a chrome that cannot say which way it is held (a multi-panel iOS device, #1116) is not waited for: the
+    // step is named by its target whatever the chrome says (CodeRabbit on #1221).
+    const shown = target !== undefined ? !!now && (chromeOrientation(now) === undefined || chromeOrientation(now) === target)
+      : turn !== undefined && (want === undefined ? turn !== from : turn === want)
+    if (shown) return now
+    if (clock.now() >= until) return null
+    await clock.sleep(ROTATE_POLL_MS)
+  }
+}
+
+/**
+ * Until the chrome shows the device upright, for up to `ROTATE_SETTLE_MS`. The reset stands it up and reports done
+ * before Android's chrome says so (0.6–3.6 s), and every turn after it is read against that chrome: the start
+ * orientation's `setOrientation`, which returns at once when the chrome already says the target, and a replayed
+ * rotate, whose turn is counted from it (review). A chrome that cannot say which way it is held is not waited for.
+ */
+async function chromeUpright(channel: DashboardSessionChannel, sessionId: string, signal: AbortSignal | undefined, clock: Clock): Promise<void> {
+  const until = clock.now() + ROTATE_SETTLE_MS
+  for (;;) {
+    signal?.throwIfAborted()
+    const chrome = await channel.chrome(sessionId, 1)
+    const o = chrome ? chromeOrientation(chrome) : undefined
+    if (o === undefined || o === 'portrait' || clock.now() >= until) return
+    await clock.sleep(ROTATE_POLL_MS)
+  }
+}
+
 function frameTurnOf(chrome: ChromePayload | null): 0 | 90 | 180 | 270 | undefined {
   // Android body mode sends points in the frame's space; its `streamRotation` is the turn from that frame to the screen.
   if (!chrome || 'framePng' in chrome) return undefined
@@ -198,6 +272,8 @@ const TYPING = new Set<RawStep['kind']>(['text', 'type', 'paste', 'key'])
 const SHOWN_AFTER = new Set<RawStep['kind']>([...TYPING, 'imeAction'])
 
 export interface MatchHooks {
+  /** What the rotate waits count on; the real clock when absent. */
+  clock?: Clock
   /** `inserted`: a step the replay added (a tap on the field typed into), not one of the range's, so not counted. */
   onStep: (step: CapturedStep, screenshot?: string, inserted?: boolean) => void
   /** Where a step is about to touch, for drawing on the device as it does (the MCP watch view's marks). */
@@ -230,6 +306,9 @@ export interface MatchHooks {
   tapDidNothing?: (prev: RawStep, next: RawStep, shotBefore: Uint8Array, shotNow: Uint8Array, masks: ScreenRect[], signal: AbortSignal) => Promise<boolean>
   /** `LOOK_AGAIN`, shortened by tests. */
   lookAgain?: { forMs: number; everyMs: number }
+  /** Indices into the steps the person put back after they were left out (#1170): replayed whatever the recording says
+   *  the app did with them, since putting one back is asking for exactly that. */
+  putBack?: ReadonlySet<number>
   signal: AbortSignal
 }
 
@@ -298,6 +377,14 @@ const onScreen = (e: UIElement): boolean => {
   return x >= 0 && x <= 1 && y >= 0 && y <= 1
 }
 
+/** The touch a replay is about to send, to draw over the mirror: none for a step `replayStep` sends nothing for — one the
+ *  device refused when it was recorded, one left out, or a soft-keyboard key, typed by its `text` step (CodeRabbit on
+ *  #1216). */
+function replayedMark(raw: RawStep): StepMark | null {
+  if (raw.outcome === 'refused' || raw.dropped || raw.kind === 'keyboardKey') return null
+  return markOf(raw, 'frame')
+}
+
 /** The step the replay sends before `slice[offset]`, past those left out (`dropped`). */
 function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
   for (let i = offset - 1; i >= 0; i--) if (!slice[i]!.dropped) return slice[i]
@@ -306,10 +393,11 @@ function previousSent(slice: RawStep[], offset: number): RawStep | undefined {
 
 /** Whether `slice[offset]` is a swipe whose next sent step is a tap the app named: that tap is found by its element,
  *  so how far this swipe carried the list is not compared — a fling's length differs between any two runs. */
-function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
+function swipeBeforeNamedTap(slice: RawStep[], offset: number, frameTurn?: 0 | 90 | 180 | 270): boolean {
   // One `scroll` cannot make (slanted, off the middle) leaves a tap whose element is not on the screen to its point
   // (`namedTap`), with no search to stand in for the picture.
-  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, {}) === null) return false
+  // On the screen, as `namedTap` reads it: an Android body mode swipe is in the frame's space (`frameTurnOf`).
+  if (slice[offset]?.kind !== 'swipe' || scrollDirectionOf(slice[offset]!, frameTurn !== undefined ? { frameTurn } : {}) === null) return false
   for (let i = offset + 1; i < slice.length; i++) {
     const s = slice[i]!
     if (s.dropped) continue
@@ -323,9 +411,14 @@ function swipeBeforeNamedTap(slice: RawStep[], offset: number): boolean {
  * keychain, privacy grants, clipboard and simulated location reset, the network back online and the device upright.
  * An agent that cannot do it gets the app's data cleared, as before, and `null` says the rest was not.
  */
-export async function resetDevice(channel: DashboardSessionChannel, sessionId: string, bundleId: string | null): Promise<HeldResetReport | null> {
+export async function resetDevice(
+  channel: DashboardSessionChannel, sessionId: string, bundleId: string | null, signal?: AbortSignal, clock: Clock = realClock,
+): Promise<HeldResetReport | null> {
   const report = await channel.runReset(sessionId, bundleId ? [bundleId] : [])
-  if (report !== undefined) return report
+  if (report !== undefined) {
+    if (report?.done.includes('orientation')) await chromeUpright(channel, sessionId, signal, clock)
+    return report
+  }
   if (bundleId) await channel.clearState(sessionId, bundleId)
   return null
 }
@@ -344,9 +437,16 @@ export async function matchRange(
   const slice = steps.slice(range.start, range.end)
   await lease.start()
   // Apart from the report: `onReset?.(await …)` skips the reset itself when nobody listens.
-  const reset = await resetDevice(channel, sessionId, bundleId)
+  const clock = hooks.clock ?? realClock
+  const reset = await resetDevice(channel, sessionId, bundleId, hooks.signal, clock)
   hooks.onReset?.(reset)
   hooks.signal.throwIfAborted()
+  // Where the device is held, unknown: the reset stood it up and the chrome has yet to say so (`resetDevice` waited), or
+  // a turn never showed in time (below). A turn counted from such a base can take an earlier turn's late chrome for its
+  // own and name it wrongly, so while it is unknown a rotate is left out rather than measured (reviews).
+  const afterReset = reset?.done.includes('orientation') ? heldTurn(await chromeNow(channel, tap)) : undefined
+  let heldUnknown = afterReset !== undefined && afterReset !== 0
+  let turnLeftOut = false
   const alignment = new KeyboardAlignment(channel, sessionId, keyboard)
   await alignment.align()
   const orientation = rangeStartOrientation(steps, range)
@@ -457,7 +557,7 @@ export async function matchRange(
       const tapIt = before && !before.interfaceTurn ? focusTap(raw, before.elements) : undefined
       if (!tapIt) return undefined
       const focusShot = await channel.screenshot(sessionId, hooks.signal).catch(() => null)
-      const focusMark = markOf(tapIt)
+      const focusMark = replayedMark(tapIt)
       if (focusMark) hooks.onTouch?.(focusMark)
       await replayStep(channel, sessionId, tapIt, hooks.signal)
       const tapped = matchStep(tapIt, { tree: before!.elements, postures: tap.postures().postures, platform: tap.platform })
@@ -467,10 +567,15 @@ export async function matchRange(
       return tapIt
     }
     let focus = await focusFirst()
-    // Only iOS reports touches, and its points are never in the frame's space: the app's turn is all that places them.
-    let named = before
-      ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-      : undefined
+    // The swipe before a named tap says which way to scroll for it: an iOS point is in the app's turn, an Android body
+    // mode one in the frame's (`frameTurnOf`), which went unread until Android reported touches (P4).
+    // The chrome the channel holds, not the viewer's last render: a turn reported since is not drawn yet (CodeRabbit).
+    const namedTurns = async (b: NonNullable<typeof before>) => {
+      const previous = previousSent(slice, offset)
+      const frameTurn = previous?.kind === 'swipe' && previous.space === 'frame' ? frameTurnOf(await chromeNow(channel, tap)) : undefined
+      return { ...(b.interfaceTurn !== undefined ? { interfaceTurn: b.interfaceTurn } : {}), ...(frameTurn !== undefined ? { frameTurn } : {}) }
+    }
+    let named = before ? namedTap(raw, before.elements, previousSent(slice, offset), await namedTurns(before)) : undefined
     // After the focus tap and its settle: a typed step's picture was taken at its first key, with the field focused.
     // A tap the app named is judged by finding that element, not by the picture: the list under it may sit elsewhere.
     // A focus tap went in since: pressed again now, the tap would take the field's focus away.
@@ -481,6 +586,8 @@ export async function matchRange(
     // A tap made while the screen the tap before it brought was still coming (`madeMidTransition`), looking unlike its
     // recording: its picture is of the screen before that tap acted, which the replay never sees. Not a stop.
     let midTransition = false
+    // Its screen was let go without comparing, at the person's word (#1178): Edit says so.
+    let notCompared = false
     // The app did nothing with it when it was recorded: not sent, as nothing came of it then — sent now it would land
     // on the screen the tap before it brought. Matched all the same, so the review of taps the app ignored offers it
     // (`noResponseTaps`), left out by default.
@@ -488,7 +595,7 @@ export async function matchRange(
     // Not before typing: the review never offers a tap right before typing (`noResponseTaps`), so one left unsent there
     // would stay in the flow for Verify to send where Match did not. Sent, and marked, like one nothing says about.
     const leftUnsent = async (): Promise<boolean> => {
-      if (actedWhenRecorded !== false) return false
+      if (actedWhenRecorded !== false || hooks.putBack?.has(range.start + offset)) return false
       // Past a keyboard toggle, which has no step: the review looks past it too (`noResponseTaps`; CodeRabbit, #1176).
       const next = slice.slice(offset + 1).find((s) => !s.dropped && s.kind !== 'keyboardToggle')
       if (next && (TYPING.has(next.kind) || next.kind === 'keyboardKey')) return false
@@ -542,6 +649,7 @@ export async function matchRange(
         const rest = carry === 'skip' ? null : withoutAreas(d.cells, carry.areas)
         if (carry === 'skip' || !rest || rest.share <= SCREEN_DIFF_THRESHOLD) {
           URL.revokeObjectURL(d.nowUrl)
+          if (carry === 'skip') notCompared = true
           return null
         }
         return { ...d, cells: rest, areas: diffAreas(rest), masks: [...d.masks, ...carry.areas], carried: { count: carry.areas.length, from: carry.from } }
@@ -571,7 +679,7 @@ export async function matchRange(
         const now = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
         URL.revokeObjectURL(differs.nowUrl)
-        if (now) await hooks.onDiverged(range.start + offset, now)
+        if (now) await stopAt(now)
         return
       }
       if (retry === 'pressed' && prevTap) {
@@ -586,10 +694,16 @@ export async function matchRange(
         }
         const still = await judged(await hooks.compare(raw, masks).catch(() => null))
         hooks.signal.throwIfAborted()
-        if (still) await hooks.onDiverged(range.start + offset, still)
+        if (still) await stopAt(still)
         return
       }
-      await hooks.onDiverged(range.start + offset, differs)
+      await stopAt(differs)
+    }
+    // Waits for the person. Going on from a screen mostly different lets the step go uncompared: no place was set aside
+    // that the rest of it was compared around, as Continue anyway on one different in places does.
+    const stopAt = async (d: ScreenDivergence): Promise<void> => {
+      await hooks.onDiverged!(range.start + offset, d)
+      if (d.mostly) notCompared = true
     }
     // The tap before this step, replayed once more when it did nothing on the replay and something when recorded.
     // `pressed`: tapped again; `waited`: looked again a moment later and did not; `not-asked`: neither.
@@ -611,13 +725,14 @@ export async function matchRange(
       hooks.signal.throwIfAborted()
       // Named: on its element again, or not at all — the point is what a named tap is there not to trust.
       if (prev.named) return (await attempt([{ type: 'tapOn', selector: prev.named.selector }])) ? 'pressed' : 'waited'
-      const mark = markOf(prev.raw)
+      const mark = replayedMark(prev.raw)
       if (mark) hooks.onTouch?.(mark)
       await replayStep(channel, sessionId, prev.raw, hooks.signal)
       return 'pressed'
     }
     // A turned app replays its taps at their points (`namedTap`), so the swipe before one is compared as any other.
-    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset))) await compareNow()
+    const swipeTurn = raw.kind === 'swipe' && raw.space === 'frame' ? frameTurnOf(await chromeNow(channel, tap)) : undefined
+    if (compared(raw) && !skipCompare && !named && (!!before?.interfaceTurn || !swipeBeforeNamedTap(slice, offset, swipeTurn))) await compareNow()
     // Read while the screen was late, the tree may not hold what the person tapped (an alert's OK under a spinner): read
     // again, and named from that, the tap goes to its element rather than to a point on a screen that has moved.
     if (midTransition && await leftUnsent()) continue
@@ -625,9 +740,7 @@ export async function matchRange(
       await rereadLate()
       // A field read while the screen was late (a splash before the form) may only now be there to focus.
       focus ??= await focusFirst()
-      named = before
-        ? namedTap(raw, before.elements, previousSent(slice, offset), before.interfaceTurn !== undefined ? { interfaceTurn: before.interfaceTurn } : {})
-        : undefined
+      named = before ? namedTap(raw, before.elements, previousSent(slice, offset), await namedTurns(before)) : undefined
     }
     const shoot = () => channel.screenshot(sessionId, hooks.signal).catch(() => null)
     // A password is pictured before it is typed: after, Android shows its last character for a moment.
@@ -654,7 +767,8 @@ export async function matchRange(
     if (named) {
       const { tapped, scrolled } = await runNamed(named)
       if (tapped) {
-        const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements }
+        // Not reachable marked today (a named tap is not compared), carried for the rule that each step built here is.
+        const step: CapturedStep = { raw, step: { type: 'tapOn', selector: named.selector }, tree: before!.elements, ...(notCompared ? { notCompared: true as const } : {}) }
         matched.push(step)
         // What it did is read against the screen it was tapped on, which a scroll before it has moved from `before`.
         if (!scrolled) watching = { step, index: matched.length - 1, before: before!.elements, touched: named.target! }
@@ -678,7 +792,7 @@ export async function matchRange(
       }
       ;({ questions, reach } = await ask(before?.elements ?? []))
     }
-    const mark = markOf(raw)
+    const mark = replayedMark(raw)
     if (mark) hooks.onTouch?.(mark)
     await replayStep(channel, sessionId, raw, hooks.signal).catch((e: unknown) => {
       throw unfocused ? new Error(copy.typedBeforeRange, { cause: e }) : e
@@ -686,6 +800,8 @@ export async function matchRange(
     const ctx: MatchContext = {
       tree: before?.elements ?? [],
       ...turns,
+      // From the read the tree came in, so the two cannot be of different screens (#1196).
+      ...(before?.aspect !== undefined ? { screenAspect: before.aspect } : {}),
       ...(reach ? { reach } : {}),
       postures: tap.postures().postures,
       platform: tap.platform,
@@ -695,16 +811,27 @@ export async function matchRange(
       if (settled && TYPING.has(raw.kind)) ctx.treeAfter = settled.elements
       if (after) shot = await shoot()
     }
-    if (raw.kind === 'rotate') {
-      const turned = await chromeNow(channel, tap)
+    // Known again only by the reset's upright, and only before any turn has gone unmeasured: after one, a base read
+    // upright may predate where it landed, and its late chrome would read as the next turn's (CodeRabbit on #1221). The
+    // rest of the run's turns are left out instead.
+    if (heldUnknown && !turnLeftOut && heldTurn(chrome) === 0) heldUnknown = false
+    // Not sent again (refused when recorded, or left out of the replay): no turn comes to wait for.
+    const turnSent = raw.kind === 'rotate' && raw.outcome !== 'refused' && !raw.dropped
+    if (turnSent && heldUnknown) turnLeftOut = true
+    if (turnSent && !heldUnknown) {
+      // `chrome` was read before the turn was sent: the turn it held.
+      const turned = await chromeAfterTurn(channel, tap, heldTurn(chrome), turnAskedFor(raw), hooks.signal, clock)
+      // Never shown in time: where it landed is unknown, as after a reset not yet seen upright (CodeRabbit on #1221).
+      if (!turned) { heldUnknown = true; turnLeftOut = true }
       const o = turned ? chromeOrientation(turned) : undefined
       if (o) ctx.orientationAfter = o
     }
     const matchedStep = matchStep(raw, ctx)
     // What it did when it was recorded is not known: kept, and marked for the person to judge in Edit.
-    const step: CapturedStep = midTransition && actedWhenRecorded !== true && !matchedStep.fragile
+    const marked: CapturedStep = midTransition && actedWhenRecorded !== true && !matchedStep.fragile
       ? { ...matchedStep, fragile: 'mid-transition' }
       : matchedStep
+    const step: CapturedStep = notCompared ? { ...marked, notCompared: true } : marked
     matched.push(step)
     if ((raw.kind === 'tap' || raw.kind === 'longPress') && before) {
       watching = { step, index: matched.length - 1, before: before.elements, ...(questions[0] ? { touched: questions[0] } : {}) }
@@ -783,19 +910,28 @@ class AligningDriver extends SocketFlowDriver {
   // The flow's own points, before the driver turns them for the device: the mirror shows the device upright.
   override tap(x: number, y: number): Promise<void> {
     this.signal?.throwIfAborted()
-    this.onTouch?.({ kind: 'tap', x, y })
+    this.onTouch?.({ kind: 'tap', point: { x, y } })
     return super.tap(x, y)
   }
 
   override longPress(x: number, y: number, durationMs: number): Promise<void> {
-    this.onTouch?.({ kind: 'tap', x, y })
+    this.onTouch?.({ kind: 'tap', point: { x, y } })
     return super.longPress(x, y, durationMs)
   }
 
-  override swipe(from: [number, number], to: [number, number], durationMs: number) {
+  // `holdMs` passed on: `scroll { until }`'s search drags through here in Match and Verify, and a swipe that dropped it
+  // flung the list past the element as before.
+  override swipe(from: [number, number], to: [number, number], durationMs: number, holdMs?: number) {
     this.signal?.throwIfAborted()
-    this.onTouch?.({ kind: 'swipe', from, to })
-    return super.swipe(from, to, durationMs)
+    this.onTouch?.({ kind: 'swipe', from: { x: from[0], y: from[1] }, to: { x: to[0], y: to[1] }, durationMs })
+    return super.swipe(from, to, durationMs, holdMs)
+  }
+
+  override pinch(start: PinchFingers, end: PinchFingers, durationMs: number) {
+    this.signal?.throwIfAborted()
+    const pt = ([x, y]: [number, number]) => ({ x, y })
+    this.onTouch?.({ kind: 'pinch', from: [pt(start[0]), pt(start[1])], to: [pt(end[0]), pt(end[1])], durationMs })
+    return super.pinch(start, end, durationMs)
   }
 
   override async inputText(text: string): Promise<void> {

@@ -245,11 +245,13 @@ export function useAndroidScreen({
     transform: `rotate(${totalTurn}deg)`,
     transformOrigin: 'center center',
     visibility: pictureVisible ? 'visible' : 'hidden',
-    cursor: 'none',
   }
 
   return {
     surfaceHostRef, containerRef, decoderRef, videoSizeRef, needsCSSRotationRef, screenTurnRef, screenTurn, bodyMode,
+    /** The picture is turned a quarter by CSS inside a landscape box (portrait content held landscape, no body mode):
+     *  what the overlay needs to put a screen point back in its box. The ref above is for event handlers. */
+    needsCSSRotation,
     decoderUnsupported, totalTurn,
     containerW, containerH, screenRadius, frameMatchesScreen, pictureVisible, canvasStyle,
     /** Degrees the whole device is drawn turned by while turns this viewer asked for wait for their frame, and

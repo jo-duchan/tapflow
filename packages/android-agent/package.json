@@ -1,6 +1,6 @@
 {
   "name": "@tapflowio/android-agent",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Android emulator agent for tapflow — ADB control and scrcpy H.264 streaming",
   "keywords": [
     "tapflow",
@@ -61,7 +61,7 @@
     "@tapflowio/agent-core": "workspace:*",
     "@tapflowio/protocol": "workspace:*",
     "@tapflowio/audiotap-helper": "workspace:*",
-    "ws": "^8.22.2"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@tapflowio/relay": "workspace:*",

@@ -1,5 +1,37 @@
 # @tapflowio/agent-core
 
+## 0.33.0
+
+### Minor Changes
+
+- 3b600c8: Flow Capture reads typing on Android and tells soft-keyboard taps from app taps (#1135). The Android agent reads the focused field through the uidump jar's new `Focused` class (`field-value`), sets typed text with `ACTION_SET_TEXT` at the caret (`input:type`, so `inputText` and MCP `type_text` take any text; ASCII still goes through `input text` with no field focused), holds Ctrl+A for select-all and Shift+Space for Caps Lock (Android 13+), and presses a field's IME action for the new `ImeAction` key code (Android 11+). Both agents answer `ui:keyboard:request` with where the soft keyboard is (`keyboard-state`; iOS through the tree runner's new `GET /keyboard`, carried into the touch space by the app's turn) and take `device:keyboard-set` with a done or error reply (`keyboard-set`): iOS writes the keyboard and restarts its daemon, Android switches Gboard with Shift+Space until its title matches, and only while it is up. `ui:field:response` carries the keyboard and its language. The relay reads the keyboard after each recorded input, one read at a time, and records it as `keyboard` entries, with a settled read once the person pauses; a tap that starts on the keyboard continues a run of typing. flow-runner judges each touch by those reads (`keyboardKey`, `imeAction`, `keyboard-unknown`), adds the `imeAction` step, and no longer refuses `replace` on Android before a run: a device that cannot select fails the step. The `paste-not-typeable` skip is gone. An iOS `flow run` boot resets the keyboard to its first language with its run reset.
+- f4f59a5: Flow Capture records what a person really typed (#1135). While a person is recorded, the relay asks the iOS agent for the keyboard-focused text field at the start of each run of typing and once typing pauses (`ui:field:request`/`ui:field:response`, capability `field-value`); the answer, the field's whole contents (an app's or AutoFill's text included), goes into the capture only: no other socket receives it, and it comes back only to the person recorded, in their own snapshot of the capture. The agent reads it from inside the app (the app observer), whole, never a secure field's value. Flow Capture exports the typing into one field as `inputText: { text, replace: true }`, which selects what the field holds and types over it; a run whose field could not be read is marked `field-unread`. On Android `replace` needs Android 13 or later; an older device fails the step, since only the device knows its version. A device's keyboard language is reset when another person takes it (`device:keyboard-reset`, capability `keyboard-reset`, #1134); an app already running keeps the previous language until it is launched again. And the boot's keyboard sync restarts `com.apple.TextInput.kbd` (the daemon's name on iOS 26.4) before the old name, which no longer exists there.
+- 6b8bb08: Flow Capture's Match and Verify start from the reset `tapflow flow run` gives a device (#1139). The new `device:run-reset` (agent capability `run-reset`) resets a device the session already holds and answers with what it did (`device:run-reset-done`, a `RunResetReport`) or why it could not (`device:run-reset-error`, `reason: 'unsupported'` from the relay for an agent without it). iOS reinstalls each named app in place, copying the installed bundle aside first, so it starts as a run's fresh install does, then resets the keychain, privacy permissions, pasteboard, location and keyboard language; Android `pm clear`s the apps and, over gRPC, empties the clipboard. Both put a device taken offline back online, and turn it upright (on Android, an emulator over gRPC), reported as the new `RunResetItem`s `app-reinstall`, `network` and `orientation`. A reset cut short by a shutdown or a newer boot answers an error, never a partial report. iOS runs a keyboard set behind a reset in flight on the same device. The relay answers a `device:keyboard-set` or `device:run-reset` an agent rebind stranded, as it answers a boot. The dialog shows what was reset, falls back to clearing the app's data on an agent without the request, and a flow whose range began turned sideways gets `setOrientation: landscape` after its launch.
+- dca8ae8: <!-- changelog: internal — a refactor that moves code without changing behaviour, plus entry points only the dashboard will use (Flow Capture, #1125) -->
+
+  flow-runner's session semantics are split from its WebSocket transport so a browser can run flows with the same code as `tapflow flow run`. `SessionChannel` holds the waiters and what each input is on the wire, `SocketFlowDriver` is the `FlowDriver` over any session device, and `RelayClient` and `RelayDriver` are now those two over `ws` and REST, with their API unchanged. The new `@tapflowio/flow-runner/browser` entry exports the engine with them and reaches no Node API. agent-core adds an `@tapflowio/agent-core/errors` entry so that entry can import the error classes without the package index.
+
+- bee37cc: A touch lands where the device says it reaches its element, and a flow checks what the touch brings (#1125). protocol: `ui:reach:request`/`ui:reach:response`, `ReachTarget`, `ReachResult`, `UIElement.checked`/`selected`, `fromFramePoint`. agent-core: the `reach` capability. ios-agent: the UI-tree runner's `/reach` (`isHittable` and the hit point), and switch and selection state in the tree. android-agent: the uidump jar's `reach` mode (window layer and drawing order), and `checked`/`selected`. relay: `POST /api/v1/sessions/:sessionId/reach`, run records keep a step's `reach`, `reachNote` and `effect`, and the dashboard's Verify and Flow Runs show unchecked touches and touches that changed nothing. flow-runner: `tapOn`, `longPressOn` and `pinch` press the reached point, `scroll { until }` stops only at a reachable center, steps take `expect` and flows `viewport` (a flow carrying either cannot be read by an older flow-runner), `observeEffects`, and Flow Capture's swipe and point rules use reach. mcp-server: `run_flow` presses the reached point. cli: `flow run` says which touches were not checked.
+- 24a5629: `input:touch:cancel` lifts an open touch without completing it (#1115). flow-runner sends it, followed by the end it sent before, when it leaves a session mid-gesture, so an agent that cancels shows the app a cancelled touch rather than a tap, and an older agent or relay completes the gesture as before. iOS cancels through the touch helper's digitizer event, Android through a palm on the gRPC slot (Android 11 and later), `ACTION_CANCEL` on scrcpy (not measured on a device), and a dropped gesture on the adb fallback; paths with no cancel lift with an up, as an end does. Agents announce `touch-cancel`, which the relay reads to keep the end that follows a cancel out of the watcher feed.
+
+### Patch Changes
+
+- Updated dependencies [d015a87]
+- Updated dependencies [9a0ac35]
+- Updated dependencies [4f315a8]
+- Updated dependencies [3b600c8]
+- Updated dependencies [f4f59a5]
+- Updated dependencies [41b8494]
+- Updated dependencies [61560fd]
+- Updated dependencies [ae37d23]
+- Updated dependencies [6b8bb08]
+- Updated dependencies [5bb81f5]
+- Updated dependencies [fcc3c9b]
+- Updated dependencies [e741247]
+- Updated dependencies [bee37cc]
+- Updated dependencies [24a5629]
+  - @tapflowio/protocol@0.33.0
+
 ## 0.32.0
 
 ### Minor Changes

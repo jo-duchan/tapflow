@@ -15,6 +15,7 @@ import { useIsMobile } from '@/hooks/useMobile'
 import { usePerfMode } from '@/hooks/usePerfMode'
 import { DeepLinkDialog } from '@/components/device/DeepLinkDialog'
 import { SimulatorInfoCard } from '@/components/device/shared/SimulatorInfoCard'
+import { AppLogFeed } from '@/lib/appLogs'
 import { PERF_NOTICE_KEY } from '@/lib/perfNotice'
 
 describe('useIsMobile reads the viewport as a store', () => {
@@ -100,7 +101,7 @@ describe('DeepLinkDialog', () => {
 
 describe('SimulatorInfoCard — the Standard-mode notice', () => {
   const props = {
-    joined: true, fps: 0, connected: true, deviceReady: true, bootError: null,
+    joined: true, fps: 0, appLogFeed: new AppLogFeed(), connected: true, deviceReady: true, bootError: null,
     installing: false, installError: null, decoderUnsupported: false, keyboardActive: false,
   }
   afterEach(() => localStorage.clear())

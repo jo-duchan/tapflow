@@ -9,7 +9,7 @@ import { defaultRunner, type AdbRunner } from './adb.js'
 import { FocusedServers, type FocusedOp } from './FocusedServer.js'
 import type { LaunchOptions, ReachResult, ReachTarget } from '@tapflowio/protocol'
 import { hasLaunchOptions } from '@tapflowio/protocol/launch'
-import { androidLaunchExtras } from './launchExtras.js'
+import { androidLaunchExtras, shellQuote } from './launchExtras.js'
 import { parseKeyguard } from './postures.js'
 
 const logger = createLogger('android-agent:adb-wrapper')
@@ -65,6 +65,14 @@ const PEEK_CALL_TIMEOUT_MS = 10_000
 /** The home package read (`homePackage`): one PackageManager query, which answers in tens of ms. */
 const HOME_PACKAGE_TIMEOUT_MS = 5_000
 
+/** A dump that ended with no hierarchy. Its message carries what the device printed, which can be on-screen text: fine
+ *  for the caller, who sees the screen, but `logged` is the same without it, for a log (CodeRabbit, #1242). */
+export class DumpNoXmlError extends PlatformError {
+  constructor(message: string, readonly logged: string) {
+    super(message)
+  }
+}
+
 export class AdbWrapper {
   // avdId ("avd:<name>") → ADB serial ("emulator-5554")
   private readonly serialMap = new Map<string, string>()
@@ -81,8 +89,16 @@ export class AdbWrapper {
 
   // The resident field server per device (#1135), when the runner can keep a child; the one-shot run otherwise.
   private readonly focusedServers: FocusedServers | null
+  // Devices whose field server should hold its UiAutomation connection: a recorded person's (P4, `holdConnection`).
+  private readonly holdWanted = new Set<string>()
+  // A hold a dump let go of comes back once dumps have stopped for this long (`dumpUiHierarchy`).
+  private readonly reholdTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-  constructor(private readonly runner: AdbRunner = defaultRunner) {
+  constructor(
+    private readonly runner: AdbRunner = defaultRunner,
+    /** The clock the dump's budget is counted on: tests give a fixed one (#1220's flake, AGENTS.md "Test Hygiene"). */
+    private readonly now: () => number = Date.now,
+  ) {
     this.focusedServers = runner.spawnPiped
       // Quoted: adb joins the arguments and the device shell splits them, so an unquoted `FocusedServer <nonce>` was two
       // patterns, and toybox pkill ORs them — killing any field server, a newer one included. The nonce is hex.
@@ -416,12 +432,18 @@ export class AdbWrapper {
    * returns before the app even has focus (measured 0.2–0.36 s against 0.5–0.9 s), so a step sent right after the
    * reply could reach the launcher instead. Monkey stays as the fallback, and its error text is what a failure says.
    */
-  async launchApp(serial: string, packageName: string, options?: LaunchOptions, defaultsOnly = false): Promise<LaunchOptions | undefined> {
+  async launchApp(
+    serial: string,
+    packageName: string,
+    options?: LaunchOptions,
+    defaultsOnly = false,
+    onStart?: (deviceTime: string | undefined) => void
+  ): Promise<LaunchOptions | undefined> {
     // Resolved once and reused by whichever launch follows, so a default that falls back costs no second resolve.
     let resolved: { component: string | undefined } | undefined
     if (hasLaunchOptions(options)) {
       if (!defaultsOnly) {
-        await this.launchFresh(serial, packageName, options!)
+        await this.launchFresh(serial, packageName, options!, undefined, onStart)
         return options
       }
       // The relay's per-app defaults, none of them asked for by the caller: what this device cannot take is left out
@@ -429,14 +451,96 @@ export class AdbWrapper {
       resolved = { component: await this.launcherComponent(serial, packageName) }
       const deliverable = deliverableDefaults(packageName, options!, resolved.component)
       if (deliverable) {
-        await this.launchFresh(serial, packageName, deliverable, resolved.component)
+        await this.launchFresh(serial, packageName, deliverable, resolved.component, onStart)
         return deliverable
       }
     }
     const component = resolved ? resolved.component : await this.launcherComponent(serial, packageName)
-    if (component && await this.startAndWait(serial, component)) return undefined
-    await this.launchWithMonkey(serial, packageName)
+    if (component && await this.startAndWait(serial, component, onStart)) return undefined
+    await this.launchWithMonkey(serial, packageName, onStart)
     return undefined
+  }
+
+  async getAppUid(serial: string, packageName: string, timeoutMs = 2_000): Promise<number | null> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '-U', packageName]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packageLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) =>
+      line.startsWith(`package:${packageName} `) || line === `package:${packageName}`
+    )
+    // Match a comma-separated list of UIDs, e.g. uid:10123,1010123
+    const uidText = packageLine?.match(/(?:^|\s)uid:([\d,]+)(?:\s|$)/)?.[1]
+    if (!uidText) return null
+
+    const uids = uidText.split(',')
+      .map((s) => Number(s))
+      .filter((uid) => Number.isSafeInteger(uid) && uid >= 0)
+    if (uids.length === 0) return null
+    if (uids.length === 1) return uids[0]!
+
+    // The app is installed for multiple users. The launch targets the current user.
+    const userArgs = ['-s', serial, 'shell', 'am', 'get-current-user']
+    const userOut = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...userArgs)
+      : await this.runner.exec(...userArgs)
+    const currentUser = Number(userOut.trim())
+
+    if (Number.isSafeInteger(currentUser) && currentUser >= 0) {
+      // Android UIDs are userId * 100000 + appId.
+      const targetUid = uids.find((uid) => Math.floor(uid / 100000) === currentUser)
+      if (targetUid !== undefined) return targetUid
+    }
+
+    // Another user's uid would stream that user's copy of the app, so an unknown current user streams nothing.
+    return null
+  }
+
+  async getPackagesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<string[]> {
+    const args = ['-s', serial, 'shell', 'cmd', 'package', 'list', 'packages', '--uid', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    const packages = output.split(/\r?\n/).map((line) =>
+      /^package:([^\s]+)(?:\s|$)/.exec(line.trim())?.[1]
+    ).filter((name): name is string => name !== undefined)
+    return [...new Set(packages)]
+  }
+
+  /** The uid's processes with their names (`ps -A -o PID,NAME -u <uid>`): an app's main process is named as its
+   *  package, and its others (`:remote`, workers) after it. */
+  async processesForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<Array<{ pid: number; name: string }>> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID,NAME', '-u', String(uid)]
+    let output: string
+    try {
+      output = this.runner.execBounded
+        ? await this.runner.execBounded(timeoutMs, ...args)
+        : await this.runner.exec(...args)
+    } catch (e) {
+      // `ps` exits 1 when the uid has no process (measured, API 34), with its header on stdout: none, not a failure.
+      const stdout = (e as { stdout?: unknown }).stdout
+      if (typeof stdout !== 'string' || !/^\s*PID\b/.test(stdout)) throw e
+      output = stdout
+    }
+    const processes: Array<{ pid: number; name: string }> = []
+    for (const line of output.split(/\r?\n/)) {
+      const m = /^\s*(\d+)\s+(\S+)\s*$/.exec(line)
+      if (m) processes.push({ pid: Number(m[1]), name: m[2]! })
+    }
+    return processes
+  }
+
+  /** The device's clock as logcat's `-T` reads it, or undefined. */
+  deviceTime(serial: string): Promise<string | undefined> {
+    return this.readDeviceTime(serial)
+  }
+
+  async hasAppProcessForUid(serial: string, uid: number, timeoutMs = 2_000): Promise<boolean> {
+    const args = ['-s', serial, 'shell', 'ps', '-A', '-o', 'PID', '-u', String(uid)]
+    const output = this.runner.execBounded
+      ? await this.runner.execBounded(timeoutMs, ...args)
+      : await this.runner.exec(...args)
+    return output.split(/\r?\n/).some((line) => /^\d+$/.test(line.trim()))
   }
 
   /**
@@ -447,7 +551,13 @@ export class AdbWrapper {
    * - `-S` stops the app first in the same command, since a running app would only be brought forward and its intent
    *   never re-read; and the two `Activity not started` warnings, which the plain launch counts as launched, fail.
    */
-  private async launchFresh(serial: string, packageName: string, options: LaunchOptions, resolved?: string): Promise<void> {
+  private async launchFresh(
+    serial: string,
+    packageName: string,
+    options: LaunchOptions,
+    resolved?: string,
+    onStart?: (deviceTime: string | undefined) => void
+  ): Promise<void> {
     if (Object.keys(options.env ?? {}).length > 0) {
       throw new ValidationError('env is iOS-only: Android has no way to set an app\'s environment. Pass it in arguments instead, read from the intent extras')
     }
@@ -457,6 +567,7 @@ export class AdbWrapper {
     }
     let out: string
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-S', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         ...androidLaunchExtras(options.arguments),
@@ -500,9 +611,23 @@ export class AdbWrapper {
   // `Status: timeout` (slow, but started) are launches. `-W` waits for the first frame, which can be never (an app
   // that does not draw, a locked screen) while the dashboard's launch has no deadline of its own: the device-side
   // `timeout` bounds it, and running out counts as launched, since the intent was delivered.
-  private async startAndWait(serial: string, component: string): Promise<boolean> {
+  private async readDeviceTime(serial: string): Promise<string | undefined> {
+    try {
+      const args = ['-s', serial, 'shell', 'date', shellQuote('+%m-%d %H:%M:%S.%3N')]
+      const output = this.runner.execBounded
+        ? await this.runner.execBounded(2_000, ...args)
+        : await this.runner.exec(...args)
+      const value = output.trim()
+      return /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async startAndWait(serial: string, component: string, onStart?: (deviceTime: string | undefined) => void): Promise<boolean> {
     let out: string
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'timeout', String(AM_START_WAIT_SEC), 'am', 'start', '-W',
         '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', '-f', '0x10200000', '-n', component,
         // Measured on API 36: errors go to stdout and the exit status is 0. Folded in on the device for an image that
@@ -516,12 +641,13 @@ export class AdbWrapper {
     return !out.split('\n').some((l) => l.trim().startsWith('Error'))
   }
 
-  private async launchWithMonkey(serial: string, packageName: string): Promise<void> {
+  private async launchWithMonkey(serial: string, packageName: string, onStart?: (deviceTime: string | undefined) => void): Promise<void> {
     // monkey reserves 2% of its events for system keys, and on a device with no physical system
     // keys — an emulator whose AVD profile has hw.mainKeys=no, as Pixel profiles do — it aborts
     // with exit 251 before sending any event, the launch included ("SYS_KEYS has no physical keys
     // but with factor 2.0%"). Options must precede the count: monkey stops parsing at it.
     try {
+      onStart?.(await this.readDeviceTime(serial))
       const args = ['-s', serial, 'shell', 'monkey', '--pct-syskeys', '0', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1']
       await (this.runner.execBounded?.(hostBound(AM_START_WAIT_SEC), ...args) ?? this.runner.exec(...args))
     } catch (e) {
@@ -564,7 +690,88 @@ export class AdbWrapper {
    * cannot be pushed or produced no XML. A dump with no XML is an explicit `PlatformError`, never a silent empty tree.
    */
   async dumpUiHierarchy(serial: string, timeoutSec = 10): Promise<string> {
-    return this.inDumpQueue(serial, () => this.dumpNow(serial, timeoutSec))
+    // Before queueing as well: a re-hold due while this dump waits its turn would be queued ahead of it.
+    clearTimeout(this.reholdTimers.get(serial))
+    this.reholdTimers.delete(serial)
+    return this.inDumpQueue(serial, async () => {
+      // Through the field server first, on its connection, held or not: no app_process to start (one-shot p50 1306 ms,
+      // served ~340 ms, held ~15–300 ms on Pixel_9_tapflow Android 14), and a held connection stays held. The same XML
+      // (TreeDump.answer). Anything it cannot answer goes the one-shot way below, as before.
+      const started = this.now()
+      const served = await this.dumpViaServer(serial)
+      if (served !== undefined) {
+        // A one-shot dump just before this one let the hold go and set a re-hold, which this dump's queueing cleared:
+        // set it again, or a recording would stay unheld and its next touch pay the hold (CodeRabbit on #1193).
+        if (this.holdWanted.has(serial) && !this.focusedServers?.isHeld(serial)) this.scheduleRehold(serial)
+        return served
+      }
+      // What the server spent comes off the one-shot's budget: together they must fit the relay's 15 s tree deadline.
+      timeoutSec = Math.max(1, timeoutSec - Math.ceil((this.now() - started) / 1000))
+      // The one-shot dump connects its own UiAutomation, which a held one refuses: let go for it. Held again once dumps stop for
+      // REHOLD_AFTER_MS, not after each: a Match or Verify replay dumps before every step, and a hold settling the window
+      // list each time (up to 400 ms) would be paid by the replay. Left to the 30 s ping instead, the first tap after a
+      // Match or a tree read paid that settling itself, past its up, and went unreported (Compose sample, measured).
+      const servers = this.focusedServers
+      const jar = this.uidumpDevicePath
+      // A re-hold due during a long dump would run right after it and take the connection back between two dumps.
+      clearTimeout(this.reholdTimers.get(serial))
+      this.reholdTimers.delete(serial)
+      if (servers?.isHeld(serial) && jar) await servers.request(serial, jar, 'release')
+      try {
+        return await this.dumpNow(serial, timeoutSec)
+      } finally {
+        if (this.holdWanted.has(serial)) this.scheduleRehold(serial)
+      }
+    })
+  }
+
+  private async dumpViaServer(serial: string): Promise<string | undefined> {
+    if (!this.focusedServers || this.uidumpUnsupported.has(serial)) return undefined
+    const jar = await this.pushUidump(serial)
+    if (!jar) return undefined
+    const outcome = await this.focusedServers.request(serial, jar, 'dump', String(UIDUMP_IDLE_MS), (UIDUMP_TIMEOUT_SEC + 1) * 1000)
+    this.noteStart(serial, outcome)
+    if (!outcome.sent || outcome.out === null) return undefined
+    const answer = parseJsonLine(outcome.out) as { xml?: unknown; error?: unknown } | null
+    if (typeof answer?.xml !== 'string') {
+      // Warn, not debug: a dump that falls back is a tree read that may then fail, and the reason is gone otherwise.
+      logger.warn(`${serial}: field server dump fell back: ${typeof answer?.error === 'string' ? answer.error.slice(0, 200) : 'no XML'}`)
+      return undefined
+    }
+    return hierarchyXml(Buffer.from(answer.xml, 'base64').toString('utf8'))
+  }
+
+  /** A server that could not start may be missing its jar (a wiped emulator on the same serial): pushed again next time. */
+  private noteStart(serial: string, outcome: { startFailed?: true }): void {
+    if (outcome.startFailed) this.uidumpPushed.delete(serial)
+  }
+
+  private scheduleRehold(serial: string): void {
+    clearTimeout(this.reholdTimers.get(serial))
+    const timer = setTimeout(() => {
+      this.reholdTimers.delete(serial)
+      void this.pingFocusedServer(serial).catch(() => {})
+    }, REHOLD_AFTER_MS)
+    timer.unref?.()
+    this.reholdTimers.set(serial, timer)
+  }
+
+  /**
+   * Keep the field server's UiAutomation connection for as long as a person is recorded on the device (P4), or let it
+   * go: a touch's hit through a held connection costs its walk and a cleared cache (30–45 ms), against p50 140 ms
+   * connecting per request, which outlasts a tap. A tree dump through the server keeps it; one the server cannot answer
+   * lets go of it for the one-shot dump, and the next hit or ping holds it again.
+   */
+  async holdConnection(serial: string, on: boolean): Promise<void> {
+    if (on) this.holdWanted.add(serial)
+    else { this.holdWanted.delete(serial); clearTimeout(this.reholdTimers.get(serial)); this.reholdTimers.delete(serial) }
+    const servers = this.focusedServers
+    if (!servers) return
+    await this.inDumpQueue(serial, async () => {
+      if (!on && !servers.isHeld(serial)) return
+      const jar = await this.pushUidump(serial)
+      if (jar) this.noteStart(serial, await servers.request(serial, jar, on ? 'hold' : 'release'))
+    })
   }
 
   // One UiAutomation connection per device at a time: every jar run, and the dump fallback, waits its turn.
@@ -626,6 +833,47 @@ export class AdbWrapper {
   }
 
   /**
+   * What a touch-down at a point hit, through the field server's `hit` (Flow Capture P4, `Hit.java`): the point as a
+   * fraction of the screen as drawn. Only through the server — the one-shot run's ~1 s start would answer after the
+   * touch changed the screen. `null` when there is no server or no answer; `writtenAt` is when the request went out,
+   * on `performance.now()`, which the answer's device times are set against.
+   */
+  async hitTest(serial: string, x: number, y: number): Promise<{ answer: string; writtenAt: number } | null> {
+    if (!this.focusedServers) return null
+    const servers = this.focusedServers
+    return this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return null
+      // A server restarted since (an answer it missed, its idle exit) holds nothing: held again first.
+      if (this.holdWanted.has(serial) && !servers.isHeld(serial) && servers.mayHold(serial)) this.noteStart(serial, await servers.request(serial, jar, 'hold'))
+      const outcome = await servers.request(serial, jar, 'hit', `${x.toFixed(5)} ${y.toFixed(5)}`)
+      if (outcome.startFailed) this.uidumpPushed.delete(serial)
+      return outcome.sent && outcome.out !== null ? { answer: outcome.out, writtenAt: outcome.writtenAt } : null
+    })
+  }
+
+  /** Start the device's field server, or keep it from its idle exit, without a UiAutomation connection: while a person
+   *  is recorded, so a touch after a pause is not the one that waits ~1 s for app_process. */
+  async pingFocusedServer(serial: string): Promise<void> {
+    if (!this.focusedServers) return
+    const servers = this.focusedServers
+    await this.inDumpQueue(serial, async () => {
+      const jar = await this.pushUidump(serial)
+      if (!jar) return
+      // A hold a dump let go of, or a restarted server lost, comes back here before a touch has to wait for it.
+      this.noteStart(serial, await servers.request(serial, jar, this.holdWanted.has(serial) && !servers.isHeld(serial) && servers.mayHold(serial) ? 'hold' : 'ping'))
+    })
+  }
+
+  /** `dumpsys gfxinfo <pkg> framestats`: the app's recent frames (P4). Read on a binder thread of the app, not its UI
+   *  thread; ~40 ms (measured). '' when it cannot be read. */
+  async framestats(serial: string, pkg: string): Promise<string> {
+    if (!PACKAGE_NAME.test(pkg)) return ''
+    const args = ['-s', serial, 'shell', 'dumpsys', 'gfxinfo', pkg, 'framestats']
+    return (this.runner.execBounded?.(FRAMESTATS_TIMEOUT_MS, ...args) ?? this.runner.exec(...args)).catch(() => '')
+  }
+
+  /**
    * Type `text` into the focused field with `ACTION_SET_TEXT` (#1135), where typing it would land: at the caret, over
    * the selection (a select-all first makes it the whole value). The field takes it whatever the keyboard's language or
    * composition, with no clipboard and no key events (Appium's sendKeys does the same). The text goes on stdin as
@@ -640,7 +888,9 @@ export class AdbWrapper {
       const served = await this.viaServer(serial, jar, 'set', text)
       if (served !== undefined) {
         const result = served === null ? undefined : (parseJsonLine(served) as { result?: string } | null)?.result
-        return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+        if (SET_TEXT_RESULTS.has(result ?? '')) return result as SetTextResult
+        if (served !== null) logUnusable(serial, 'set', served)
+        return 'failed'
       }
       const out = await execInput(
         `${Buffer.from(text, 'utf8').toString('base64')}\n`, (UIDUMP_TIMEOUT_SEC + 2) * 1000,
@@ -648,7 +898,9 @@ export class AdbWrapper {
         'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'set',
       ).catch(() => '')
       const result = (parseJsonLine(out) as { result?: string } | null)?.result
-      return SET_TEXT_RESULTS.has(result ?? '') ? result as SetTextResult : 'failed'
+      if (SET_TEXT_RESULTS.has(result ?? '')) return result as SetTextResult
+      logUnusable(serial, 'set', out)
+      return 'failed'
     })
   }
 
@@ -663,7 +915,9 @@ export class AdbWrapper {
         'timeout', String(UIDUMP_TIMEOUT_SEC), 'app_process', '/system/bin', 'dev.tapflow.uidump.Focused', 'ime',
       ).catch(() => '')
       const result = (parseJsonLine(out) as { result?: string } | null)?.result
-      return result === 'ok' || result === 'no-focus' || result === 'rejected' || result === 'unsupported' ? result : 'failed'
+      if (result === 'ok' || result === 'no-focus' || result === 'rejected' || result === 'unsupported') return result
+      logUnusable(serial, 'ime', out)
+      return 'failed'
     })
   }
 
@@ -753,11 +1007,9 @@ export class AdbWrapper {
     const xml = hierarchyXml(output)
     if (!xml) {
       const detail = output.trim().slice(0, 200)
-      throw new PlatformError(
-        `uiautomator dump produced no XML within ${timeoutSec}s` +
-        (detail ? ` (${detail})` : '') +
-        ' — screens with continuous animation block the dump; retry on a settled screen',
-      )
+      const reason = `uiautomator dump produced no XML within ${timeoutSec}s`
+      const hint = ' — screens with continuous animation block the dump; retry on a settled screen'
+      throw new DumpNoXmlError(reason + (detail ? ` (${detail})` : '') + hint, reason + hint)
     }
     return xml
   }
@@ -948,6 +1200,11 @@ function deliverableDefaults(packageName: string, options: LaunchOptions, compon
 }
 
 /** What the jar's `Focused read` prints: device pixels, in the display's space. */
+/** An Android package name: nothing a device shell would read as more than one word. */
+const PACKAGE_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/
+const FRAMESTATS_TIMEOUT_MS = 3_000
+const REHOLD_AFTER_MS = 3_000
+
 export interface FocusedRead {
   identifier?: string
   frame?: { x: number; y: number; width: number; height: number }
@@ -960,6 +1217,16 @@ export interface FocusedRead {
 
 export type SetTextResult = 'ok' | 'transformed' | 'refused' | 'rejected' | 'no-focus' | 'cannot-append-secure' | 'unavailable' | 'failed'
 const SET_TEXT_RESULTS = new Set<string>(['ok', 'transformed', 'refused', 'rejected', 'no-focus', 'cannot-append-secure'])
+
+/**
+ * Why a set or an IME action came back `failed`, which said nothing (Android 16, wdio demo app: four in one evening,
+ * no reason anywhere). Only the jar's `error` — an exception's class and message, never the text being set, which
+ * goes in on stdin and is not echoed — or that the answer held none.
+ */
+function logUnusable(serial: string, op: 'set' | 'ime', out: string): void {
+  const error = (parseJsonLine(out) as { error?: unknown } | null)?.error
+  logger.warn(`${serial}: field ${op} failed: ${typeof error === 'string' ? error.slice(0, 300) : 'no usable answer'}`)
+}
 
 function parseJsonLine(out: string): unknown {
   const line = out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('{'))

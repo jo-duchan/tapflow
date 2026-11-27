@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '@tapflowio/protocol'
+import type { ClientKind, FieldReadReason, FocusedField, KeyboardState, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import type { CapturedMessage, CaptureEntry, CaptureSnapshot } from '@tapflowio/protocol/capture'
 
 /**
@@ -35,6 +35,9 @@ interface Capture {
   /** Each touch's end and where it was: a picture of a touch is kept only when the reads on either side of it show it
    *  was off the soft keyboard (`putThumbnail`). */
   touches: Map<string, RecordedTouch>
+  /** Why a step's picture was refused, by its `requestId`, for the reasons a person can act on: the dialog says it
+   *  where the picture would be. Gone once one is kept, and with the step when it is trimmed. */
+  refusals: Map<string, ThumbnailRefusalReason>
 }
 
 interface RecordedTouch {
@@ -43,6 +46,8 @@ interface RecordedTouch {
   frame: boolean
   /** The relay's clock at the touch's end, which is when the read that follows it is asked. */
   at: number
+  /** Where it went down, when the agent said (#1214). */
+  landed?: TouchLanding
 }
 
 /** A key that types a character, as flow-runner's `keyChar` judges one: what continues a typed run. */
@@ -68,6 +73,8 @@ function offKeyboard(t: RecordedTouch, keyboard: KeyboardState | undefined): boo
 
 /** Why a thumbnail was not kept, for the route to answer with. */
 export type ThumbnailRefusal = 'no-capture' | 'unknown-input' | 'not-yet' | 'exists' | 'keyboard' | 'typed' | 'full'
+/** The refusals a person can act on, which the dialog says where the picture would be. */
+export type ThumbnailRefusalReason = NonNullable<CaptureSnapshot['thumbnailRefusals']>[string]
 
 /** Who drives the session the input came through, as the relay recorded it at the join: the declared kind and the
  *  user id. Not protocol's `SessionHolder`, which is a label for people and only ever an AI kind. */
@@ -462,6 +469,20 @@ export class CaptureStore {
     } catch { /* see recordInput */ }
   }
 
+  /**
+   * Where a recorded gesture went down, from the agent (#1214). Kept only for a gesture this capture recorded, and once:
+   * a second landing for one gesture names nothing more.
+   */
+  recordLanded(sessionId: string, holder: Holder, requestId: string, landed: TouchLanding): void {
+    try {
+      const capture = this.captures.get(sessionId)
+      const touch = capture?.touches.get(requestId)
+      if (!capture || !touch || touch.landed || !this.recording(sessionId, holder, capture)) return
+      touch.landed = landed
+      this.append(capture, { at: this.now(), kind: 'landed', requestId, landed })
+    } catch { /* see recordInput */ }
+  }
+
   recordChrome(sessionId: string, holder: Holder, chrome: unknown): void {
     try {
       const capture = this.captureFor(sessionId, holder)
@@ -536,6 +557,7 @@ export class CaptureStore {
     capture.snapshot = {
       id: randomUUID(), takenAt: this.now(), entries: capture.entries.slice(), thinned: capture.thinned,
       thumbnails: [...capture.thumbnails.keys()],
+      ...(capture.refusals.size > 0 ? { thumbnailRefusals: Object.fromEntries(capture.refusals) } : {}),
     }
     return capture.snapshot
   }
@@ -543,21 +565,30 @@ export class CaptureStore {
   /**
    * Keep the screen an input began on (1b-3b), sent by the person's own dashboard after the input itself. Only for an
    * input this capture holds — the picture is never ahead of its step, and nothing else can be parked here — once, and
-   * never for a touch on the soft keyboard. Over its cap the oldest go first.
+   * never for a touch on the soft keyboard. Over its cap the oldest go first. A refusal the person can act on is
+   * remembered for the dialog to say (`CaptureSnapshot.thumbnailRefusals`).
    */
   putThumbnail(sessionId: string, user: string, requestId: string, jpeg: Buffer): 'kept' | ThumbnailRefusal {
     const capture = this.owned(sessionId, user)
     if (!capture) return 'no-capture'
+    const result = this.judgeThumbnail(sessionId, capture, requestId, jpeg)
+    if (result === 'kept') capture.refusals.delete(requestId)
+    return result
+  }
+
+  private judgeThumbnail(sessionId: string, capture: Capture, requestId: string, jpeg: Buffer): 'kept' | ThumbnailRefusal {
+    const refuse = (why: ThumbnailRefusalReason): ThumbnailRefusal => { capture.refusals.set(requestId, why); return why }
     if (capture.thumbnails.has(requestId)) return 'exists'
     const at = capture.entries.findIndex((e) => e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId === requestId)
     if (at < 0) return 'unknown-input'
     // A touch is kept only when the reads say it was off the soft keyboard, before it and after: the screen as a key is
     // pressed shows what was just typed, a password's last character included. A touch with no read to say — an agent
-    // that does not read the keyboard, iOS with the app not in front — keeps no picture.
+    // that does not read the keyboard — keeps no picture; one made while iOS had the app off the screen does
+    // (`touchOnKeys`).
     const touch = capture.touches.get(requestId)
     if (touch) {
       const keys = this.touchOnKeys(capture, touch)
-      if (keys !== 'off') return keys === 'on' ? 'keyboard' : 'not-yet'
+      if (keys !== 'off') return keys === 'on' ? refuse('keyboard') : 'not-yet'
     }
     // A key inside a typed run is not where the run's step begins, and its screen shows the run so far: only the run's
     // first key keeps one, whatever the dashboard sent.
@@ -602,7 +633,7 @@ export class CaptureStore {
       const reads = capture.entries.filter((e): e is Extract<CaptureEntry, { kind: 'field' }> => e.kind === 'field' && e.requestedAt >= runStart && e.requestedAt < startedAt)
       // A read still out may be the one that names a secure field (iOS takes about 0.45 s, one at a time): wait for it.
       if ([...this.fieldReadsOut.get(sessionId) ?? []].some((t) => t.requestedAt >= runStart && t.requestedAt < startedAt)) return 'not-yet'
-      if (reads.length === 0 || reads.some((r) => r.field?.secure !== false)) return 'typed'
+      if (reads.length === 0 || reads.some((r) => r.field?.secure !== false)) return refuse('typed')
     }
     // Room only from this capture's own older pictures, and only past its own cap: room the relay as a whole lacks is
     // other captures', and taking this one's pictures would not make it.
@@ -633,19 +664,46 @@ export class CaptureStore {
   /**
    * Whether the reads place a touch on the soft keyboard: before it, the last read asked for before its end that said
    * anything — by when it was asked, not when it came back, so a read out during the touch counts; one that could not
-   * say (Android answers so for a moment after a launch, measured) is passed over, and none at all is `on`. After it,
-   * the first read it asked for, because the read before can be stale — a keyboard sliding up reads as down (measured:
-   * a first key kept). `not-yet` until that read is back: the picture can beat it, and is asked for again.
+   * say (Android answers so for a moment after a launch, measured) is passed over. After it, the first read it asked
+   * for, because the read before can be stale — a keyboard sliding up reads as down (measured: a first key kept).
+   * `not-yet` until that read is back: the picture can beat it, and is asked for again.
+   *
+   * A touch the agent says went down on the home screen is `off` before any read (#1214). Without that, two cases a read
+   * before cannot settle are `off` all the same:
+   * - The last read before says iOS had the app under test off the screen (`shown: null, onHome: true`): the home screen
+   *   or another app, where the runner reads no keyboard. Kept as a QA Session's recording and screenshots keep such a
+   *   screen, which nothing masks either: capturing steps is off until the person turns it on, and these pictures stay
+   *   in the relay's memory, theirs alone. Only when the read after it has the keyboard down or the app still off the
+   *   screen: inside the app under test the rules below still hold.
+   * - Only reads that could not say came before it (an app still starting), and the read after has the keyboard down: a
+   *   key leaves the keyboard up, and the one key that closes it shows no character (session 1cef3852, iOS 26.5).
+   * No read at all before it (an agent that reads no keyboard) is `on`: no read after will come to say otherwise.
    */
   private touchOnKeys(capture: Capture, touch: RecordedTouch): 'off' | 'on' | 'not-yet' {
+    // The agent saw it go down on the home screen (#1214), which has no keyboard of its own: Spotlight's is another
+    // process (`other`), and a SpringBoard field is in an alert (`alert`), both left to the reads below.
+    if (touch.landed?.on === 'home') return 'off'
     let before: KeyboardState | undefined
+    let latest: KeyboardState | undefined
     for (let i = capture.entries.length - 1; i >= 0 && !before; i--) {
       const e = capture.entries[i]!
-      if (e.kind === 'keyboard' && e.requestedAt < touch.at && e.keyboard.shown !== null) before = e.keyboard
+      if (e.kind !== 'keyboard' || e.requestedAt >= touch.at) continue
+      latest ??= e.keyboard
+      if (e.keyboard.shown !== null) before = e.keyboard
     }
-    if (!offKeyboard(touch, before)) return 'on'
     const after = capture.entries.find((e): e is Extract<CaptureEntry, { kind: 'keyboard' }> => e.kind === 'keyboard' && e.requestedAt >= touch.at)
+    // Off the app as last read, and still so after it — the keyboard down, or the app still off the screen. Reads go one
+    // at a time and no input waits for one, so that last read can be from before the app came up, the touch already on
+    // a field it focused (pre-PR review); by the time the read after is back, any read asked before the touch is back
+    // too. A read after that cannot say is not `off`: iOS answers so for an app inactive with its keyboard up
+    // (CodeRabbit on #1226).
+    if (latest?.shown === null && latest.onHome === true) {
+      if (!after) return 'not-yet'
+      return after.keyboard.shown === false || (after.keyboard.shown === null && after.keyboard.onHome === true) ? 'off' : 'on'
+    }
+    if (!latest || (before && !offKeyboard(touch, before))) return 'on'
     if (!after) return 'not-yet'
+    if (!before) return after.keyboard.shown === false ? 'off' : 'on'
     return offKeyboard(touch, after.keyboard) ? 'off' : 'on'
   }
 
@@ -725,7 +783,7 @@ export class CaptureStore {
     if (!capture) {
       capture = {
         id: randomUUID(), ownerUser: holder.user, startedAt: this.now(), entries: [], bytes: 0, thinned: false,
-        thumbnails: new Map(), thumbnailBytes: 0, touches: new Map(),
+        thumbnails: new Map(), thumbnailBytes: 0, touches: new Map(), refusals: new Map(),
       }
       this.captures.set(sessionId, capture)
       const chrome = this.opts.chromeOf?.(sessionId)
@@ -794,5 +852,6 @@ export class CaptureStore {
     for (const e of [...entries, ...(capture.snapshot?.entries ?? [])]) if (e.kind === 'input' && 'requestId' in e.msg && e.msg.requestId) kept.add(e.msg.requestId)
     for (const [id, jpeg] of capture.thumbnails) if (!kept.has(id)) this.dropThumbnail(capture, id, jpeg)
     for (const id of capture.touches.keys()) if (!kept.has(id)) capture.touches.delete(id)
+    for (const id of capture.refusals.keys()) if (!kept.has(id)) capture.refusals.delete(id)
   }
 }

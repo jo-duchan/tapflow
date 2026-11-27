@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { BrowserToRelay } from '@tapflowio/protocol'
 import { BreadcrumbProvider } from '@/hooks/useBreadcrumb'
 import type { BrowserInbound, SessionInfo } from '@/lib/types'
+import type { MachineTouch } from '@/lib/touchMarks'
 import { withQuery } from './withQuery'
 
 /**
@@ -28,11 +29,10 @@ vi.mock('@/hooks/useRelay', async () => {
   }
 })
 vi.mock('@/components/device/WatchedDevice', () => ({
-  WatchedDevice: ({ platform, marks }: { platform: string; marks?: { cursor: { x: number; y: number } | null; trails: { kind: string }[] } }) => (
+  WatchedDevice: ({ platform, touch }: { platform: string; touch?: MachineTouch | null }) => (
     <div
       data-testid="watched-device" data-platform={platform}
-      data-marks={marks ? marks.trails.map((t) => t.kind).join(',') : 'none'}
-      data-cursor={marks?.cursor ? `${marks.cursor.x},${marks.cursor.y}` : 'none'}
+      data-touch={touch === undefined ? 'none' : touch === null ? '' : touch.kind === 'tap' ? `tap:${touch.point.x},${touch.point.y}` : 'swipe'}
     />
   ),
 }))
@@ -79,7 +79,7 @@ describe('the watch page\'s actions', () => {
   const action = (a: Record<string, unknown>, at = 1_700_000_000_000) =>
     deliver({ type: 'watch:action', sessionId: 'sess-a', at, action: a } as BrowserInbound)
 
-  it('lists what the agent does as it happened, under the step it belongs to, and draws a tap for a moment', async () => {
+  it('lists what the agent does as it happened, under the step it belongs to, and hands its latest touch to the device', async () => {
     renderAt('/automation/sessions/sess-a')
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     expect(screen.getByText(/Nothing yet/)).toBeTruthy()
@@ -94,10 +94,8 @@ describe('the watch page\'s actions', () => {
     // The time is there for whoever asks, not on every line.
     expect(inside[0]!.firstElementChild!.getAttribute('title')).toMatch(/\d/)
     expect(screen.getByRole('heading', { name: 'Agent activity' })).toBeTruthy()
-    expect(screen.getByTestId('watched-device').dataset.marks).toBe('tap')
-    // The trail fades; the cursor stays where the agent last tapped.
-    await vi.waitFor(() => expect(screen.getByTestId('watched-device').dataset.marks).toBe(''), { timeout: 2000 })
-    expect(screen.getByTestId('watched-device').dataset.cursor).toBe('0.5,0.8')
+    // The latest touch is handed to the device to play; how long it shows is the touch marks' own timing.
+    expect(screen.getByTestId('watched-device').dataset.touch).toBe('tap:0.5,0.8')
   })
 
   it('opens every step, and keeps one someone closed closed', async () => {
@@ -126,7 +124,6 @@ describe('the watch page\'s actions', () => {
     expect(screen.getByTestId('watched-device')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'step 1: launchApp' })).toBeTruthy()
     expect(screen.getByText('Launched the app')).toBeTruthy()
-    expect(screen.getByRole('link', { name: /Back to App Center/ })).toBeTruthy()
   })
 
   it('ignores another session\'s actions', async () => {
@@ -167,12 +164,11 @@ describe('the watch page', () => {
 
   // Mutation: let a reconnect start a new watch. The relay ended it because the session became someone
   // else's — a fresh watch would be refused at best.
-  it('stays ended across a reconnect, and offers the way back', async () => {
+  it('stays ended across a reconnect', async () => {
     renderAt('/automation/sessions/sess-a')
     await deliver({ type: 'watch:started', sessionId: 'sess-a' })
     await deliver({ type: 'watch:ended', sessionId: 'sess-a', reason: 'holder-changed' })
     expect(screen.getByRole('status').textContent).toBe('Someone else picked up this device, so the watch ended.')
-    expect(screen.getByRole('link', { name: /Back to App Center/ })).toBeTruthy()
     // The last picture stays to be looked at (no frames come any more); the activity beside it stays too.
     expect(screen.getByTestId('watched-device')).toBeTruthy()
     send.mockClear()

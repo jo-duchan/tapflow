@@ -1,4 +1,4 @@
-import type { BrowserToRelay, FieldReadReason, FocusedField, KeyboardState, TouchObservation } from '../index.js'
+import type { BrowserToRelay, FieldReadReason, FocusedField, KeyboardState, TouchLanding, TouchObservation } from '../index.js'
 
 /**
  * Flow Capture's record (#1125), as the relay keeps it and returns it from `/api/v1/sessions/:id/capture/snapshot`.
@@ -39,6 +39,9 @@ export type CaptureEntry =
   /** What a gesture's touch-down hit, seen from inside the app (record-time observation): `requestId` is the gesture's
    *  `input:touch:end`'s. Absent for a touch the agent could not observe — a reader falls back per touch. */
   | { at: number; kind: 'touched'; requestId: string; touched: TouchObservation }
+  /** Where a gesture went down, from the agent (#1214): `requestId` is its `input:touch:end`'s. Absent for a touch the
+   *  agent could not place, and from an agent that sends none — a reader falls back per touch. */
+  | { at: number; kind: 'landed'; requestId: string; landed: TouchLanding }
 
 export interface CaptureSnapshot {
   id: string
@@ -49,4 +52,8 @@ export interface CaptureSnapshot {
   /** The `requestId`s of the inputs whose screen the relay holds a picture of (1b-3b), read one at a time from
    *  `GET …/capture/snapshot/thumbnails/:requestId`. Absent from a relay that keeps none. */
   thumbnails?: string[]
+  /** Why the relay kept no picture of an input, by its `requestId`, for the reasons a person can act on: `keyboard`, the
+   *  reads could not show the touch was off the soft keyboard; `typed`, it began right after typing into a field not
+   *  known to show its text. Absent from a relay that does not say, and for an input with a picture or none sent. */
+  thumbnailRefusals?: Record<string, 'keyboard' | 'typed'>
 }

@@ -90,6 +90,10 @@ int main(int argc, char **argv) {
     printf("%d\t%d\n", max, capped);
     return 0;
   }
+  if (strcmp(what, "inapp") == 0 && argc == 3) {
+    printf("%d\n", tf_exe_in_app_bundle_decision(arg(argv[2])));
+    return 0;
+  }
   fprintf(stderr, "unknown case: %s (argc %d)\n", what, argc);
   return 2;
 }

@@ -1,5 +1,6 @@
 import { execSync, spawn } from 'node:child_process'
 import { banner, createSpinner, step } from '../lib/print.js'
+import { requireOnPath } from '../lib/hostTools.js'
 
 export async function cmdBoot(nameOrUdid: string): Promise<void> {
   // iOS 먼저 탐색
@@ -29,7 +30,7 @@ export async function cmdBoot(nameOrUdid: string): Promise<void> {
 
   // Android AVD 탐색
   try {
-    execSync('which emulator', { stdio: 'pipe' })
+    requireOnPath('emulator')
     const avdList = execSync('emulator -list-avds', { encoding: 'utf8', stdio: 'pipe' })
       .trim().split('\n').map((l) => l.trim()).filter(Boolean)
     const target = avdList.find((avd) => avd === nameOrUdid)

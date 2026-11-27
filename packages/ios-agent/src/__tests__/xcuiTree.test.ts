@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { parseTreeText, splitInterfaceTurn } from '../xcuiTree'
+import { parseTreeText, parseTreeTextWithAspect, splitInterfaceTurn } from '../xcuiTree'
 
 // Real XCUIApplication.debugDescription captured from the resident runner
 // (io.cloudgrey.the-app main screen). This is the format-regression fixture
@@ -254,5 +254,22 @@ describe('splitInterfaceTurn', () => {
     const withHeader = splitInterfaceTurn(`TAPFLOW_INTERFACE_ORIENTATION 3\n${bare}`)
     expect(parseTreeText(withHeader.body).length).toBe(parseTreeText(bare).length)
     expect(parseTreeText(bare).length).toBeGreaterThan(0)
+  })
+})
+
+// #1196: the height ÷ width of what the frames were divided by — the app's window, in its own upright interface.
+describe('parseTreeTextWithAspect', () => {
+  const tree = (window: string, ...rows: string[]) => ['Element subtree:', window, ...rows].join('\n')
+  const button = "      Button, 0x3, {{10.0, 10.0}, {100.0, 40.0}}, label: 'OK'"
+
+  it('is the window\'s, upright and in a landscape interface', () => {
+    expect(parseTreeTextWithAspect(tree('    Window (Main), 0x2, {{0.0, 0.0}, {393.0, 852.0}}', button)).aspect).toBeCloseTo(852 / 393, 4)
+    expect(parseTreeTextWithAspect(tree('    Window (Main), 0x2, {{0.0, 0.0}, {852.0, 393.0}}', button)).aspect).toBeCloseTo(393 / 852, 4)
+  })
+
+  it('is the largest frame\'s with no window, the basis the frames were divided by', () => {
+    const read = parseTreeTextWithAspect(tree("    Other, 0x2, {{0.0, 0.0}, {820.0, 1180.0}}, label: 'root'", button))
+    expect(read.aspect).toBeCloseTo(1180 / 820, 4)
+    expect(read.elements).toEqual(parseTreeText(tree("    Other, 0x2, {{0.0, 0.0}, {820.0, 1180.0}}, label: 'root'", button)))
   })
 })

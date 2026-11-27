@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import http from 'http'
 import fs from 'fs'
 import os from 'os'
@@ -7,7 +7,15 @@ import { RelayServer } from '../RelayServer'
 import { initDb, getDb, closeDb } from '../db'
 import { makePasswordHash } from '../api/auth'
 import { signJwt } from '../middleware/auth'
-import { writeZipFixture } from './helpers/zipFixture'
+import { writeZipFixture, makeAppZip } from './helpers/zipFixture'
+import { minFreeDiskBytes } from '../lib/uploads'
+
+const APP_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>com.example.floor</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+</dict></plist>`
 import { assertArchiveTools } from './helpers/archivePrereqs'
 
 // multipart/form-data 바디를 직접 구성한다 (busboy 파싱용).
@@ -66,7 +74,9 @@ describe('upload size-limit handling', () => {
   })
 
   beforeEach(async () => {
-    uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-uploads-'))
+    // Nested, because recordings go beside uploads (`<uploads>/../recordings`), not under the system tmp root.
+    uploadsDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tapflow-uploads-')), 'uploads')
+    fs.mkdirSync(uploadsDir)
     server = new RelayServer({ port: 0, uploadsDir })
     await server.start()
     port = (server.address() as { port: number }).port
@@ -74,9 +84,11 @@ describe('upload size-limit handling', () => {
 
   afterEach(async () => {
     await server.stop()
-    fs.rmSync(uploadsDir, { recursive: true, force: true })
+    fs.rmSync(path.dirname(uploadsDir), { recursive: true, force: true })
     delete process.env.TAPFLOW_MAX_BUILD_BYTES
     delete process.env.TAPFLOW_MAX_COMMENT_BYTES
+    delete process.env.TAPFLOW_MAX_RECORDING_BYTES
+    delete process.env.TAPFLOW_MIN_FREE_DISK_BYTES
   })
 
   it('빌드: 크기 상한 초과 → 400 + uploads/builds에 잔존 파일 없음', async () => {
@@ -160,6 +172,88 @@ describe('upload size-limit handling', () => {
     const dir = path.join(uploadsDir, 'avatars')
     expect(fs.readFileSync(path.join(dir, 'user-1.png'), 'utf8')).toBe('new-image')
     expect(fs.readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([])
+  })
+
+  // GHSA-jj96-5xwq-j8mx: any signed-in role could upload recordings of any size, so repeated uploads filled the
+  // volume the database shares.
+  const recordingsDir = () => path.join(uploadsDir, '..', 'recordings')
+  const recordingRows = () => (getDb().prepare('SELECT COUNT(*) AS n FROM recordings').get() as { n: number }).n
+  const onDisk = (dir: string) => (fs.existsSync(dir) ? fs.readdirSync(dir) : [])
+
+  it('recording: over the size limit → 413, no file kept and no row', async () => {
+    process.env.TAPFLOW_MAX_RECORDING_BYTES = '100'
+    const before = recordingRows()
+    const boundary = 'rec-big'
+    const body = multipartBody(boundary, [{ name: 'file', filename: 'r.webm', contentType: 'video/webm', data: Buffer.alloc(500, 1) }])
+    const r = await httpPostMultipart(port, '/api/v1/recordings/upload', body, boundary, cookie)
+    expect(r.status).toBe(413)
+    expect(onDisk(recordingsDir())).toEqual([])
+    expect(recordingRows()).toBe(before)
+  })
+
+  it('recording: within the limit is kept', async () => {
+    process.env.TAPFLOW_MAX_RECORDING_BYTES = String(10 * 1024)
+    const boundary = 'rec-ok'
+    const body = multipartBody(boundary, [{ name: 'file', filename: 'r.webm', contentType: 'video/webm', data: Buffer.alloc(500, 1) }])
+    const r = await httpPostMultipart(port, '/api/v1/recordings/upload', body, boundary, cookie)
+    expect(r.status).toBe(200)
+    expect(onDisk(recordingsDir())).toHaveLength(1)
+  })
+
+  // A second part used to be written too, with no row naming it, so the TTL purge never removed it.
+  it('recording: a second file part is not written', async () => {
+    const boundary = 'rec-two'
+    const body = multipartBody(boundary, [
+      { name: 'file', filename: 'a.webm', contentType: 'video/webm', data: Buffer.alloc(100, 1) },
+      { name: 'file', filename: 'b.webm', contentType: 'video/webm', data: Buffer.alloc(100, 2) },
+    ])
+    const r = await httpPostMultipart(port, '/api/v1/recordings/upload', body, boundary, cookie)
+    expect(r.status).toBe(200)
+    expect(onDisk(recordingsDir())).toHaveLength(1)
+  })
+
+  it.each([
+    ['recording', 'POST', '/api/v1/recordings/upload', () => recordingsDir(), [{ name: 'file', filename: 'r.webm', contentType: 'video/webm', data: 'video' }]],
+    ['build', 'POST', '/api/v1/builds', () => path.join(uploadsDir, 'builds'), [{ name: 'file', filename: 'app.apk', contentType: 'application/octet-stream', data: 'apk' }]],
+    ['comment attachment', 'POST', '/api/v1/comments', () => path.join(uploadsDir, 'comments'), [
+      { name: 'build_id', data: '1' }, { name: 'body', data: 'hi' },
+      { name: 'file', filename: 'a.png', contentType: 'image/png', data: 'png' },
+    ]],
+    ['avatar', 'PATCH', '/api/v1/profile', () => path.join(uploadsDir, 'avatars'), [{ name: 'avatar', filename: 'a.png', contentType: 'image/png', data: 'png' }]],
+    ['team logo', 'PATCH', '/api/v1/settings', () => path.join(uploadsDir, 'team'), [{ name: 'logo', filename: 'a.png', contentType: 'image/png', data: 'png' }]],
+  ] as const)('%s: refused with 507 below the free-space floor, nothing left on disk', async (_name, method, route, dir, parts) => {
+    process.env.TAPFLOW_MIN_FREE_DISK_BYTES = String(Number.MAX_SAFE_INTEGER)
+    const boundary = 'floor'
+    const r = await httpPostMultipart(port, route, multipartBody(boundary, [...parts]), boundary, cookie, method)
+    expect(r.status).toBe(507)
+    expect(onDisk(dir())).toEqual([])
+  })
+
+  // The slice check writes the build's executable (up to 256 MB) to the system tmp dir while the upload is still on
+  // disk. The file is removed at once either way, so what is asserted is that the write was never attempted.
+  it('build: the simulator-slice check writes nothing to a tmp dir below the floor, and the upload still lands', async () => {
+    const realStatfs = fs.statfsSync.bind(fs)
+    vi.spyOn(fs, 'statfsSync').mockImplementation(((p: fs.PathLike) => {
+      const st = realStatfs(p)
+      // One byte over the floor: only the executable's own length takes it below, so the check must count it.
+      return String(p) === os.tmpdir() ? { ...st, bsize: 1, bavail: minFreeDiskBytes() + 1 } : st
+    }) as typeof fs.statfsSync)
+    const lipoWrites: string[] = []
+    const realWrite = fs.writeFileSync.bind(fs)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (String(file).includes('tapflow-lipo-')) lipoWrites.push(String(file))
+      return (realWrite as (...a: unknown[]) => void)(file, ...rest)
+    }) as typeof fs.writeFileSync)
+    try {
+      const zip = makeAppZip(path.dirname(uploadsDir), 'Floor', APP_PLIST)
+      const boundary = 'lipo-floor'
+      const body = multipartBody(boundary, [{ name: 'file', filename: 'Floor.app.zip', contentType: 'application/zip', data: fs.readFileSync(zip) }])
+      const r = await httpPostMultipart(port, '/api/v1/builds', body, boundary, cookie)
+      expect(r.status).toBe(201)
+      expect(lipoWrites).toEqual([])
+    } finally {
+      vi.restoreAllMocks()
+    }
   })
 
   // A failed write rejects what the build route awaits in an async listener; uncaught, that ended the relay.

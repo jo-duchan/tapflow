@@ -78,13 +78,8 @@ export const INBOUND_DISPOSITION = {
   'device:keyboard-set-error': {
     ignored: 'Never requested, for the reason its `-done` is not read.',
   },
-  'device:run-reset-done': {
-    ignored: 'Never requested: an agent drives the device as it finds it. Flow Capture\'s dialog asks for it before a '
-      + 'replay (#1139), and a `flow run` boot carries its own.',
-  },
-  'device:run-reset-error': {
-    ignored: 'Never requested, for the reason its `-done` is not read.',
-  },
+  'device:run-reset-done': { settles: 'runReset' },
+  'device:run-reset-error': { settles: 'runReset' },
 
   'device:booting': {
     ignored: 'Not "no consumer" — it is the only signal separating "the agent picked the boot up" from '
@@ -126,10 +121,22 @@ export const INBOUND_DISPOSITION = {
     ignored: 'Nothing here displays a device; `list_devices` already carries its name and platform. The only '
       + 'reader in the repo is flow-runner, which copies it into a run\'s video (A4).',
   },
+  'app:log': {
+    ignored: 'Logs are for a person watching in the dashboard; an agent tool does not consume them.'
+  },
+  'app:log:run': {
+    ignored: 'The relay watches an app\'s logs only for a dashboard holder, so this client is never sent one.'
+  },
   // This client drives a session; it never watches one, so the four watch replies have no waiter here.
   'watch:started': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:refused': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:holder-left': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:ended': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:action': { ignored: 'Sent only to a watching socket; this client never watches.' },
+  'capture:observe-done': { settles: 'observe' },
+  'capture:observe-error': { settles: 'observe' },
+  'capture:observation': {
+    does: 'Settles nothing: passed to `onObservation` listeners, which MCP Flow Capture (L6a) pairs with its touches by '
+      + '`requestId`. One that arrives after its capture closed has no listener and is dropped.',
+  },
 } satisfies Record<BrowserInbound['type'], Disposition>

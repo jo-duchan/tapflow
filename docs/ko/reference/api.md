@@ -942,6 +942,7 @@ Body (JSON):
   failureKind     string               선택  "product" | "environment"
   failureMessage  string               선택  skipped 플로우에서는 건너뛴 이유를 사람이 읽는 문장으로
   deviceId, deviceName, platform  string  선택
+  screenshotMissed  boolean           선택  러너가 스크린샷을 찍으려 했지만 받지 못했으면 true
 ```
 
 `skipped`는 러너가 실행하지 않은 플로우입니다. `app-mismatch`는 플로우의 `appId`가 빌드와 다른 경우, `tag-filter`는 태그 옵션에 걸러진 경우입니다. skipped 플로우에는 스크린샷을 올릴 수 없고 이미 `passed`나 `failed`로 보고한 플로우는 skipped로 다시 보고할 수 없습니다(`409`).
@@ -950,7 +951,7 @@ Body (JSON):
 
 ### `POST /api/v1/runs/:id/flows/:idx/screenshot`
 
-보고한 플로우의 스크린샷을 올립니다. 실패한 플로우는 실패한 화면, 통과한 플로우는 끝난 화면입니다. 본문은 이미지 바이트 그대로이고 릴레이는 앞부분 바이트로 PNG나 JPEG인지 판단합니다. 5MB를 넘으면 `413`, 이미지가 아니면 `415`를 받습니다.
+보고한 플로우의 스크린샷을 올립니다. 실패한 플로우는 실패한 화면, 통과한 플로우는 끝난 화면입니다. 본문은 이미지 바이트 그대로이고 릴레이는 앞부분 바이트로 PNG나 JPEG인지 판단합니다. 5MB를 넘으면 `413`, 이미지가 아니면 `415`, 릴레이 디스크가 가득 차면 `507`을 받습니다. 이 세 경우에는 릴레이가 그 이유를 플로우에 `screenshotNote`로 남깁니다.
 
 **응답 `200`** `{ "ok": true }`
 
@@ -1022,7 +1023,7 @@ Query:
 실행 하나와 플로우별 결과를 돌려줍니다. 목록 항목의 필드에 아래가 더해집니다.
 
 - `deviceReset`: 실행이 기기를 초기화했는지입니다. 초기화 기능보다 오래된 러너의 실행은 `null`입니다. `requested`는 요청 여부이고 기기를 켠 결과를 보고받으면 `booted`, `cold`, `report`가 더해집니다. 러너가 세션을 알려 주면 `devices`에 기기마다 `sessionId`, `deviceId`, `deviceName`, `cold`, `report`가 담깁니다. 기기가 여럿이면 바깥 필드는 첫 기기의 결과입니다. 이 필드는 목록 항목에도 있습니다.
-- `flows`: 계획된 플로우 순서대로입니다. 보고된 플로우는 `status`(`passed`·`failed`)와 `steps`, `device`, `durationMs`, `hasScreenshot`을 담습니다. 건너뛴 플로우는 `status: "skipped"`와 `skipReason`, 이유를 담은 `failureMessage`를 담습니다. 영상이 있는 플로우는 `video`에 `ended`, `endReason`, `evicted`, `notRecorded`, `bytes`를 담고 영상이 없으면 `null`입니다. `notRecorded`는 러너가 영상을 남길 수 없었던 이유(`jpeg`, `no-keyframe`)입니다. 아직 보고되지 않은 플로우는 진행 중인 실행에서 `running`(지금 실행 중)이나 `pending`, 끝난 실행에서 `not-run`입니다. 러너가 시작을 알린 `running` 플로우에는 `device`(`id`, `name`, `sessionId`)가 있습니다. 시작을 알리지 않는 옛 러너의 실행에서는 보고되지 않은 첫 플로우를 `running`으로 표시합니다.
+- `flows`: 계획된 플로우 순서대로입니다. 보고된 플로우는 `status`(`passed`·`failed`)와 `steps`, `device`, `durationMs`, `hasScreenshot`을 담습니다. 스크린샷이 없으면 `screenshotNote`에 이유를 담습니다. `too-large`·`not-image`·`storage-full`은 릴레이가 업로드를 거절한 이유입니다. `not-taken`은 러너가 스크린샷을 찍으려 했지만 받지 못한 경우입니다. 이유를 모르면 `null`입니다. 건너뛴 플로우는 `status: "skipped"`와 `skipReason`, 이유를 담은 `failureMessage`를 담습니다. 영상이 있는 플로우는 `video`에 `ended`, `endReason`, `evicted`, `notRecorded`, `bytes`를 담고 영상이 없으면 `null`입니다. `notRecorded`는 러너가 영상을 남길 수 없었던 이유(`jpeg`, `no-keyframe`)입니다. 아직 보고되지 않은 플로우는 진행 중인 실행에서 `running`(지금 실행 중)이나 `pending`, 끝난 실행에서 `not-run`입니다. 러너가 시작을 알린 `running` 플로우에는 `device`(`id`, `name`, `sessionId`)가 있습니다. 시작을 알리지 않는 옛 러너의 실행에서는 보고되지 않은 첫 플로우를 `running`으로 표시합니다.
 - `watchSessionId`: 러너가 지금 붙잡고 있는 세션 ID입니다. 진행 중일 때만 값이 있고 [AI 세션 보기](/ko/automation/mcp-server#watch-the-device) 페이지 주소에 씁니다.
 - `watchSessionIds`: 러너가 지금 붙잡고 있는 세션 전부입니다. 여러 기기에서 도는 실행은 기기마다 하나씩이고 끝난 실행에서는 빈 배열입니다.
 
@@ -1204,13 +1205,16 @@ Query:
       "enabled": true
     }
   ],
-  "interfaceTurn": 90
+  "interfaceTurn": 90,
+  "aspect": 0.46
 }
 ```
 
 `frame`은 화면 크기에 대한 0–1 비율이며 앱이 그려진 방향의 화면을 기준으로 합니다. 오류 상태 코드는 스크린샷과 같으며 시간 초과는 15초입니다.
 
 `interfaceTurn`은 기기의 세로 화면을 시계 방향으로 몇 도 돌려야 앱 화면이 똑바로 서는지 나타냅니다(`0`, `90`, `180`, `270`). 에이전트가 앱의 방향을 읽을 수 있을 때만 들어 있으며 현재는 iOS만 보냅니다. 값이 없으면 방향 정보가 없다는 뜻입니다.
+
+`aspect`는 `frame` 비율의 기준 영역을 픽셀로 잰 높이를 너비로 나눈 값입니다. 세워 든 폰에서는 `2.2` 안팎, 옆으로 돌린 폰에서는 `0.46` 안팎입니다. 프레임의 높이에 이 값을 곱하면 너비와 비교할 수 있습니다. 값이 없으면 에이전트가 보내지 않은 것이며 이 필드가 생기기 전의 에이전트가 그렇습니다.
 
 입력 칸(`role: "input"`)에는 `secure`가 함께 옵니다. 비밀번호처럼 입력한 글자를 가리는 칸이면 `true`, 아니면 `false`입니다. 입력 칸이 아니어도 글자를 가린다고 알려 온 요소에는 `secure: true`가 붙습니다. 입력 칸인데 `secure`가 없으면 에이전트가 판단하지 못했다는 뜻이므로 비밀번호 칸으로 다루세요. 지금 입력을 받는 칸에는 `focused: true`가 붙습니다.
 
@@ -1269,7 +1273,7 @@ Query:
 
 ### `GET /api/v1/sessions/:sessionId/capture/snapshot/thumbnails/:requestId`
 
-복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다.
+복사본에 든 단계의 그림을 `image/jpeg`로 돌려줍니다. 그림이 있는 단계는 복사본의 `thumbnails`에 나옵니다. 없으면 `404`를 돌려줍니다. 복사본의 `thumbnailRefusals`는 그림을 남기지 않은 이유를 `requestId`별로 알려 줍니다. 값은 `keyboard`(키보드 읽기로 화면 키보드 밖임이 확인되지 않은 터치)나 `typed`(글자를 친 직후에 시작한 입력)이고 이유를 알려 주지 않는 릴레이에서는 이 필드가 없습니다.
 
 ### `PUT /api/v1/sessions/:sessionId/capture/pause`
 

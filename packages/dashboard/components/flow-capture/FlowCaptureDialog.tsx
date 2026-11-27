@@ -14,9 +14,8 @@ import { DialogRun, keyboardOf, loadSnapshot, matchRange, PauseLease, stepsOf, v
 import { compareWithRecording, recordedAlike, tapDidNothing } from '@/lib/flowCapture/screenCompare'
 import { Remembered } from '@/lib/flowCapture/remembered'
 import type { CaptureTap } from '@/lib/flowCapture/tap'
-import { addMark, type StepMark } from '@/lib/flowCapture/marks'
-import { chromeOrientation } from '@tapflowio/protocol/screen'
-import { NO_MARKS, type WatchMarks } from '@/lib/watchActions'
+import { mirrorMark, touchOfMark, type StepMark } from '@/lib/flowCapture/marks'
+import type { MachineTouch } from '@/lib/touchMarks'
 import { EditScreen, ExportScreen, MatchScreen, RangeScreen, VerifyScreen } from './screens'
 
 /**
@@ -119,6 +118,15 @@ function thumbnailUrl(sessionId: string, snapshot: CaptureSnapshot, step: RawSte
   return `/api/v1/sessions/${sessionId}/capture/snapshot/thumbnails/${encodeURIComponent(key)}`
 }
 
+/** Why `step` has no picture: the relay's reason, else a plain "none kept". Nothing from a relay that keeps none. */
+function noPictureWhy(snapshot: CaptureSnapshot, step: RawStep): string | null {
+  if (!snapshot.thumbnails) return null
+  const key = step.thumbnailKey
+  if (key && snapshot.thumbnails.includes(key)) return null
+  const refused = key ? snapshot.thumbnailRefusals?.[key] : undefined
+  return refused ? copy.noPicture[refused] : copy.noPicture.none
+}
+
 function initFrom(snapshot: CaptureSnapshot): CaptureState {
   const { steps, range } = stepsOf(snapshot)
   return reduce(initialState, { type: 'loaded', steps, range, name: '' })
@@ -140,38 +148,38 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
   // A stop at a step that looked different is a view of its own: its buttons replace Stop, and the focus on Stop with them.
   const swapFocus = useFocusAfterSwap<HTMLDivElement>(state.phase === 'matching' && state.diverged ? 'diverged' : state.phase === 'matching' && state.review ? 'review' : state.phase, fallback)
   // Where the replay is touching, drawn over the device on Match and Verify; each run starts with none.
-  const [marks, setMarks] = useState<WatchMarks>(NO_MARKS)
+  const [touch, setTouch] = useState<MachineTouch | null>(null)
   const markId = useRef(0)
-  // Only upright: the flow's points are the app's, the mirror is the framebuffer, and a turned device puts one in the
-  // other's wrong place (as `markOf` refuses for Match's recorded points).
-  const onTouch = (mark: StepMark) => {
-    const chrome = tap.chrome()
-    const o = chrome ? chromeOrientation(chrome) : undefined
-    if (o !== undefined && o !== 'portrait') return
+  // The mirror copies the video frame: a mark in the screen's points is carried into it, or left out (`mirrorMark`).
+  const onTouch = (touched: StepMark) => {
+    const mark = mirrorMark(touched, tap.chrome())
+    if (!mark) return
     // The id is taken here, not in the updater, which React may run twice.
     const id = ++markId.current
-    setMarks((m) => addMark(m, id, mark))
+    setTouch(touchOfMark(id, mark, performance.now()))
   }
 
   // The keyboard language the range was recorded in, which both replays start from (#1135).
   const keyboard = keyboardOf(snapshot, state.steps, state.range)
 
   // Match's end: to Edit, unless some taps the app did not respond to wait for the person's review there (P2c).
-  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched))
+  const finishMatch = (matched: CapturedStep[]) => dispatch(matchEnded(state.steps, matched, state.putBack))
   const continueToEdit = () => dispatch({ type: 'review-continued' })
 
-  const startMatch = () => {
+  // From `from`, not the render's `state`, when a change dispatched just now has not rendered yet (Put back, #1170).
+  const startMatch = (from: CaptureState = state) => {
     const opened = session.current
     if (!opened) return
     const { channel, lease, run } = opened
     const signal = run.begin()
-    remembered.begin(state.range.start)
-    dispatch({ type: 'match-started', total: state.range.end - state.range.start })
-    setMarks(NO_MARKS)
+    remembered.begin(from.range.start)
+    dispatch({ type: 'match-started', total: from.range.end - from.range.start })
+    setTouch(null)
     setBusy(true)
-    matchRange(tap, channel, lease, withAsked(state), state.range, bundleId, {
+    matchRange(tap, channel, lease, withAsked(from), from.range, bundleId, {
       signal,
       onTouch,
+      putBack: new Set(Object.keys(from.putBack).map(Number)),
       onReset: (report) => dispatch({ type: 'device-reset', report }),
       onStep: (step, screenshot, inserted) => {
         if (screenshot) run.keep(screenshot)
@@ -192,15 +200,24 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       carried: (index, step, masks, turn) => remembered.carried(index, step, thumbnailUrl(tap.sessionId, snapshot, step), masks, turn, signal),
       onDiverged: (index, { cells: _, ...divergence }) => {
         run.keep(divergence.nowUrl)
-        const step = state.steps[index]
+        const step = from.steps[index]
         dispatch({ type: 'diverged', index, ...divergence, recordedUrl: step ? thumbnailUrl(tap.sessionId, snapshot, step) : null })
         return run.decide(signal)
       },
     }, keyboard)
       // A run a later one replaced answers into nothing: its failure would be shown on the new one, its end would end it.
-      .then((matched) => { if (run.isCurrent(signal)) finishMatch(matched) })
+      .then((matched) => { if (run.isCurrent(signal)) dispatch(matchEnded(from.steps, matched, from.putBack)) })
       .catch((e: unknown) => { if (run.isCurrent(signal)) dispatch({ type: 'match-failed', error: signal.aborted ? copy.matchStopped : (e as Error).message }) })
       .finally(() => { if (run.isCurrent(signal)) setBusy(false) })
+  }
+
+  const putBackAndMatch = (indices: number[]) => {
+    let next = state
+    for (const index of indices) {
+      dispatch({ type: 'replay-dropped', index })
+      next = reduce(next, { type: 'replay-dropped', index })
+    }
+    startMatch(next)
   }
 
   // Without the steps the replay added at the end (a tap on the field the next, unmatched step types into): on their own
@@ -228,7 +245,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
     if (!flow || !edited || !opened) return
     const { channel, lease } = opened
     dispatch({ type: 'verify-started' })
-    setMarks(NO_MARKS)
+    setTouch(null)
     setBusy(true)
     verifyFlow(
       tap, channel, lease, flow, edited.secrets, (mark) => dispatch({ type: 'verify-step', mark, at: Date.now() }), keyboard, onTouch,
@@ -262,13 +279,13 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
       />
       <div {...swapFocus} className="h-full min-h-0">
         {state.phase === 'range' && (
-          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={startMatch} onCancel={close} continueRef={fallback}
-            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} />
+          <RangeScreen state={state} dispatch={dispatch} bundleId={bundleId} platform={tap.platform} onContinue={() => startMatch()} onCancel={close} continueRef={fallback}
+            thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)} noPictureWhy={(step) => noPictureWhy(snapshot, step)} />
         )}
         {state.phase === 'matching' && (
           <MatchScreen
-            state={state} tap={tap} marks={marks}
-            onStop={() => session.current?.run.abort()} onRestart={startMatch} onTakeWhatMatched={takeWhatMatched}
+            state={state} tap={tap} touch={touch}
+            onStop={() => session.current?.run.abort()} onRestart={() => startMatch()} onTakeWhatMatched={takeWhatMatched} onPutBackAndMatch={putBackAndMatch}
             onBackToRange={backToRange} onContinueAnyway={continueAnyway} stopRef={fallback}
             onContinueToEdit={continueToEdit} onKeep={(step, kept) => dispatch({ type: 'set-kept', step, kept })}
             thumbnailOf={(step) => thumbnailUrl(tap.sessionId, snapshot, step)}
@@ -281,7 +298,7 @@ function CaptureSession({ tap, session, snapshot, bundleId, setBusy, close }: {
           />
         )}
         {state.phase === 'verifying' && (
-          <VerifyScreen state={state} tap={tap} marks={marks} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
+          <VerifyScreen state={state} tap={tap} touch={touch} total={flow?.steps.length ?? 0} onExport={() => dispatch({ type: 'to-export' })} onBack={() => dispatch({ type: 'go-to', step: 2 })} primaryRef={fallback} />
         )}
         {state.phase === 'export' && flow && <ExportScreen flow={exportedFlow(state, bundleId) ?? flow} bundleId={bundleId} onDone={close} doneRef={fallback} />}
       </div>

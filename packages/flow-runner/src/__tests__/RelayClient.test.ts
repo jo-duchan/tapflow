@@ -268,6 +268,18 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
     for (const m of moves) expect(m).not.toHaveProperty('requestId')
   })
 
+  // The overshoot fix: a held swipe ends on its end point before the lift (the cadence is holdStill's own test).
+  it('swipe with a hold moves onto the end point before it lifts', async () => {
+    const { client, received } = await capture()
+    await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 100)
+    const touch = received.filter((m) => String(m['type']).startsWith('input:touch:'))
+    const end = touch.findIndex((m) => m['type'] === 'input:touch:end')
+    const last = touch[end - 1]!
+    expect(last['type']).toBe('input:touch:move')
+    const p = last['payload'] as { x: number; y: number }
+    expect(Math.abs(p.y - 0.3)).toBeLessThanOrEqual(0.0005 + 1e-9)
+  })
+
   it('pressKey sends a usable id', async () => {
     const { client, received } = await capture()
     await client.pressKey('s1', 'Enter')
@@ -343,6 +355,25 @@ describe('RelayClient — the input senders mint a correlator and await the ack'
       spy.mockRestore()
     }
     expect(timeouts).toContain(10_000 + 80)
+  })
+
+  it('a held swipe waits for its ack its hold longer too, and a hold that is not a time is none', async () => {
+    const { client, received } = await capture()
+    const timeouts: number[] = []
+    const real = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0)
+      return real(fn, ms)
+    }) as typeof setTimeout)
+    try {
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, 50)
+      await client.swipe('s1', [0.5, 0.7], [0.5, 0.3], 40, Number.NaN)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(timeouts).toContain(10_000 + 40 + 50)
+    expect(timeouts).toContain(10_000 + 40)
+    expect(received.filter((m) => m['type'] === 'input:touch:end')).toHaveLength(2)
   })
 
   // Both agents inject a move the moment it arrives, so a pinch sent at once is a jump. `pinch:end` carries no
@@ -2163,5 +2194,20 @@ describe('RelayClient.setOrientation / setPosture — wait for the state, not th
     const err = await three.client.setPosture('s1', 'unfolded', 200).catch((e: unknown) => e)
     expect((err as Error).message).toMatch(/offers 3 postures/)
     expect(err).not.toBeInstanceOf(DeviceLacksError)
+  })
+})
+
+describe('RelayClient.screenshot — the format it asks for', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  // A run asks for JPEG; everyone else asks as before, with no parameter an older relay could misread. Mutations:
+  // always add it, or never.
+  it('adds format=jpeg only when asked', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(2) } as unknown as Response)
+    const c = client()
+    await c.screenshot('s1', undefined, 'jpeg')
+    await c.screenshot('s1')
+    const urls = fetchMock.mock.calls.map(([u]) => String(u))
+    expect(urls[0]).toMatch(/\/api\/v1\/sessions\/s1\/screenshot\?format=jpeg$/)
+    expect(urls[1]).toMatch(/\/api\/v1\/sessions\/s1\/screenshot$/)
   })
 })

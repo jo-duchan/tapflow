@@ -3,7 +3,7 @@ import { WebSocket } from 'ws'
 import type { DeviceStatus } from '@tapflowio/agent-core'
 import type { AgentResources, SessionInfo } from './types.js'
 import type { BooterClass } from './admission/HostBootGate.js'
-import type { AiClientKind, ChromePayload, DeviceSummary, MacAdmission, ServiceTier, ClientKind, DeviceDetails, DeviceReport, FormFactor, Point, PosturesPayload, WatchEndReason } from '@tapflowio/protocol'
+import type { AiClientKind, ChromePayload, DeviceSummary, MacAdmission, ServiceTier, ClientKind, DeviceDetails, DeviceReport, FormFactor, Point, PointSpace, PosturesPayload, WatchEndReason } from '@tapflowio/protocol'
 
 export interface Session {
   id: string
@@ -44,7 +44,9 @@ export interface Session {
   holderStream: boolean
   /** Where the holder's current touch began and last was, so its end can be told to watchers as a tap or a swipe
    *  (A2). Kept whether or not anyone watches: a watcher can arrive mid-gesture. Cleared at the end and with the holder. */
-  gesture: { start: Point; last: Point } | null
+  gesture: { start: Point; last: Point; at: number; space?: PointSpace } | null
+  /** The same for a pinch's two fingers, so its end can be told with them (#1203's follow-up). Cleared with `gesture`. */
+  pinch: { start: [Point, Point]; last: [Point, Point]; at: number; space?: PointSpace } | null
   /** A `input:touch:cancel` reached an agent that cancels, so the end following it completed nothing to tell. */
   touchCancelled: boolean
   streamSocket: WebSocket | null
@@ -80,6 +82,16 @@ export interface Session {
   lastPersonUser?: string
   /** A different person took the device and its keyboard has not been reset yet: sent with their next boot. */
   keyboardResetOwed?: boolean
+  /**
+   * MCP Flow Capture (L6a): the MCP holder that armed record-time observation with `capture:observe`, keyed by its
+   * owner key, and the touches it has sent since (`input:touch:end`/`input:pinch:end` requestIds, newest last), whose
+   * observations go back to it and to nobody else. Kept by the relay, never stored elsewhere; cleared when that holder
+   * goes (`RelayServer.disarmObserve`).
+   */
+  observe?: { owner: string; sent: string[] }
+  /** The boot last sent to the agent: the `observed` it carried, and the last `capture:observe` an MCP holder's
+   *  arming sent the agent since (`said`). Read and cleared by that boot's own `device:ready` (its `requestId`). */
+  bootArmed?: { requestId: string; sent: boolean; said?: boolean }
   /** Who cold-booted the device this session drives, and when — kept after the holder leaves, since that is when
    *  it matters: it is what the per-Mac automation cap counts and shuts down (`admission/capacity.ts`). Set when
    *  the relay forwards a cold boot, undone if that boot fails or turns out warm, cleared on `shutdown-done`.
@@ -287,6 +299,7 @@ export class SessionManager {
         holderLabel: null,
         holderStream: true,
         gesture: null,
+        pinch: null,
         touchCancelled: false,
         streamSocket: null,
         deviceId: d.id,
@@ -431,6 +444,7 @@ export class SessionManager {
     session.holderStream = holder.stream !== false
     // A touch the previous holder began is not this one's to end.
     session.gesture = null
+    session.pinch = null
     session.touchCancelled = false
     // A person taking the device ends the wait, and if it was not theirs, the one waiting is told who. An AI client
     // only borrows it: the wait is kept and comes back when the client leaves.
@@ -492,6 +506,7 @@ export class SessionManager {
     session.holderName = null
     session.holderStream = true
     session.gesture = null
+    session.pinch = null
     session.touchCancelled = false
     if (session.idleTimer) { clearTimeout(session.idleTimer); session.idleTimer = null }
     if (onTimeout) {

@@ -64,6 +64,9 @@ describe('a ui-tree read over any transport', () => {
   it('reads the elements and the interface turn, and refuses a body nothing can use', () => {
     expect(parseUITreeResponse({ elements: [el('OK')], interfaceTurn: 90 })).toEqual({ elements: [el('OK')], interfaceTurn: 90 })
     expect(parseUITreeResponse({ elements: [el('OK')], interfaceTurn: 45 })).toEqual({ elements: [el('OK')] })
+    // #1196: the tree's aspect, kept when it is a positive number and dropped otherwise, never costing the tree.
+    expect(parseUITreeResponse({ elements: [el('OK')], aspect: 0.45 })).toEqual({ elements: [el('OK')], aspect: 0.45 })
+    for (const bad of [0, -1, '2', Infinity, null]) expect(parseUITreeResponse({ elements: [el('OK')], aspect: bad })).toEqual({ elements: [el('OK')] })
     const bad = (() => { try { parseUITreeResponse({ elements: [{ role: 'button' }] }) } catch (e) { return e } })()
     expect(bad).toBeInstanceOf(RelayHttpError)
     expect((bad as RelayHttpError).permanent).toBe(true)

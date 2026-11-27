@@ -8,7 +8,7 @@ import type {
 import { avdRotationLockMemory, formFactorOf, osVersionOf, type RotationLockMemory } from './avdConfig.js'
 import type {
   AgentControlOutbound, AgentDevicesApplied, DeviceReport, ClipboardReplyBody, OpenUrlReplyBody,
-  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest,
+  AppInstallReplyBody, AppLaunchReplyBody, AppLaunchToAgent, AppLogsUnwatch, AppLogsWatch, LaunchOptions, AppClearStateReplyBody, DeviceKeyboardSetReplyBody, DeviceRunResetReplyBody, DevicePosture, ReachResult, ReachTarget, FormFactor, RunResetReport, RunResetRequest, RelayAgentFeature,
   InputPinchStart, InputTouchStart, PointSpace,
 } from '@tapflowio/protocol'
 import { appliedKeys, compactLaunchOptions, launchOptionsProblem } from '@tapflowio/protocol/launch'
@@ -52,11 +52,16 @@ import {
   DeviceListWatcher,
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
-import { AdbWrapper } from './AdbWrapper.js'
+import { AdbWrapper, DumpNoXmlError } from './AdbWrapper.js'
+import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
+import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
+import { spawn } from 'child_process'
+import { AppLogWatch, type AppLogWatchDeps } from './AppLogWatch.js'
+import { getAdbPath } from './sdk.js'
 import { EmulatorLauncher, findEmulatorPid, probeEmulator, stopEmulatorProcess } from './EmulatorLauncher.js'
 import { ensureHelperApp, launchMuteOnlyTap, isAudioSupported } from '@tapflowio/audiotap-helper'
 import { AndroidTouchHelper } from './AndroidTouchHelper.js'
-import { dumpRootFloats, parseUiAutomatorDump } from './uiTree.js'
+import { dumpRootFloats, parseUiAutomatorTree } from './uiTree.js'
 import { fieldResponseOf, keyboardStateOf } from './keyboard.js'
 import { ScrcpySession } from './scrcpy/ScrcpySession.js'
 import type { ScrcpyFrame } from './scrcpy/ScrcpyVideo.js'
@@ -68,8 +73,12 @@ import { bootPostureId, parseCurrentPosture, parsePostures } from './postures.js
 import { EmulatorVideo } from './emulator/EmulatorVideo.js'
 import { LEAN_MARKER_PATH, reconcileLean, type LeanDevice } from './LeanPackages.js'
 import { BootSupersededError, installReclaimingStorage, type ReclaimDevice } from './StorageReclaim.js'
+import { TouchWatch } from './TouchWatch.js'
 
 const logger = createLogger('android-agent')
+const APP_LOG_DISCOVERY_TIMEOUT_MS = 5_000
+const APP_LOG_ADB_COMMAND_TIMEOUT_MS = 2_000
+const APP_LOG_PID_RETRY_INTERVAL_MS = 250
 
 // Typed so a typo cannot ship silently — the viewer gates the whole clipboard bridge on this, and
 // since #447 the Full reset toggle too. `full-reset` is honoured in `handleDeviceBoot`, which stops
@@ -80,7 +89,7 @@ const logger = createLogger('android-agent')
 // string on its own is what puts a control on screen.
 const AGENT_CAPABILITIES: AgentCapability[] = [
   'clipboard', 'full-reset', 'network-control', 'build-download', 'launch-options', 'touch-cancel',
-  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach',
+  'field-value', 'keyboard-state', 'keyboard-set', 'run-reset', 'reach', 'app-logs', 'app-log-watch', 'capture-observe',
 ]
 
 // Parse H.264 SPS NAL unit to extract frame dimensions.
@@ -280,6 +289,15 @@ const ANDROID_BUTTONS: AndroidButton[] = [
 
 interface DeviceState {
   sessionId: string
+  appLogStream: AppLogStream | null
+  appLogGeneration: number
+  /** The app the relay asked to watch (`app:logs:watch`): wanted state, kept while the stream is down (a boot, an
+   *  install, which can give the package a new uid) and raised again after. */
+  appLogWatch: { watchId: string; bundleId: string } | null
+  appLogWatcher: AppLogWatch | null
+  appLogWatchGeneration: number
+  /** The run the last stream of this watch left unfinished, handed to the next so it says `exited` first. */
+  appLogWatchRun: { watchId: string; pid: number } | null
   /** Why each abandoned boot was abandoned, keyed by **the seq it lost**. A single slot would tell the
    *  wrong story the moment two boots overlap: boot A, boot B, then a shutdown leaves one slot saying
    *  `shut-down`, which is what B lost to — A lost to B.
@@ -396,6 +414,8 @@ export function pickAndroidBackend(serial: string, env: NodeJS.ProcessEnv = proc
 }
 
 export interface AndroidAgentOptions {
+  /** How a watched app's logcat is spawned (`app:logs:watch`). Under vitest the default spawns nothing. */
+  appLogWatchDeps?: Pick<AppLogWatchDeps, 'spawn' | 'adbPath'>
   /** How often the device list is re-read for a relay that takes updates. Injectable for tests. */
   deviceRereadMs?: number
   /** An AVD's Android version by name, for one that is not running. Defaults to its system image (`avdConfig`). */
@@ -475,8 +495,10 @@ const EMULATOR_GONE_RESTART =
 
 export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private readonly adb: AdbWrapper
+  private readonly appLogWatchDeps: Pick<AppLogWatchDeps, 'spawn' | 'adbPath'>
   private readonly launcher: EmulatorLauncher
   private ws: WebSocket | null = null
+  private relayFeatures: RelayAgentFeature[] = []
 
   /** Send on the control socket, if there is one. The `?.` is the point: 66 call sites relied on a send
    *  being a no-op between reconnects, and this preserves that exactly.
@@ -507,6 +529,16 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     ws.send(JSON.stringify(msg))
   }
   private deviceStates = new Map<string, DeviceState>()
+  /** A recorded person's touches, per device (Flow Capture P4): only for a boot the relay marked `observed` and that
+   *  keeps observations (`touchObservations`), as iOS. */
+  private readonly touchWatches = new Map<string, TouchWatch>()
+  /** The relay takes `capture:landed` (#1214): said at registration, as `device-updates` is. */
+  private relayTakesLandings = false
+  /** The app under test per device, as last installed or launched here: the only app whose touches are reported. Kept
+   *  across sessions, as iOS's `lastBundleIds`: a person may open the app from its icon. */
+  private readonly appPackages = new Map<string, string>()
+  /** The latest launch begun per device: an older one finishing after it does not name the app under test. */
+  private readonly launchSeq = new Map<string, number>()
   /**
    * One queue of rotation commands per device (#910). Each `setRotation` is its own `adb` process, so
    * two sent back to back can land in either order, and a held ⌘⇧O or a boot reset racing the first
@@ -553,6 +585,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
   constructor(options: AndroidAgentOptions = {}, adb?: AdbWrapper) {
     this.adb = adb ?? new AdbWrapper()
+    this.appLogWatchDeps = options.appLogWatchDeps ?? {
+      spawn: process.env.VITEST ? ((() => { throw new Error('no app log watch under test') }) as unknown as typeof spawn) : spawn,
+      adbPath: getAdbPath,
+    }
     this.launcher = new EmulatorLauncher()
     this.deviceFilter = options.deviceFilter
     this.token = options.token
@@ -637,6 +673,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }
         if (msg.type === 'agent:registered') {
           registered = true
+          this.relayFeatures = Array.isArray(msg.features)
+            ? msg.features.filter(
+                (feature: unknown): feature is RelayAgentFeature =>
+                  feature === 'device-updates' || feature === 'app-logs' || feature === 'app-log-watch'
+              )
+            : []
           clearTimeout(timer)
           this.ws = ws
           this.sleepBlocker.acquire() // idempotent across reconnects
@@ -664,6 +706,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           this.resourcesTimer = setInterval(() => { void this.reportResources() }, 5000)
           // Only a relay that said it takes `agent:devices`; see the same line in IOSAgent.
           if (Array.isArray(msg.features) && msg.features.includes('device-updates')) this.deviceWatcher.start(offered)
+          // A relay from before #1214 logs every `capture:landed` as unknown: sent only to one that said it takes them.
+          this.relayTakesLandings = Array.isArray(msg.features) && msg.features.includes('touch-landings')
           this.lastPingAt = null
           this.lastSocketError = undefined
           ws.on('ping', () => { this.lastPingAt = Date.now() })
@@ -752,6 +796,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.deviceStates.set(sessionId, {
         sessionId,
         deviceId,
+        appLogStream: null,
+        appLogGeneration: 0,
+        appLogWatch: null,
+        appLogWatcher: null,
+        appLogWatchGeneration: 0,
+        appLogWatchRun: null,
         touchHelper: null,
         booted: false,
         streamWs: null,
@@ -789,6 +839,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   disconnect(): void {
+    this.relayFeatures = []
     this._stopping = true
     if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null }
     if (this.resourcesTimer) { clearInterval(this.resourcesTimer); this.resourcesTimer = null }
@@ -880,6 +931,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   }
 
   private cleanupDeviceState(state: DeviceState): void {
+    this.stopAppLogStream(state)
+    this.stopAppLogWatcher(state)
+    this.touchWatches.get(state.deviceId)?.stop()
+    this.touchWatches.delete(state.deviceId)
     if (state.screenWatch) clearInterval(state.screenWatch)
     state.screenWatch = null
     const serial = this.adb.getSerial(state.deviceId)
@@ -900,6 +955,149 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     // A restart still waiting to start belongs to the stream torn down above; it will see it lost its
     // seq and return. Left set, the next stream's own death would not restart it until then.
     state.restarting = false
+  }
+
+  /** Takes the watch's stream down and keeps the watch: `raiseAppLogWatch` brings it back. */
+  private stopAppLogWatcher(state: DeviceState): void {
+    ++state.appLogWatchGeneration
+    const watchId = state.appLogWatch?.watchId
+    const pid = state.appLogWatcher?.stop() ?? null
+    if (pid !== null && watchId) state.appLogWatchRun = { watchId, pid }
+    state.appLogWatcher = null
+  }
+
+  /** (Re)starts the stream for the session's watch when there is one and the device is up: on the watch itself, when
+   *  the device is ready, and after an install. A stream already up for the watch is left as it is. */
+  private raiseAppLogWatch(state: DeviceState): void {
+    const wanted = state.appLogWatch
+    const serial = this.adb.getSerial(state.deviceId)
+    if (!wanted || !state.booted || !serial || state.appLogWatcher) return
+    const generation = ++state.appLogWatchGeneration
+    const sessionId = state.sessionId
+    this.stopAppLogStream(state)
+    const previous = state.appLogWatchRun?.watchId === wanted.watchId ? state.appLogWatchRun.pid : null
+    state.appLogWatchRun = null
+    const current = () => state.appLogWatchGeneration === generation && state.appLogWatch === wanted && this.deviceStates.get(sessionId) === state
+    const deps: AppLogWatchDeps = {
+      ...this.appLogWatchDeps,
+      uid: async () => {
+        const uid = await this.adb.getAppUid(serial, wanted.bundleId, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+        if (uid === null) return null
+        const packages = await this.adb.getPackagesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+        // A shared uid's stream would carry another package's output: refused, as the Launch stream refuses it.
+        return packages.length === 1 && packages[0] === wanted.bundleId ? uid : null
+      },
+      processes: (uid) => this.adb.processesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS),
+      deviceTime: () => this.adb.deviceTime(serial),
+    }
+    const watcher = new AppLogWatch(
+      serial,
+      wanted.bundleId,
+      (item) => {
+        if (!current()) return true
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT) return false
+        if (item.kind === 'text') this.sendMsg({ type: 'app:log', sessionId, watchId: wanted.watchId, text: item.text })
+        else this.sendMsg({ type: 'app:log:run', sessionId, watchId: wanted.watchId, event: item.event, pid: item.pid })
+        return true
+      },
+      (error) => logger.warn('app log watch:', error.message),
+      deps,
+      Date.now,
+      previous,
+    )
+    state.appLogWatcher = watcher
+    void watcher.start()
+  }
+
+  private stopAppLogStream(state: DeviceState): number {
+    const generation = ++state.appLogGeneration
+    state.appLogStream?.stop()
+    state.appLogStream = null
+    return generation
+  }
+
+  private async startAppLogStreamAfterLaunch(
+    sessionId: string,
+    state: DeviceState,
+    serial: string,
+    bundleId: string,
+    launchId: string,
+    logStartTime: string | undefined,
+    generation: number
+  ): Promise<void> {
+    if (!logStartTime) {
+      logger.warn(`not capturing app logs for ${bundleId}: could not read device time before launch`)
+      return
+    }
+    const deadline = Date.now() + APP_LOG_DISCOVERY_TIMEOUT_MS
+    let lastError: unknown
+    const isCurrent = () => state.appLogGeneration === generation && this.deviceStates.get(sessionId) === state
+
+    while (Date.now() < deadline) {
+      if (!isCurrent()) return
+      const timeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+      try {
+        const uid = await this.adb.getAppUid(serial, bundleId, timeoutMs)
+        if (!isCurrent()) return
+        if (Date.now() >= deadline) break
+        if (uid !== null) {
+          const packagesTimeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+          const packages = await this.adb.getPackagesForUid(serial, uid, packagesTimeoutMs)
+          if (!isCurrent()) return
+          if (Date.now() >= deadline) break
+          if (packages.length > 1 && packages.includes(bundleId)) {
+            logger.warn(`not capturing app logs for ${bundleId}: Android UID ${uid} is shared by ${packages.join(', ')}`)
+            return
+          }
+          if (packages.length === 1 && packages[0] === bundleId) {
+            const processTimeoutMs = Math.max(1, Math.min(APP_LOG_ADB_COMMAND_TIMEOUT_MS, deadline - Date.now()))
+            const hasProcess = await this.adb.hasAppProcessForUid(serial, uid, processTimeoutMs)
+            if (!isCurrent()) return
+            if (Date.now() >= deadline) break
+            if (!hasProcess) continue
+            state.appLogStream = new AppLogStream(
+              serial,
+              uid,
+              (text) => {
+                if (!isCurrent()) return true
+                if (
+                  !this.ws ||
+                  this.ws.readyState !== WebSocket.OPEN ||
+                  this.ws.bufferedAmount >= APP_LOG_SOCKET_BUFFER_LIMIT
+                )
+                  return false
+                this.sendMsg({ type: 'app:log', sessionId, launchId, text })
+                return true
+              },
+              (error) => logger.warn('app log stream failed:', error.message),
+              {
+                startTime: logStartTime,
+                isTargetAlive: async () => {
+                  if (!isCurrent()) return false
+                  const currentPackages = await this.adb.getPackagesForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+                  if (!isCurrent() || currentPackages.length !== 1 || currentPackages[0] !== bundleId) return false
+                  return this.adb.hasAppProcessForUid(serial, uid, APP_LOG_ADB_COMMAND_TIMEOUT_MS)
+                },
+              }
+            )
+            return
+          }
+        }
+      } catch (error) {
+        if (!isCurrent()) return
+        lastError = error
+      }
+
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(APP_LOG_PID_RETRY_INTERVAL_MS, remaining))
+        timer.unref()
+      })
+      if (!isCurrent()) return
+    }
+
+    if (lastError) logger.warn('could not start app log stream:', lastError instanceof Error ? lastError.message : String(lastError))
   }
 
   /**
@@ -2177,6 +2375,28 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     })
   }
 
+  /**
+   * The touch watch on or off for a device (record-time observation): by a boot, which always starts a new one, or by
+   * `capture:observe` (MCP Flow Capture, L6a, `keepWatch`), which keeps one already on so a gesture in flight keeps its
+   * report. Only touches on the gRPC channel are observed, and only for the app this agent last installed or launched.
+   */
+  private applyObservation(avdId: string, observe: boolean, keepWatch = false): void {
+    const current = this.touchWatches.get(avdId)
+    if (observe && keepWatch && current) return
+    current?.stop()
+    this.touchWatches.delete(avdId)
+    const serial = this.adb.getSerial(avdId)
+    if (!observe || !serial) return
+    this.touchWatches.set(avdId, new TouchWatch({
+      hit: (sr, x, y) => this.adb.hitTest(sr, x, y),
+      framestats: (sr, pkg) => this.adb.framestats(sr, pkg),
+      ping: (sr) => this.adb.pingFocusedServer(sr),
+      hold: (sr, on) => this.adb.holdConnection(sr, on),
+      send: (m) => this.sendMsg(m),
+      ...(this.relayTakesLandings ? { landings: { send: (m) => this.sendMsg(m), home: (sr) => this.adb.homePackage(sr) } } : {}),
+    }, serial, () => this.appPackages.get(avdId)))
+  }
+
   /** One more step's time at most. A clear still running past that fails the boot rather than announcing a device the
    *  run's install could lose its data on: failing the step does not stop the clear, and nothing else orders the two. */
   private async awaitPendingClears(deviceId: string): Promise<void> {
@@ -2189,7 +2409,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
     }
   }
 
-  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest): Promise<void> {
+  private async handleDeviceBoot(sessionId: string, avdId: string, fullErase = false, tier?: { secureContext: boolean; external: boolean }, requestId?: string, runReset?: RunResetRequest, observeTouches = false): Promise<void> {
     const state = this.deviceStates.get(sessionId)
     // Split, because the two halves are not the same kind of nothing. No open control channel means the
     // answer itself has nowhere to go, so this is the one abandonment that stays silent — and the caller
@@ -2327,7 +2547,12 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
       this.sendChrome(state)
       void this.sendPostures(state)
       state.booted = true
+      // What each touch hits, while this person is recorded or an MCP client armed it — decided at the boot for a
+      // person, as iOS: turning capturing on mid-session is observed from the next boot. An MCP client arms a running
+      // device with `capture:observe`. The stream's teardown (`cleanupDeviceState`) ends it.
+      this.applyObservation(avdId, observeTouches)
       this.sendMsg({ type: 'device:ready', sessionId, requestId, payload: { deviceId: avdId, cold: launched, ...(runResetReport ? { runReset: runResetReport } : {}) } })
+      this.raiseAppLogWatch(state)
       // Clear a network condition the last session left behind, then report (#607).
       //
       // **At boot rather than at teardown**, because airplane mode lives in the AVD's userdata and
@@ -2958,8 +3183,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
   private handleRelayMessage(msg: { type: string; sessionId: string; requestId?: string; payload?: unknown }): void {
     switch (msg.type) {
       case 'device:boot': {
-        const { deviceId, resetMode, secureContext, external, runReset } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest }
-        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset)
+        const { deviceId, resetMode, secureContext, external, runReset, observed, touchObservations } = msg.payload as { deviceId: string; resetMode?: 'app-only' | 'full-erase'; secureContext?: boolean; external?: boolean; runReset?: RunResetRequest; observed?: boolean; touchObservations?: boolean }
+        this.handleDeviceBoot(msg.sessionId, deviceId, resetMode === 'full-erase', { secureContext: !!secureContext, external: !!external }, msg.requestId, runReset, observed === true && touchObservations === true)
           .catch((e) => logger.error('handleDeviceBoot failed:', e))
         break
       }
@@ -3000,6 +3225,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           })
           break
         }
+        this.stopAppLogStream(state)
+        // Reinstalled, the package can get another uid: the watch's stream is raised again after the install.
+        this.stopAppLogWatcher(state)
         const doInstall = async () => {
           // Not past a run reset's `pm clear` still running: it would land on the app installed here. A client that
           // joined without booting (MCP's `connect_device`) reaches this without the boot's own wait.
@@ -3030,10 +3258,16 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           }
         }
         doInstall()
-          .then(() => respond({ type: 'app:install-done' }))
+          .then(() => {
+            if (bundleId) this.appPackages.set(state.deviceId, bundleId)
+            respond({ type: 'app:install-done' })
+            this.raiseAppLogWatch(state)
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             respond({ type: 'app:install-error', message })
+            // Stopped for the install: an install that failed leaves the app it found, and the relay sends no new watch.
+            this.raiseAppLogWatch(state)
           })
         break
       }
@@ -3061,17 +3295,40 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         const options = compactLaunchOptions({ arguments: args, env })
+        const launchNo = (this.launchSeq.get(state!.deviceId) ?? 0) + 1
+        this.launchSeq.set(state!.deviceId, launchNo)
         // Flow Capture's Match saw a launch go unanswered for its 30 s in 4 of 28 replays on an emulator (2026-11-17),
         // with the app on screen and nothing in this log. Where it waits is logged once it is slow, so the next one says.
         const started = Date.now()
         let phase = 'waiting for a late pm clear'
         const slow = setTimeout(() => logger.warn(`app:launch on ${serial} still running after ${LAUNCH_SLOW_MS / 1000}s: ${phase}`), LAUNCH_SLOW_MS)
         slow.unref?.()
+        const appLogGeneration = this.stopAppLogStream(state!)
         // Same reason as `app:install`: a launched app writes data a late `pm clear` would take.
         this.awaitPendingClears(state!.deviceId)
-          .then(() => { phase = `launching (clears took ${Date.now() - started}ms)`; return this.adb.launchApp(serial, bundleId, options, defaultsOnly === true) })
+          .then(async () => {
+            phase = `launching (clears took ${Date.now() - started}ms)`
+            let logStartTime: string | undefined
+            const applied = await this.adb.launchApp(serial, bundleId, options, defaultsOnly === true, (deviceTime) => { logStartTime = deviceTime })
+            return { applied, logStartTime }
+          })
           // What was delivered, which for the relay's defaults can be less than what was sent, down to nothing.
-          .then((applied) => respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' }))
+          .then(({ applied, logStartTime }) => {
+            // The app under test once it launched: a launch that failed leaves the one before, and one overtaken by a
+            // later launch does not take it back (CodeRabbit on #1187).
+            if (this.launchSeq.get(state!.deviceId) === launchNo) this.appPackages.set(state!.deviceId, bundleId)
+            if (
+              this.relayFeatures.includes('app-logs') &&
+              // A watched app's output comes from the watch, whichever way the app was opened.
+              state!.appLogWatch?.bundleId !== bundleId &&
+              state!.appLogGeneration === appLogGeneration &&
+              this.deviceStates.get(sessionId) === state
+            ) {
+              void this.startAppLogStreamAfterLaunch(sessionId, state!, serial, bundleId, requestId, logStartTime, appLogGeneration)
+                .catch((error: unknown) => logger.warn('could not start app log stream:', error instanceof Error ? error.message : String(error)))
+            }
+            respond(options ? { type: 'app:launch-done', applied: appliedKeys(applied ?? {}) } : { type: 'app:launch-done' })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             // The toast gets the reason alone; the full adb output (the cause) stays in this log.
@@ -3098,6 +3355,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           state.lastTouchPx = { x: px, y: py }
           this.fire(g.owner.touchDown(0, px, py))
         }
+        // After the down is sent: what it hit is asked off the touch's path. Not on the adb fallback (`helper`), which
+        // plays the whole gesture once its end arrives, so the down's time is not when the app saw it.
+        if (g?.via === 'channel') this.touchWatches.get(state.deviceId)?.down(x, y, state.rotation ? toNaturalPoint(state.rotation, x, y) : { x, y })
         break
       }
       case 'input:touch:move': {
@@ -3108,6 +3368,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         // A move with no gesture behind it — or one whose backend has since been replaced — is not the
         // gesture the tester made. Dropped, as iOS drops it.
         const g = this.gestureOwner(state, 'touch')
+        if (g) this.touchWatches.get(state.deviceId)?.move(x, y)
         if (g?.via === 'helper') {
           g.owner.touchMove(x, y)
         } else if (g?.via === 'channel') {
@@ -3123,6 +3384,9 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) { this.ackNoSession(msg.sessionId, requestId); break }
         const closed = this.closeGesture(state, 'touch')
+        const watch = this.touchWatches.get(state.deviceId)
+        if (closed.via === 'none') watch?.cancel()
+        else watch?.up(msg.sessionId, requestId)
         const seq = state.bootSeq
         const { x: upX, y: upY } = state.lastTouchPx
         // terminal of a tap/swipe → ack the gesture, on what the dispatch actually reported
@@ -3141,6 +3405,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         const state = this.deviceStates.get(msg.sessionId)
         if (!state) break
         const { x, y } = state.lastTouchPx
+        this.touchWatches.get(state.deviceId)?.cancel()
         const closed = this.closeGesture(state, 'touch', (pc) => pc.touchCancel(0, x, y))
         if (closed.via === 'helper') closed.owner.touchCancel()
         else if (closed.via === 'channel') {
@@ -3412,11 +3677,10 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         break
       }
       case 'screenshot:request': {
-        // `format` is deliberately destructured and unused — it is on the wire and this platform
-        // cannot honour it, which is the whole of #508. Reading it here and answering with it is
-        // exactly the bug.
+        // `format` is a preference: JPEG is made with `sips` when asked, and the reply says what was produced — never
+        // the request's echo, which sent PNG bytes out as `image/jpeg` (#508).
         const raw = msg as unknown as { requestId: string; format?: 'png' | 'jpeg'; sessionId?: string }
-        const { requestId } = raw
+        const { requestId, format } = raw
         const sessionId = msg.sessionId
         const state = this.deviceStates.get(sessionId!)
         const serial = state ? this.adb.getSerial(state.deviceId) : undefined
@@ -3425,17 +3689,19 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.screenshot(serial)
-          .then((buf) => this.sendMsg({
-            type: 'screenshot:done',
-            sessionId,
-            requestId,
-            // `'png'`, never the requested format. `screencap -p` produces PNG and takes no format
-            // argument, and this field means what was produced — the request's is a preference (see
-            // `ScreenshotRequest` in protocol). Echoing it sent PNG bytes out under `image/jpeg`
-            // (#508), which the relay then wrote into the HTTP Content-Type.
-            format: 'png',
-            data: buf.toString('base64'),
-          }))
+          .then(async (shot) => {
+            const png = withoutLeadingText(shot)
+            // `screencap -p` writes PNG and takes no format; JPEG is converted here, and when that cannot be done the
+            // PNG goes out labelled as what it is.
+            const jpeg = format === 'jpeg' ? await toJpeg(png) : null
+            this.sendMsg({
+              type: 'screenshot:done',
+              sessionId,
+              requestId,
+              format: jpeg ? 'jpeg' : 'png',
+              data: (jpeg ?? png).toString('base64'),
+            })
+          })
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
             this.sendMsg({ type: 'screenshot:error', sessionId, requestId, message })
@@ -3688,6 +3954,37 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           .catch(() => this.sendMsg({ type: 'ui:keyboard:response', sessionId, requestId, keyboard: { shown: null } }))
         break
       }
+      case 'app:logs:watch': {
+        const { watchId, bundleId } = msg as unknown as Partial<AppLogsWatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || typeof watchId !== 'string' || !watchId || typeof bundleId !== 'string' || !bundleId) break
+        const same = state.appLogWatch?.watchId === watchId && state.appLogWatch?.bundleId === bundleId
+        if (same && state.appLogWatcher) break
+        if (!same) {
+          this.stopAppLogWatcher(state)
+          state.appLogWatch = { watchId, bundleId }
+        }
+        this.raiseAppLogWatch(state)
+        break
+      }
+      case 'app:logs:unwatch': {
+        const { watchId } = msg as unknown as Partial<AppLogsUnwatch>
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state || state.appLogWatch?.watchId !== watchId) break
+        state.appLogWatch = null
+        this.stopAppLogWatcher(state)
+        break
+      }
+      case 'capture:observe': {
+        // MCP Flow Capture (L6a): arm or disarm observation on a device that may be running already, with no boot. The
+        // relay sends it only from an MCP holder, again when this agent comes back, and `off` when the holder goes.
+        // Mid-boot it changes nothing for long: the boot starts its own watch by the relay's `observed`, which counts
+        // an armed MCP holder.
+        const state = this.deviceStates.get(msg.sessionId)
+        if (!state) break
+        this.applyObservation(state.deviceId, (msg.payload as { on?: unknown } | undefined)?.on === true, true)
+        break
+      }
       case 'device:run-reset': {
         const requestId = this.correlatorOf(msg)
         if (requestId === null) break
@@ -3744,9 +4041,14 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
         }
         this.adb.dumpUiHierarchy(serial)
           .then((xml) => this.parseTree(serial, xml))
-          .then((elements) => this.sendMsg({ type: 'ui:tree:response', sessionId, requestId, elements }))
+          .then(({ elements, aspect }) => this.sendMsg({
+            type: 'ui:tree:response', sessionId, requestId, elements, ...(aspect !== undefined ? { aspect } : {}),
+          }))
           .catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
+            // The relay passes the reason to its HTTP caller (a 502's body) but logs none: this is the only log line for it.
+            // Not what the device printed, which can be on-screen text: the caller has that in the reply.
+            logger.warn(`ui:tree on ${serial} failed: ${(e instanceof DumpNoXmlError ? e.logged : message).slice(0, 300)}`)
             this.sendMsg({ type: 'ui:tree:error', sessionId, requestId, message })
           })
         break
@@ -3885,8 +4187,8 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
   /** A dump as elements, normalised by the screen when a dialog's window is its root (`dumpRootFloats`): the screen's
    *  size is asked only then, so a dump of the app's own window costs nothing more. */
-  private async parseTree(serial: string, xml: string): Promise<UIElement[]> {
-    return parseUiAutomatorDump(xml, dumpRootFloats(xml) ? await this.screenSize(serial) : null)
+  private async parseTree(serial: string, xml: string): Promise<{ elements: UIElement[]; aspect?: number }> {
+    return parseUiAutomatorTree(xml, dumpRootFloats(xml) ? await this.screenSize(serial) : null)
   }
 
   /** The screen Android draws, in device pixels: what a tree's and a keyboard's bounds are fractions of. */
@@ -4073,7 +4375,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
 
   async queryUITree(): Promise<UIElement[]> {
     const serial = this.soleLive().serial
-    return this.parseTree(serial, await this.adb.dumpUiHierarchy(serial))
+    return (await this.parseTree(serial, await this.adb.dumpUiHierarchy(serial))).elements
   }
 
   stream(): ReadableStream<Buffer> {

@@ -102,10 +102,19 @@ export const INBOUND_DISPOSITION = {
     does: 'handed to the stream listener when one is set and written into the run\'s video beside the chrome; '
       + 'nothing else here reads it',
   },
+  'app:log': {
+    ignored: 'Logs are for a person watching in the dashboard; a replay does not consume them.'
+  },
+  'app:log:run': {
+    ignored: 'The relay watches an app\'s logs only for a dashboard holder, so a replay is never sent one.'
+  },
   // A replay engine drives a session; it never watches one, so the four watch replies have no waiter here.
   'watch:started': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:refused': { ignored: 'Answers `watch:start`, which this client never sends.' },
   'watch:holder-left': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:ended': { ignored: 'Sent only to a watching socket; this client never watches.' },
   'watch:action': { ignored: 'Sent only to a watching socket; this client never watches.' },
+  'capture:observe-done': { ignored: 'Answers `capture:observe`, which only an MCP client sends (L6a); a flow run is never observed.' },
+  'capture:observe-error': { ignored: 'Answers `capture:observe`, which only an MCP client sends (L6a).' },
+  'capture:observation': { ignored: 'Sent only to an MCP holder that armed observation (L6a); a flow run never does.' },
 } satisfies Record<BrowserInbound['type'], Disposition>

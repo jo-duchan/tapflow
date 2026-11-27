@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto'
 import { getDb, isDbOpen } from '../db.js'
 import { assertCanWrite, requireBuildAuth, requireViewAuth } from '../middleware/auth.js'
 import { json, readBodyLimited } from '../router.js'
-import { unlinkSafe } from '../lib/uploads.js'
+import { unlinkSafe, assertDiskRoom, StorageFullError } from '../lib/uploads.js'
 
 // Flow run records: what `tapflow flow run` did, for the runs page. The CLI writes them over REST with the
 // token it already runs with, and nothing here may ever make that run slower or fail it — the caps below
@@ -195,6 +195,7 @@ interface FlowRow {
   steps_json: string
   screenshot_file: string | null
   screenshot_mime: string | null
+  screenshot_note: string | null
 }
 
 export function findRun(id: string): RunRow | undefined {
@@ -442,6 +443,9 @@ export async function handleReportFlow(
       body.status, skipReason ?? null, body.status === 'skipped' ? null : str(body.failureKind, 50), str(body.failureMessage, MAX_MESSAGE),
       durationMs, JSON.stringify(steps),
     )
+    // The runner tried to take a screenshot and got nothing (`FlowResult.screenshotMissed`): said only while none is
+    // stored, and never by the upsert above, so a retried report cannot clear a refusal the upload left.
+    if (body.screenshotMissed === true && body.status !== 'skipped') noteScreenshot(run.seq, idx, 'not-taken')
     db.prepare(`UPDATE flow_runs SET last_activity_at = datetime('now') WHERE seq = ?`).run(run.seq)
     return null
   })()
@@ -495,6 +499,17 @@ function imageKind(buf: Buffer): { mime: string; ext: string } | null {
   return null
 }
 
+/**
+ * Why a flow has no screenshot, written where the relay refuses one — so the page says it, and whatever the runner's
+ * version (review: a note call of the runner's own would answer 200 on an older relay). Never over a stored one: a
+ * retry that failed must not hide the screenshot an earlier try kept.
+ */
+type ScreenshotNote = 'too-large' | 'not-image' | 'storage-full' | 'not-taken'
+function noteScreenshot(runSeq: number, idx: number, note: ScreenshotNote): void {
+  getDb().prepare('UPDATE flow_run_flows SET screenshot_note = ? WHERE run_seq = ? AND idx = ? AND screenshot_file IS NULL')
+    .run(note, runSeq, idx)
+}
+
 export async function handleUploadFlowScreenshot(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -510,11 +525,26 @@ export async function handleUploadFlowScreenshot(
   if (row.status === 'skipped') return json(res, 409, { error: 'A skipped flow has no screenshot' })
 
   const buf = await readBodyLimited(req, MAX_SCREENSHOT_BYTES)
-  if (buf === null) return json(res, 413, { error: `Screenshot larger than ${MAX_SCREENSHOT_BYTES} bytes` })
+  if (buf === null) {
+    noteScreenshot(run.seq, Number(params.idx), 'too-large')
+    return json(res, 413, { error: `Screenshot larger than ${MAX_SCREENSHOT_BYTES} bytes` })
+  }
   const kind = imageKind(buf)
-  if (!kind) return json(res, 415, { error: 'Screenshot must be PNG or JPEG' })
+  if (!kind) {
+    noteScreenshot(run.seq, Number(params.idx), 'not-image')
+    return json(res, 415, { error: 'Screenshot must be PNG or JPEG' })
+  }
 
   fs.mkdirSync(screenshotsDir, { recursive: true })
+  try {
+    assertDiskRoom(screenshotsDir, buf.length)
+  } catch (err) {
+    if (err instanceof StorageFullError) {
+      noteScreenshot(run.seq, Number(params.idx), 'storage-full')
+      return json(res, 507, { error: err.message })
+    }
+    throw err
+  }
   const filename = `${randomUUID()}${kind.ext}`
   await fs.promises.writeFile(path.join(screenshotsDir, filename), buf)
   // **Re-read after the awaits, with nothing awaited between the read and the update.** Two uploads for one
@@ -522,7 +552,7 @@ export async function handleUploadFlowScreenshot(
   // meanwhile updates no row. Either way a file no row names would stay forever: nothing sweeps this
   // directory, so a file kept here outlives the run it was "deleted with".
   const before = current.get(run.seq, Number(params.idx)) as { screenshot_file: string | null } | undefined
-  const updated = getDb().prepare('UPDATE flow_run_flows SET screenshot_file = ?, screenshot_mime = ? WHERE run_seq = ? AND idx = ?')
+  const updated = getDb().prepare('UPDATE flow_run_flows SET screenshot_file = ?, screenshot_mime = ?, screenshot_note = NULL WHERE run_seq = ? AND idx = ?')
     .run(filename, kind.mime, run.seq, Number(params.idx))
   if (updated.changes === 0) {
     unlinkSafe(path.join(screenshotsDir, filename), 'run screenshot')
@@ -793,6 +823,9 @@ export function handleGetRun(
       failureKind: f.failure_kind, failureMessage: f.failure_message, durationMs: f.duration_ms,
       steps: JSON.parse(f.steps_json) as unknown[],
       hasScreenshot: f.screenshot_file !== null,
+      // Kept true by the writes (`noteScreenshot` only while none is stored, a store clears it), not masked here: one
+      // rule in one place, which the tests can see break.
+      screenshotNote: f.screenshot_note,
       video: videos.get(idx) ?? null,
     }
   })

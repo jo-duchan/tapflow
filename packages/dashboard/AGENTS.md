@@ -81,7 +81,7 @@ posture…", and framing by a lagging description stretched a landscape frame in
 **Input does not wait either: a pointer goes out as the frame's own point, marked `space: 'frame'`**, and the
 agent turns it by the frame it holds. The second version turned it here into the screen Android draws, by the
 description's correction, and so had to drop every touch until the description caught up — felt as input
-stalling after each turn. The cursor, the pinch hint and the recording's overlay are still drawn in the screen
+stalling after each turn. The pointer's touch marks, the recording's included, are still drawn in the screen
 Android draws (`toShownNorm`, `turnPoint` by `streamRotation`); they move with the description, which is only
 a picture of where the pointer is. Every other sender of a touch — MCP's screenshot, the UI tree, older
 dashboards — sends no `space` and means that screen, and `bodyRotation` is the marker that the agent reads the
@@ -153,7 +153,73 @@ fifth is refused with the reason (`watchRefusalText`).
 is in the middle of. The relay refuses those from a watching socket too; this is the half that does not depend
 on it. A watch that ended or was refused stays so across a reconnect (`AISession.test.tsx`).
 
-**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's pointer — a cursor that stays at the last tap and glides to the next, with a fading trail — through the screens' `overlay` (`TapMarks`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space). The run video's replay passes no `marks`, so it draws none. Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
+**What the holder does is told to its watchers (A2), and only them**: `watch:action`, built by the relay from the input and app commands it passed on, plus the holder's own `session:activity` step names. The page keeps the last 100 (`useWatchSession`), shows them as steps that open onto their actions (`AgentActivity`, Trace's look rebuilt as a disclosure — Trace is Base UI), keeps the last picture and the log after the watch ends, and draws the agent's latest tap, swipe or pinch through the screens' `overlay` (`TouchMarksLayer` with a `touch`, placed per platform: iOS through `iosScreenLayout`, Android in the screen's own space, or as it is when the holder sent the frame's own points) — see "Touches are drawn by one model" below. The run video's replay passes a `timeline` instead: the runner's recorded touches on the playback clock (below). Typing arrives as a count and an opened URL without the URL — never add a field that carries either.
+
+### Touches are drawn by one model, and the colour says which surface
+
+Every touch on a device or a picture of one is drawn by `lib/touchMarks` and nothing else: the QA viewer's own
+pointer (live, and burned into its recording), the watch view's agent, Flow Capture's Match and Verify replays, and
+its step pictures. **The motion is the same everywhere; only the colour differs, and it follows the surface — white
+(a light grey fill) on Manual QA, where a person drives the device, blue in Flow Capture and on the watch page** (user,
+2026-11-21). By
+surface and not by who made each touch: Flow Capture's step pictures show a person's recorded touches and are blue,
+so one dialog never mixes the two. Before it, the QA viewer had a white cursor in a DOM div plus a second copy in each
+recording composer, and the machine side had a blue gliding cursor with a dashed trail: three looks for one gesture.
+
+Three layers, each used everywhere: `model.ts` (pure — a state and a time in, the parts to draw out), `draw.ts`
+(the only renderer, a canvas — the overlay and a recording call the same function, so a video shows what the page
+did), and `store.ts` (what is touching now, outside React, since a pointer moves at the display's rate).
+`PointerTouchMarks` turns pointer events into it for both viewers, and `TouchMarksLayer` puts it over a screen,
+fed by a `store`, a machine's `touch`, or a picture's `still` mark. **A new place that shows a touch uses the layer;
+it does not draw its own.** The numbers are the user's Figma (Medium, node 4564:1730), in `TOUCH_MARK` and at the
+top of `draw.ts`; change them there.
+
+**A light border and a thin dark shadow are what keep a mark visible on any screen**, not the colour. The first look
+was a white disc with a white glow, and on a white screen it all but vanished. The fill carries the mark on white, the
+border on black, the shadow on both, as a pointer cursor's fill, outline and shadow do. The shadow is 20 % where Figma
+has 8 %: at 8 % a tap's release ring, which has no fill, could not be seen on white. A machine's border and shadow are
+blue as well (blue-300, blue-600 at 35 %): white and black on a blue dot read as two colours, and a navy shadow read
+grey (user, 2026-11-21).
+
+Three things that look optional and are not:
+
+- **The layer's canvas bleeds 40 px past its box.** A mark near an edge (a tap's widening ring, the shadow) was drawn
+  past it when this was SVG with visible overflow; a canvas clips at its edge.
+- **A swipe's moving dot blurs what is under it, and two ways do it.** A recording draws the device's frame on its
+  own canvas first, so `drawTouchParts(…, { backdrop: true })` copies that patch out and draws it back blurred. The
+  layer's canvas has nothing under it to read: the screen is another element. So the layer places a div with CSS
+  `backdrop-filter` under each moving dot, and the browser blurs the screen. Both are placed from the same parts.
+  That CSS blur sits under the canvas, so it cannot blur the canvas's own line: **the line is cut at the moving dot's
+  edge**, on the page and in a recording alike, or it ran sharp through the glass.
+- **The layer keeps where its marks start on `data-anchor`.** A canvas has no DOM a test can read, and that a mark
+  sits under the pointer — through iOS's frame and Android's turns — is the thing placement is for. The anchor checks
+  `place`; what the drawing does with it (the bleed) is `layerPoint`, tested on its own, and each viewer's recording
+  composer has a test reading the canvas calls it makes.
+
+A machine's touch arrives as one event with no pointer to follow, so the model plays it: the press, then for a swipe
+the finger moving to its end, and for a pinch both fingers each to its own — over the gesture's own length (Flow
+Capture's step, or the `durationMs` the relay now puts on `watch:action`), else over 400 ms. A tap is held for its
+`holdMs` when longer, so a long press reads as one (user, 2026-11-21). **One cap for all three, 3 s**
+(`maxGestureMs`): a separate 1 s cap on strokes drew a 2 s pinch in half its time. Only the latest is drawn. **It is pressed the moment it arrives, with no hover first:**
+it arrives once it has already reached the device, so a hover drew the press 300 ms late, over the screen it brought.
+
+**A person's press is drawn as a drag only once it is sent as one** (`DRAG_THRESHOLD`, 2 % of the screen). Under that
+the device takes a tap, and a swipe drawn there showed something that did not happen.
+**A pinch reaches watchers with its fingers** because the relay keeps them as it keeps a touch's (`Session.pinch`
+beside `gesture`); a relay from before that sends a bare pinch, which is a row and no mark. **A body-mode holder's
+points are of the frame** (`space: 'frame'`), and the relay passes that on: the watch view places them as they are,
+not through the screen's turn, which put them a quarter off. Flow Capture does the same over its replay's mirror, which
+copies that frame, and turns them into the screen by the recorded `streamRotation` on a step's screenshot
+(`markOf`'s `into`); with no map there it draws none. Until then it drew none for a frame-space step at all, so an
+Android emulator's Match, Edit and Verify showed no touch. A touch in the screen's points (a named tap, Verify's
+steps) is carried into the frame by the inverse of that map before it is drawn there (`mirrorMark`).
+**An Automation run's video draws the runner's touches** (#1205's follow-up). The runner writes each as a `touch`
+event in the video, on the frames' clock, at send time — **in the frame it was sent in**, after `SocketFlowDriver`
+turned the flow's points (`onInput`), so the player places it as the watch page places a `watch:action`; the flow's
+own points drew a landscape tap a quarter off. The player draws them with `TouchMarksLayer`'s `timeline` source:
+`timelineState` at the playback clock's time, never the wall clock, so a seek back shows a touch again and a pause
+holds it. The clock (`PlaybackClock`) is told by the player and read by the layer, so playing re-renders nothing under
+the marks — `RunVideo` relies on the device screen's props not changing per frame.
 
 ### The React Compiler is on
 

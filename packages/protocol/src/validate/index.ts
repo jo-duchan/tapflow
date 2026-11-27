@@ -54,6 +54,8 @@ import * as z from 'zod'
 
 import type {
   AgentDevices, AgentRegister, AgentResourceReport, AgentsList, AppClearState, AppClearStateDone,
+  AppLog,
+  AppLogRun,
   AppClearStateError, AppInstallDone, AppInstallError, AppInstallToRelay, AppLaunchDone,
   AppLaunchError, AppLaunchToRelay, RunResetItem, RunResetReport, ServiceTier, ClipboardData, ClipboardError, ClipboardRead, ClipboardWrite,
   NetworkError, NetworkSet, NetworkState,
@@ -62,8 +64,8 @@ import type {
   InputPinchEnd, InputPinchMove, InputPinchStart, InputPosture, InputRotate, InputTouchCancel, InputTouchEnd, InputTouchMove,
   InputTouchStart, InputType, InputTypeDone, InputTypeError, KeyboardToggled, OpenUrl, OpenUrlDone,
   OpenUrlError, ScreenshotDone, ScreenshotError, SessionChrome, SessionDeviceInfo, SessionEnd,
-  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
-  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError,
+  SessionActivity, SessionLeave, SessionStart, StreamRegister, UiTreeError, UiTreeResponse, UiReachResponse, UiFieldResponse, UiKeyboardResponse, CaptureTouched, CaptureLanded, DeviceKeyboardSet, DeviceKeyboardSetDone, DeviceKeyboardSetError,
+  DeviceRunReset, DeviceRunResetDone, DeviceRunResetError, CaptureObserve,
   WatchStart, WatchStop,
 } from '../index.js'
 import type { Assert, EnvelopeOf, IsEmpty, SchemaExact } from './assert.js'
@@ -129,6 +131,10 @@ const observedElement = z.object({
 const env = <T extends string>(type: T) => z.object({ type: z.literal(type), sessionId })
 /** `{ type, sessionId, requestId }`. */
 const envC = <T extends string>(type: T) => z.object({ type: z.literal(type), sessionId, requestId })
+const appLogText = z
+  .string()
+  .max(8192)
+  .refine((text) => new TextEncoder().encode(text).byteLength <= 8192)
 /** `{ type, sessionId, requestId? }` — the relay originates some of these itself, so the agent's copy
  *  is not always a reply. */
 const envCo = <T extends string>(type: T) =>
@@ -226,6 +232,10 @@ const BROWSER_INBOUND = {
   'device:run-reset': z.object({
     type: z.literal('device:run-reset'), sessionId, requestId,
     payload: z.object({ apps: appIds }),
+  }),
+  'capture:observe': z.object({
+    type: z.literal('capture:observe'), sessionId, requestId,
+    payload: z.object({ on: z.boolean() }),
   }),
   'open-url': z.object({
     type: z.literal('open-url'), sessionId, requestId, payload: z.object({ url: z.string() }),
@@ -379,6 +389,7 @@ const AGENT_CONSUMED = {
     // would refuse the whole tree for one unknown turn, and the caller would wait out the 15 s deadline for a
     // tree that had arrived.
     interfaceTurn: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().catch(undefined),
+    aspect: z.number().positive().finite().optional().catch(undefined),
   }),
   'ui:tree:error': z.object({
     type: z.literal('ui:tree:error'), sessionId, requestId, message: z.string().default(''),
@@ -427,6 +438,14 @@ const AGENT_CONSUMED = {
       seq: z.number().int().positive().optional().catch(undefined),
     }),
   }),
+  // A landing the relay cannot read is none: Capture judges that touch as before (#1214).
+  'capture:landed': z.object({
+    type: z.literal('capture:landed'), sessionId, requestId,
+    landed: z.object({
+      on: z.enum(['app', 'home', 'system', 'alert', 'other']),
+      id: z.string().min(1).max(256).optional().catch(undefined),
+    }),
+  }),
   // Unknown, not hidden, when the agent's answer cannot be read: a capture then judges the taps around it as unknown.
   'ui:keyboard:response': z.object({
     type: z.literal('ui:keyboard:response'), sessionId, requestId,
@@ -434,7 +453,7 @@ const AGENT_CONSUMED = {
   }),
 } as const
 
-/** The 30 the relay only forwards. Envelope tier — see the header for why there is no exception. */
+/** The 31 the relay only forwards. Envelope tier — see the header for why there is no exception. */
 const AGENT_FORWARDED = {
   'session:chrome': env('session:chrome'),
   'session:deviceInfo': env('session:deviceInfo'),
@@ -477,6 +496,18 @@ const AGENT_FORWARDED = {
   // Absent means "not the answer to a request", never "an old agent".
   'network:state': envCo('network:state'),
   'network:error': envC('network:error'),
+  // The active app's text stream is addressed to its holder, never replayed or broadcast to watchers.
+  'app:log': z
+    .object({ type: z.literal('app:log'), sessionId, launchId: z.string().min(1).optional(), watchId: z.string().min(1).optional(), text: appLogText })
+    .refine((m) => (m.launchId === undefined) !== (m.watchId === undefined), 'app:log names exactly one of launchId and watchId'),
+  // A run boundary is a few bytes and is never dropped for backpressure: a lost `exited` would join two runs.
+  'app:log:run': z.object({
+    type: z.literal('app:log:run'),
+    sessionId,
+    watchId: z.string().min(1),
+    event: z.enum(['started', 'running', 'exited']),
+    pid: z.number().int().positive(),
+  }),
 } as const
 
 const AGENT_INBOUND = { ...AGENT_CONSUMED, ...AGENT_FORWARDED } as const
@@ -505,17 +536,17 @@ const INBOUND = { ...BROWSER_INBOUND, ...AGENT_INBOUND, ...STREAM_INBOUND } as c
 // from a session that has never acked as **success** (#457), so a dropped `input:key` would be
 // reported to an MCP caller as an input that landed.
 //
-// Every browser request that declares a required `requestId` except `device:lease`, which names no
-// session to answer on. The relay maps each to the
-// reply its own waiter reads; `scripts/__tests__/correlatedRequestsGated.test.mjs` derives that set
-// from the protocol and holds all three lists to it.
+// Shutdown's ID is optional; other members require one. device:lease is excluded because it has no session to answer on.
+// The correlation guard checks both policies against the protocol and the relay's replies.
 const ANSWERABLE = {
   'device:boot': envC('device:boot'),
+  'device:shutdown': envCo('device:shutdown'),
   'app:install': envC('app:install'),
   'app:launch': envC('app:launch'),
   'app:clear-state': envC('app:clear-state'),
   'device:keyboard-set': envC('device:keyboard-set'),
   'device:run-reset': envC('device:run-reset'),
+  'capture:observe': envC('capture:observe'),
   'open-url': envC('open-url'),
   'input:touch:end': envC('input:touch:end'),
   'input:pinch:end': envC('input:pinch:end'),
@@ -551,7 +582,8 @@ export type ParseFailure =
   | { ok: false; reason: 'unknown-type'; type: string }
   | { ok: false; reason: 'bad-shape'; type: InboundType; detail: string }
   /** The payload is wrong but the envelope is not, so the caller can be told. */
-  | { ok: false; reason: 'bad-payload'; type: AnswerableType; sessionId: string; requestId: string; detail: string }
+  | { ok: false; reason: 'bad-payload'; type: Exclude<AnswerableType, 'device:shutdown'>; sessionId: string; requestId: string; detail: string }
+  | { ok: false; reason: 'bad-payload'; type: 'device:shutdown'; sessionId: string; requestId?: string; detail: string }
 
 export type ParseResult =
   | {
@@ -624,10 +656,12 @@ export function parseInbound(raw: unknown): ParseResult {
   const result = INBOUND[known].safeParse(frame)
   if (!result.success) {
     const detail = z.prettifyError(result.error)
-    // Second stage, and only for these. If the envelope stands on its own, the failure is in the
-    // payload and the relay has an address and a correlator to answer with — see `ANSWERABLE`.
-    if (Object.hasOwn(ANSWERABLE, known)) {
-      const answerable = known as AnswerableType
+    // Keep optional shutdown IDs separate so every other failure retains a required correlator.
+    if (known === 'device:shutdown') {
+      const envelope = ANSWERABLE[known].safeParse(frame)
+      if (envelope.success) return { ok: false, reason: 'bad-payload', ...envelope.data, detail }
+    } else if (Object.hasOwn(ANSWERABLE, known)) {
+      const answerable = known as Exclude<AnswerableType, 'device:shutdown'>
       const envelope = ANSWERABLE[answerable].safeParse(frame)
       if (envelope.success) {
         const { sessionId: s, requestId: r } = envelope.data
@@ -700,6 +734,7 @@ type _AppLaunch = Assert<V<'app:launch', AppLaunchToRelay>>
 type _AppClearState = Assert<V<'app:clear-state', AppClearState>>
 type _DeviceKeyboardSet = Assert<V<'device:keyboard-set', DeviceKeyboardSet>>
 type _DeviceRunReset = Assert<V<'device:run-reset', DeviceRunReset>>
+type _CaptureObserve = Assert<V<'capture:observe', CaptureObserve>>
 type _OpenUrl = Assert<V<'open-url', OpenUrl>>
 type _InputTouchStart = Assert<V<'input:touch:start', InputTouchStart>>
 type _InputTouchMove = Assert<V<'input:touch:move', InputTouchMove>>
@@ -732,6 +767,7 @@ type _UiTreeError = Assert<V<'ui:tree:error', UiTreeError>>
 type _UiFieldResponse = Assert<V<'ui:field:response', UiFieldResponse>>
 type _UiKeyboardResponse = Assert<V<'ui:keyboard:response', UiKeyboardResponse>>
 type _CaptureTouched = Assert<V<'capture:touched', CaptureTouched>>
+type _CaptureLanded = Assert<V<'capture:landed', CaptureLanded>>
 
 type _StreamRegister = Assert<V<'stream:register', StreamRegister>>
 
@@ -764,6 +800,8 @@ type _ClipboardWriteDone = Assert<E<'clipboard:write-done', ClipboardWriteDone>>
 type _ClipboardError = Assert<E<'clipboard:error', ClipboardError>>
 type _NetworkState = Assert<E<'network:state', NetworkState>>
 type _NetworkError = Assert<E<'network:error', NetworkError>>
+type _AppLog = Assert<V<'app:log', AppLog>>
+type _AppLogRun = Assert<V<'app:log:run', AppLogRun>>
 
 const READY_FACTS = z.object({ payload: z.object({ cold: z.boolean().optional().catch(undefined), serviceTier: reportedTier }) })
 
