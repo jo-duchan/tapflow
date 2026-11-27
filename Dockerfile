@@ -69,6 +69,14 @@ FROM node:24-alpine AS runner
 
 WORKDIR /app
 
+# `aapt` reads an uploaded APK's package name and version. No stable Alpine release ships
+# it: `android-build-tools` is only in edge/testing, and needs edge/main + edge/community libraries.
+RUN apk add --no-cache \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+      android-build-tools
+
 # Ensure the working directory is owned by the non-root 'node' user
 RUN chown node:node /app
 
