@@ -157,6 +157,11 @@ describe('parseBinaryPlist', () => {
     expect(parseBinaryPlist(copy)).toBeNull()
   })
 
+  it('returns null when the value of an entry it skips is broken', () => {
+    // The repeated key's value (object 100) does not exist; the entry is skipped, the file still refused.
+    expect(parseBinaryPlist(buildPlist(['k', '1'], [[0, 1], [0, 99]]))).toBeNull()
+  })
+
   it('returns null when a string runs into the offset table', () => {
     const copy = Buffer.from(LARGE)
     const t = trailerOf(copy)

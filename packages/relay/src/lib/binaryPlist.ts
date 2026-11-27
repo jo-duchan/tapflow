@@ -136,13 +136,14 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
 
   const result: Record<string, string> = Object.create(null) as Record<string, string>
   for (let i = 0; i < count; i++) {
+    // Both refs are read before an entry is skipped, so a broken one fails the file wherever it sits.
+    // The budget and the cache bound this as they bound every other read.
     const key = readString(layout, readUint(buf, payload + i * refSize, refSize))
-    if (key === MALFORMED) return null
-    // The first of a repeated key wins, as CoreFoundation reads it. Xcode never writes one.
-    if (key === null || key in result) continue
     const value = readString(layout, readUint(buf, payload + (count + i) * refSize, refSize))
-    if (value === MALFORMED) return null
-    if (value !== null) result[key] = value
+    if (key === MALFORMED || value === MALFORMED) return null
+    // The first of a repeated key wins, as CoreFoundation reads it. Xcode never writes one.
+    if (key === null || value === null || key in result) continue
+    result[key] = value
   }
   return result
 }
