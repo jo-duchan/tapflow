@@ -402,7 +402,7 @@ export class XCUITreeReader {
     // `DeviceAgent.launchApp`). Turning it into an empty tree would make every launch read as ready at once.
     const { body, interfaceTurn } = splitInterfaceTurn(text)
     if (!body.includes('Element subtree:') && !body.includes('Application,')) {
-      throw new PlatformError(`tree runner returned an unexpected response for ${bundleId} — is the app running in the foreground?`)
+      throw new PlatformError(`the screen of ${bundleId} is not readable yet — it may still be starting, or not be in front; read it again in a moment, and if it persists launch the app again`)
     }
     const { elements, aspect } = parseTreeTextWithAspect(body)
     return { elements, ...(interfaceTurn !== undefined ? { interfaceTurn } : {}), ...(aspect !== undefined ? { aspect } : {}) }

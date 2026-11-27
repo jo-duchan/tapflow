@@ -55,20 +55,21 @@ Connects to the relay over WebSocket + REST (`TapflowClient`), registers MCP too
 what the agent did on that session — an element tap with the selector it named (the engine's wait left out), a tap or
 swipe by pixels carried into the app's space by the latest tree's turn, typed text with the field a tree read **just
 before** it saw focused, each tree read, a `run_flow` as one block of the agent's steps, keys, buttons and launches.
-`list_captured_steps` and `capture_flow` hand that to flow-runner's `agentSteps` and `agentFlow`; nothing is named here.
+`list_captured_steps` and `capture_flow` hand that to flow-runner's `agentSteps` and `agentFlow`; nothing is named here. `list_captured_steps` offers a step only the expectations it brought: one already on screen before it is left out and counted (`alreadyShown`), since `capture_flow` would not count it and a real agent met a dozen per step. A captured flow is kept on `capture_flow`'s own replay from a reset, as a person's capture is on its Verify; the guide's replay-twice rule is for YAML an agent edited, and new flows are captured, not written.
 
 - **Observation is paired by `requestId`, which only this client knows.** `client.onSend` hears every touch-end as it
   leaves, and the relay passes on `capture:observation` only for a touch this socket sent. An observation of a touch the
   capture did not send (a Verify's, a dashboard's) is dropped, and one that arrives before its tool recorded the touch is
   held until it does. The listeners are attached at the first capture, so a server nobody captures with pays nothing.
 - **What is typed is a secret unless a read said otherwise** (fail-closed): a field only becomes `inputText` when the
-  read before it found one focused field with `secure: false`. While capturing, `type_text` answers with the length, not
-  the text, and `run_flow` refuses an `inputText` step, since its field is never read. A key is the same text by
+  read before it found one focused field with `secure: false`. While capturing, `type_text` answers with the length and the
+  field it went into (`into`, `secure`), not the text, and `run_flow` refuses an `inputText` step, since its field is never read. A key is the same text by
   another door, so `press_key` and a `run_flow` `pressKey` take only an allowlist of keys that type nothing (Enter, Tab,
   Backspace, arrows…) — an allowlist, because `Numpad1` or a layout's punctuation would slip past a list of letters
   and digits. The values live in this process's
   memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
-  or with the process.
+  on `connect_device` with `capture: false` (how an agent ends it to replay an edited flow, which `run_flow` refuses
+  to type in while a capture is open), or with the process.
 - **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its
   platform. It refuses rather than verify what it cannot reset: no build launched while capturing (every flow begins
   with a launch), or a build whose bundle id the relay cannot give. `viewport` is the capture's screen, read when it

@@ -22,7 +22,7 @@ When something refuses or is unsure:
 - An input reported as "could not confirm" may still have landed. Read the tree before repeating it, or it may happen twice.
 - A failure caused by the device, the session or the relay is an environment problem, not an app bug. Report it as blocked.
 
-Flows: once a scenario is verified, write it as YAML and replay it with run_flow (selectors by id, then label; wait with assertVisible, never coordinates or sleeps). Keep a flow only after it replays passing. run_flow resets nothing beyond the flow's own clearState.
+Flows: capture a verified path (connect_device with capture: true, then capture_flow, which returns it once a replay from a reset passes). Edit YAML only to repair a flow or add what capture cannot record, and keep it only if run_flow passes it twice. run_flow resets nothing beyond the flow's own clearState.
 
 Report only what you ran and observed. A case you did not run is untested, not passed.`
 
@@ -79,12 +79,9 @@ Rotation, dark mode, font size, locale and RTL, network loss or throttling, push
 - Without a spec, judge by the app's own consistency and platform conventions, and say so. Design opinions are suggestions, not defects.
 
 ## 5. Turn the verified path into a flow
-- Write the passing scenario as YAML for run_flow, starting with clearState and launchApp.
-- Selectors: id first, then exact label, then { role, index }. No coordinates.
-- Wait with assertVisible (add timeout for a slow step), never a pause. End on an assertion about the outcome, and assertNotVisible for what should be gone (spinner, error).
+- Capture it: connect_device with capture: true before you walk the path, launch_app, do it with tap and type_text, then list_captured_steps and capture_flow. Choose the range, leave out stray steps, and expect what a step brought (each step lists only that; when it brought nothing new, all are listed warned "before", and they prove nothing). Name each password with capture_flow secrets. capture_flow resets the device as CI does and returns the YAML only after it replays passing: keep it as returned. If it refuses or a step fails, leave that step out or capture the path again; never write the flow instead. A password typed there stays a secret; type_text answers only the field and the length.
 - One flow per scenario: the happy path, and one per important negative case.
-- Or capture it: connect_device with capture: true, launch_app, do the path with tap and type_text, then list_captured_steps and capture_flow, which returns the YAML only after it replays passing on a reset device. A password typed there stays a secret.
-- Replay it twice and keep it only if both pass. If it fails, fix the selector or the wait, or report the instability. Never loosen an assertion to make it pass.
+- Edit YAML only to repair a flow (a failed CI run) or to add what a capture cannot record: assertNotVisible for what should be gone (spinner, error), a timeout for a slow step. Selectors: id, then exact label, then { role, index }; never coordinates. Wait with assertVisible, never a pause. End the capture first (connect_device with capture: false), then replay an edited flow twice with run_flow and keep it only if both pass; run_flow takes no secrets, so capture a flow that types one again rather than edit it. If it fails, fix the selector or the wait, or report the instability. Never loosen an assertion to make it pass.
 - For a failed CI run, list_runs then get_run: it separates app failures from environment ones and suggests selectors.
 
 ## 6. Report
@@ -97,4 +94,4 @@ Actual: ... (quote labels from the tree)
 Evidence: tree excerpt, or the screenshot at step N
 Reproduced: 2/2 from a clean state
 
-Then: Passed (only cases you ran and checked, one line each), Untested (and why), Blocked (environment), Flows (each flow with its replay result, such as "passed 2/2").`
+Then: Passed (only cases you ran and checked, one line each), Untested (and why), Blocked (environment), Flows (each flow with its replay result: "verified by capture_flow", or "passed 2/2" for one you edited, and the secrets it needs).`
