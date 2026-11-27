@@ -584,8 +584,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
     'run_flow',
     {
       description:
-        'Replay a tapflow flow (YAML) deterministically — no LLM in the loop. Use this for verified scenarios instead of ' +
-        'tapping step by step: author the flow once, then replay it idempotently. Pass the YAML inline via "flow", or a ' +
+        'Replay a tapflow flow (YAML) deterministically — no LLM in the loop: one captured with capture_flow, or one you ' +
+        'repaired, instead of tapping step by step. Pass the YAML inline via "flow", or a ' +
         'file path via "path" (resolved from the MCP server process cwd). Steps: clearState / launchApp / tapOn / ' +
         'inputText / pressKey / imeAction / swipe / scroll / openUrl / assertVisible / assertNotVisible / pressButton / ' +
         'longPressOn / pinch / setOrientation / setPosture; scroll: { until: <selector> } scrolls to an element. launchApp launches the ' +
@@ -689,7 +689,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
   function listed(s: AgentStep, n: number): Record<string, unknown> {
     return {
       n,
-      step: s.step ?? { type: 'inputSecret', name: '(named in capture_flow secrets)' },
+      // A step with no step of its own is typed text kept as a secret, or one left out for holding one (`withheld`).
+      step: s.step ?? (s.withheld ? null : { type: 'inputSecret', name: '(named in capture_flow secrets)' }),
       origin: s.origin,
       ...(s.fragile ? { fragile: s.fragile } : {}),
       ...(s.mismatch ? { touchHit: s.mismatch } : {}),
@@ -698,7 +699,25 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       ...(s.withheld ? { withheld: true } : {}),
       ...(s.block !== undefined ? { block: s.block } : {}),
       ...(s.failed ? { failed: true } : {}),
-      ...(s.expectable?.length ? { expect: s.expectable.map((c, i) => ({ candidate: i, selector: c.selector, ...(c.warnings.length ? { warnings: c.warnings } : {}) })) } : {}),
+      ...expectations(s),
+    }
+  }
+
+  /**
+   * What a step may expect, by the candidate numbers capture_flow takes. One the screen already showed before the step
+   * is left out and counted: it proves nothing about the touch, capture_flow does not count it, and a real agent found a
+   * dozen of them per step (tab bar, titles) around the one that mattered (L6a E2E, 2026-11-27).
+   */
+  function expectations(s: AgentStep): Record<string, unknown> {
+    const all = (s.expectable ?? []).map((c, i) => ({ candidate: i, selector: c.selector, warnings: c.warnings }))
+    const fresh = all.filter((c) => !c.warnings.includes('before'))
+    // A step whose only change is a title repeating a label already on screen (a tab named as its page) brought nothing
+    // new: then all are offered, warned, rather than none (pre-PR review).
+    const offered = fresh.length ? fresh : all
+    const shown = all.length - offered.length
+    return {
+      ...(offered.length ? { expect: offered.map(({ warnings, ...c }) => ({ ...c, ...(warnings.length ? { warnings } : {}) })) } : {}),
+      ...(shown ? { alreadyShown: shown } : {}),
     }
   }
 
@@ -1023,8 +1042,11 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
           // Kept when the ack fails too: the text may have reached the field, and a secret not kept is one a later
           // name holding it would write (CodeRabbit, #1248).
           try { await client.typeText(sessionId, text) } finally { rec.add({ kind: 'type', at, text, ...(field !== undefined ? { field } : {}) }) }
-          // Not echoed: what is typed while capturing may be a password, and a result stays in the model's context.
-          return ok(JSON.stringify({ typed: true, length: [...text].length }))
+          // Not echoed: what is typed while capturing may be a password, and a result stays in the model's context. The
+          // field it went into is, so typing can be checked without the value: its id, `(no id)` for a focused field with
+          // none, `null` when the read found no focused field, and nothing when the read failed.
+          const into = field === undefined ? {} : { into: field === null ? null : field.identifier ?? '(no id)', ...(field?.secure !== undefined ? { secure: field.secure } : {}) }
+          return ok(JSON.stringify({ typed: true, length: [...text].length, ...into }))
         }
         await client.typeText(sessionId, text)
         // A capture in its own Verify records nothing, and still echoes nothing (CodeRabbit, #1248).

@@ -124,6 +124,56 @@ describe('MCP Flow Capture', () => {
     ])
   })
 
+  // L6a E2E: a real agent was offered a dozen expectations per step, all but one on screen before the step.
+  it('offers only expectations the step brought, by their own numbers, and counts the rest', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    // Reads a millisecond apart from the actions around them, as a device's are: one in the same one is neither side.
+    await new Promise((r) => setTimeout(r, 2))
+    await h.call('query_ui_tree', { sessionId: 's1' })
+    await new Promise((r) => setTimeout(r, 2))
+    const tap = h.client.tap.getMockImplementation()!
+    // The new element last, so a list numbered after the filter would give it another number than capture_flow reads.
+    h.client.tap.mockImplementationOnce(async (sid: string) => { await tap(sid); h.show([LOGIN, FORMS, WELCOME]) })
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    await new Promise((r) => setTimeout(r, 2))
+    await h.call('query_ui_tree', { sessionId: 's1' })
+    const step = ((await h.json('list_captured_steps')).body as unknown as { steps: Array<{ expect?: Array<{ candidate: number; selector: { label?: string } }>; alreadyShown?: number }> }).steps[1]!
+    expect(step.expect!.map((c) => [c.candidate, c.selector.label])).toEqual([[2, 'Welcome back']])
+    expect(step.alreadyShown).toBe(2)
+    const { body } = await h.json('capture_flow', { sessionId: 's1', name: 'l', expect: [{ step: 2, candidate: step.expect![0]!.candidate }] })
+    expect(String(body['yaml'])).toContain('Welcome back')
+  })
+
+  it('offers every expectation, warned, when a step brought nothing new', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    await h.call('launch_app', { sessionId: 's1', buildId: 7 })
+    // Reads a millisecond apart from the actions around them, as a device's are: one in the same one is neither side.
+    await new Promise((r) => setTimeout(r, 2))
+    await h.call('query_ui_tree', { sessionId: 's1' })
+    await new Promise((r) => setTimeout(r, 2))
+    await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
+    await new Promise((r) => setTimeout(r, 2))
+    await h.call('query_ui_tree', { sessionId: 's1' })
+    const step = ((await h.json('list_captured_steps')).body as unknown as { steps: Array<{ expect?: Array<{ warnings?: string[] }>; alreadyShown?: number }> }).steps[1]!
+    expect(step.expect!.length).toBe(2)
+    expect(step.expect!.every((c) => c.warnings?.includes('before'))).toBe(true)
+    expect(step.alreadyShown).toBeUndefined()
+  })
+
+  it('says where typing went: no focused field, a field with no id, or nothing when the read failed', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    h.show([LOGIN])
+    expect((await h.json('type_text', { sessionId: 's1', text: 'a' })).body).toEqual({ typed: true, length: 1, into: null })
+    h.show([field({ identifier: undefined, secure: false })])
+    expect((await h.json('type_text', { sessionId: 's1', text: 'b' })).body).toEqual({ typed: true, length: 1, into: '(no id)', secure: false })
+    h.client.queryUITreeWithTurn.mockRejectedValueOnce(new Error('read failed'))
+    expect((await h.json('type_text', { sessionId: 's1', text: 'c' })).body).toEqual({ typed: true, length: 1 })
+  })
+
   it('keeps typing into a field it could not read as plain a secret, echoes nothing, and types it only in Verify', async () => {
     const h = harness()
     await h.call('connect_device', { sessionId: 's1', capture: true })
@@ -131,9 +181,10 @@ describe('MCP Flow Capture', () => {
     await h.call('tap', { sessionId: 's1', element: { id: 'login' } })
     h.show([LOGIN, field({ secure: undefined })])
     const { body: typed } = await h.json('type_text', { sessionId: 's1', text: 'hunter2' })
-    expect(typed).toEqual({ typed: true, length: 7 })
+    // The field it went into, never the value: typing can be checked by where it went and how long it was.
+    expect(typed).toEqual({ typed: true, length: 7, into: 'field' })
     h.show([LOGIN, field({ identifier: 'name', secure: false })])
-    await h.call('type_text', { sessionId: 's1', text: 'Duck' })
+    expect((await h.json('type_text', { sessionId: 's1', text: 'Duck' })).body).toEqual({ typed: true, length: 4, into: 'name', secure: false })
 
     const { res: listRes } = await h.json('list_captured_steps')
     expect(listRes.content[0]!.text).not.toContain('hunter2')
