@@ -178,6 +178,23 @@ describe('MCP Flow Capture', () => {
     expect(steps.map((s) => [s.step, s.origin])).toEqual([[{ type: 'tapOn', selector: { id: 'login' } }, 'agent-step']])
   })
 
+  it('takes only keys that type no character while capturing, from press_key and run_flow alike', async () => {
+    const h = harness()
+    await h.call('connect_device', { sessionId: 's1', capture: true })
+    for (const key of ['KeyP', 'Digit1', 'Minus', 'Numpad1']) {
+      const res = await h.call('press_key', { sessionId: 's1', key })
+      expect(res.isError).toBe(true)
+      expect(res.content[0]?.text).toContain('type_text')
+    }
+    const { body: refused } = await h.json('run_flow', { sessionId: 's1', flow: 'name: t\nsteps:\n  - pressKey: Enter\n  - pressKey: KeyP\n' })
+    expect(refused['status']).toBe('failed')
+    expect(String(refused['failureMessage'])).toContain('type_text')
+    expect(h.client.pressKey).not.toHaveBeenCalled()
+    expect((await h.call('press_key', { sessionId: 's1', key: 'Return' })).isError).toBeFalsy()
+    const steps = ((await h.json('list_captured_steps')).body as unknown as Listed).steps
+    expect(steps.map((s) => s.step)).toEqual([{ type: 'pressKey', code: 'Enter' }])
+  })
+
   it('opens a capture without observation when the device cannot observe, and says so', async () => {
     const h = harness({ observe: async () => false })
     const { body } = await h.json('connect_device', { sessionId: 's1', capture: true })

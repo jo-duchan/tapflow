@@ -62,7 +62,10 @@ before** it saw focused, each tree read, a `run_flow` as one block of the agent'
   held until it does. The listeners are attached at the first capture, so a server nobody captures with pays nothing.
 - **What is typed is a secret unless a read said otherwise** (fail-closed): a field only becomes `inputText` when the
   read before it found one focused field with `secure: false`. While capturing, `type_text` answers with the length, not
-  the text, and `run_flow` refuses an `inputText` step, since its field is never read. The values live in this process's
+  the text, and `run_flow` refuses an `inputText` step, since its field is never read. A key is the same text by
+  another door, so `press_key` and a `run_flow` `pressKey` take only an allowlist of keys that type nothing (Enter, Tab,
+  Backspace, arrows…) — an allowlist, because `Numpad1` or a layout's punctuation would slip past a list of letters
+  and digits. The values live in this process's
   memory only, go into Verify alone, and the capture is dropped an hour after its device is let go, when another opens,
   or with the process.
 - **Verify is `device:run-reset`, then the flow, on the session given** — the capture's or another of its

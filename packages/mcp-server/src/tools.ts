@@ -40,6 +40,13 @@ const SESSION_NOTE_MARKERS = [
 const UNCONFIRMED_INPUT_PREFIX = 'Could not confirm the input reached the device'
 /** How long a tap on an element waits for it, in seconds: a screen the agent just read, so shorter than a flow's 10 s. */
 const ELEMENT_WAIT_S = 5
+/**
+ * The keys a capture takes as keys: none types a character. An allowlist, so a code that types one on some device
+ * (`Numpad1`, a layout's punctuation) is refused rather than written into the flow as it is — typed text has to go
+ * through `type_text`, which reads the field first and keeps a password out of the file (CodeRabbit, #1248).
+ */
+const CAPTURE_KEYS = new Set(['Enter', 'Return', 'Backspace', 'Delete', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'])
+const CAPTURE_KEY_REFUSAL = 'while a capture is open, only keys that type no character are pressed; type text with type_text, so the capture can tell a password from plain text'
 
 function toEnvironmentError(e: unknown): unknown {
   if (e instanceof EnvironmentStepError) return e
@@ -623,6 +630,8 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
         // Refused while the capture verifies too: it is still open (CodeRabbit, #1248).
         const typing = captured(sessionId) ? parsed.steps.findIndex((s) => s.type === 'inputText') : -1
         if (typing >= 0) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, typing, 'while a capture is open, type with type_text, so the capture can tell a password from plain text', { beforeRun: true })), null, 2))
+        const keying = captured(sessionId) ? parsed.steps.findIndex((s) => s.type === 'pressKey' && !CAPTURE_KEYS.has(s.code)) : -1
+        if (keying >= 0) return ok(JSON.stringify(flowResponse(refusedFlow(parsed, keying, CAPTURE_KEY_REFUSAL, { beforeRun: true })), null, 2))
         // The same check as `flow run --build`, before the device is touched. With one flow, "skipped" leaves nothing
         // run, which `flow run` also treats as an error rather than a pass.
         let appCheckSkipped: string | undefined
@@ -1027,6 +1036,7 @@ export function registerTools(server: McpServer, client: TapflowClient): void {
       },
     },
     async ({ sessionId, key }) => {
+      if (captured(sessionId) && !CAPTURE_KEYS.has(key)) return err(`press_key refused ${JSON.stringify(key)}: ${CAPTURE_KEY_REFUSAL}`)
       try {
         const at = Date.now()
         await client.pressKey(sessionId, key)
