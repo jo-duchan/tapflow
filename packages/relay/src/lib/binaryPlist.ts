@@ -7,13 +7,20 @@
  * never followed, so a reference cycle or deep nesting in a crafted file has nothing to recurse into.
  *
  * The input is an upload, so it is hostile: every offset and length is checked against the buffer
- * before it is read, and anything inconsistent returns null rather than throwing.
+ * before it is read, and anything inconsistent returns null rather than throwing. Cost is bounded too:
+ * the file is capped at MAX_PLIST_BYTES, and each string object is decoded once however many entries
+ * name it, so a crafted file cannot make the work grow faster than its size.
  *
  * Format: https://opensource.apple.com/source/CF/CF-1153.18/CFBinaryPList.c
  */
 
 const MAGIC = 'bplist00'
 const TRAILER_BYTES = 32
+/**
+ * A real Info.plist is a few kilobytes. The archive reader allows 256 MB, and a zip or gzip bomb gets
+ * there from a small upload, so without this cap the offset table alone could cost gigabytes.
+ */
+export const MAX_PLIST_BYTES = 1024 * 1024
 
 /**
  * Big-endian unsigned integer of `width` bytes at `at`, or -1 when it does not fit in the buffer. An 8-byte
@@ -26,8 +33,12 @@ function readUint(buf: Buffer, at: number, width: number): number {
   return value
 }
 
-/** `tableAt` is where the offset table starts, which is where every object must have ended. */
-type Layout = { buf: Buffer; offsets: number[]; tableAt: number }
+/**
+ * `tableAt` is where the offset table starts, which is where every object must have ended. `decoded`
+ * holds each string object already read: every dict entry may name the same large string, and decoding
+ * it per entry makes the cost the product of two sizes instead of their sum.
+ */
+type Layout = { buf: Buffer; offsets: number[]; tableAt: number; decoded: Map<number, string | null> }
 
 /** Where object `ref` starts, or -1 when the ref is not in the offset table. */
 function objectStart(layout: Layout, ref: number): number {
@@ -51,6 +62,14 @@ function countAndPayload(buf: Buffer, at: number): { count: number; payload: num
 
 /** The string object `ref` names, or null when it is not a string or does not fit. */
 function readString(layout: Layout, ref: number): string | null {
+  const known = layout.decoded.get(ref)
+  if (known !== undefined) return known
+  const value = decodeString(layout, ref)
+  layout.decoded.set(ref, value)
+  return value
+}
+
+function decodeString(layout: Layout, ref: number): string | null {
   const { buf } = layout
   const at = objectStart(layout, ref)
   if (at < 0) return null
@@ -67,6 +86,7 @@ function readString(layout: Layout, ref: number): string | null {
 }
 
 export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
+  if (buf.length > MAX_PLIST_BYTES) return null
   if (buf.length < MAGIC.length + TRAILER_BYTES || buf.toString('latin1', 0, MAGIC.length) !== MAGIC) return null
 
   const trailer = buf.length - TRAILER_BYTES
@@ -86,7 +106,7 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
     if (offset < MAGIC.length || offset >= tableAt) return null
     offsets[i] = offset
   }
-  const layout: Layout = { buf, offsets, tableAt }
+  const layout: Layout = { buf, offsets, tableAt, decoded: new Map() }
 
   const dictAt = offsets[topObject]
   if (buf[dictAt] >> 4 !== 0xd) return null
@@ -99,7 +119,8 @@ export function parseBinaryPlist(buf: Buffer): Record<string, string> | null {
   const result: Record<string, string> = Object.create(null) as Record<string, string>
   for (let i = 0; i < count; i++) {
     const key = readString(layout, readUint(buf, payload + i * refSize, refSize))
-    if (key === null) continue
+    // The first of a repeated key wins, as CoreFoundation reads it. Xcode never writes one.
+    if (key === null || key in result) continue
     const value = readString(layout, readUint(buf, payload + (count + i) * refSize, refSize))
     if (value !== null) result[key] = value
   }

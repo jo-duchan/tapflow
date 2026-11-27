@@ -45,11 +45,22 @@ function stripArchiveExt(filename: string): string {
 
 // ── zip / plist helpers ────────────────────────────────────────────────────
 
+const XML_ENTITIES = new Map([['amp', '&'], ['lt', '<'], ['gt', '>'], ['quot', '"'], ['apos', "'"]])
+
+/** An app named "R&D" is written `R&amp;D`; read it back as the binary parser does, so both hosts agree. */
+function decodeXmlEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-z]+);/g, (whole, name: string) => {
+    if (name[0] !== '#') return XML_ENTITIES.get(name) ?? whole
+    const code = name[1] === 'x' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
+    return code <= 0x10ffff ? String.fromCodePoint(code) : whole
+  })
+}
+
 function parseXmlPlist(xml: string): Record<string, string> {
   const result: Record<string, string> = {}
   const re = /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(xml)) !== null) result[m[1]] = m[2]
+  while ((m = re.exec(xml)) !== null) result[decodeXmlEntities(m[1])] = decodeXmlEntities(m[2])
   return result
 }
 

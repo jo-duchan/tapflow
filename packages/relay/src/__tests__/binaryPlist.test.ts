@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { parseBinaryPlist } from '../lib/binaryPlist'
+import { MAX_PLIST_BYTES, parseBinaryPlist } from '../lib/binaryPlist'
 import { extractAppZipInfo, parseInfoPlist } from '../api/builds'
 import { writeZipFixture } from './helpers/zipFixture'
 import { assertArchiveTools } from './helpers/archivePrereqs'
@@ -21,6 +21,36 @@ function trailerOf(buf: Buffer): { offsetSize: number; tableAt: number; offsets:
   const tableAt = Number(buf.readBigUInt64BE(t + 24))
   const offsets = Array.from({ length: count }, (_, i) => buf.readUIntBE(tableAt + i * offsetSize, offsetSize))
   return { offsetSize, tableAt, offsets }
+}
+
+/**
+ * A bplist00 whose top-level dict maps each key to the string object at `valueIndex` in `strings`.
+ * Written here rather than by plutil so a test can shape what plutil never would: one string named by
+ * every entry, or a file past the size cap. Refs and offsets are 4 bytes wide, ASCII strings only.
+ */
+function buildPlist(strings: string[], entries: Array<[keyIndex: number, valueIndex: number]>): Buffer {
+  const W = 4
+  const parts: Buffer[] = [Buffer.from('bplist00', 'latin1')]
+  const offsets: number[] = []
+  let at = 8
+  const push = (b: Buffer): void => { offsets.push(at); parts.push(b); at += b.length }
+  const lengthHeader = (marker: number, n: number): Buffer => {
+    if (n < 15) return Buffer.from([marker | n])
+    const b = Buffer.alloc(6); b[0] = marker | 0x0f; b[1] = 0x12; b.writeUInt32BE(n, 2); return b
+  }
+  const dict = Buffer.alloc(entries.length * 2 * W)
+  entries.forEach(([k, v], i) => { dict.writeUInt32BE(k + 1, i * W); dict.writeUInt32BE(v + 1, (entries.length + i) * W) })
+  push(Buffer.concat([lengthHeader(0xd0, entries.length), dict]))
+  for (const s of strings) push(Buffer.concat([lengthHeader(0x50, s.length), Buffer.from(s, 'latin1')]))
+  const tableAt = at
+  const table = Buffer.alloc(offsets.length * W)
+  offsets.forEach((o, i) => table.writeUInt32BE(o, i * W))
+  const trailer = Buffer.alloc(32)
+  trailer[6] = W; trailer[7] = W
+  trailer.writeBigUInt64BE(BigInt(offsets.length), 8)
+  trailer.writeBigUInt64BE(0n, 16)
+  trailer.writeBigUInt64BE(BigInt(tableAt), 24)
+  return Buffer.concat([...parts, table, trailer])
 }
 
 describe('parseBinaryPlist', () => {
@@ -149,6 +179,33 @@ describe('parseBinaryPlist', () => {
 
   // An uploaded build is hostile input. This does not assert what comes back, only that the parser
   // answers at all: a corrupted byte may still leave a readable plist, so null is not the only right answer.
+  it('reads a plist the test builder wrote', () => {
+    expect({ ...parseBinaryPlist(buildPlist(['CFBundleIdentifier', 'a.b'], [[0, 1]])) }).toEqual({ CFBundleIdentifier: 'a.b' })
+  })
+
+  it('keeps the first value of a repeated key, as CoreFoundation does', () => {
+    expect({ ...parseBinaryPlist(buildPlist(['k', '1', '2'], [[0, 1], [0, 2]])) }).toEqual({ k: '1' })
+  })
+
+  it('returns null for a plist larger than the cap, however well formed', () => {
+    const just = buildPlist(['k', 'v'.repeat(MAX_PLIST_BYTES - 100)], [[0, 1]])
+    expect(just.length).toBeLessThanOrEqual(MAX_PLIST_BYTES)
+    expect(parseBinaryPlist(just)?.['k']).toHaveLength(MAX_PLIST_BYTES - 100)
+    const over = buildPlist(['k', 'v'.repeat(MAX_PLIST_BYTES)], [[0, 1]])
+    expect(parseBinaryPlist(over)).toBeNull()
+  })
+
+  // Every entry names one 400 KB string. Decoded per entry that is 12 GB of work and minutes of a
+  // blocked relay; decoded once it is a millisecond. The timeout is the assertion.
+  it('decodes a string named by many entries once', { timeout: 2000 }, () => {
+    const keys = Array.from({ length: 30000 }, (_, i) => `k${i}`)
+    const input = buildPlist(['x'.repeat(400_000), ...keys], keys.map((_, i) => [i + 1, 0]))
+    expect(input.length).toBeLessThanOrEqual(MAX_PLIST_BYTES)
+    const parsed = parseBinaryPlist(input)!
+    expect(Object.keys(parsed)).toHaveLength(30000)
+    expect(parsed['k29999']).toHaveLength(400_000)
+  })
+
   it('never throws when any single byte is corrupted', () => {
     for (let i = 0; i < SMALL.length; i++) {
       for (const value of [0x00, 0x0f, 0x5f, 0x6f, 0xdf, 0xff]) {
@@ -174,6 +231,17 @@ describe('parseInfoPlist with a binary plist', () => {
   it('uses plutil when it converts the file', () => {
     const xml = '<plist><dict><key>CFBundleIdentifier</key><string>from.plutil</string></dict></plist>'
     expect(parseInfoPlist(SMALL, () => xml).bundleId).toBe('from.plutil')
+  })
+
+  it('reads an escaped character the way the binary parser does', () => {
+    const xml = '<plist><dict><key>CFBundleName</key><string>R&amp;D &lt;Tools&gt; &#xD55C;&#44544; &bogus; &#x110000;</string></dict></plist>'
+    expect(parseInfoPlist(SMALL, () => xml).appName).toBe('R&D <Tools> 한글 &bogus; &#x110000;')
+    expect(parseInfoPlist(Buffer.from(xml)).appName).toBe('R&D <Tools> 한글 &bogus; &#x110000;')
+  })
+
+  it('leaves an entity named after an Object property as written', () => {
+    const xml = '<plist><dict><key>CFBundleName</key><string>&constructor;&toString;</string></dict></plist>'
+    expect(parseInfoPlist(Buffer.from(xml)).appName).toBe('&constructor;&toString;')
   })
 
   it('reads nothing from a binary plist neither can parse', () => {
