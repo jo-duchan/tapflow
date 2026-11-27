@@ -106,6 +106,27 @@ describe('MCP capture observation through the relay', () => {
     await server.stop()
   })
 
+  // An Android agent holds a machine's tap's up for its hit (L6a E2E): the relay marks the end of an AI holder's touch,
+  // after the parse, so a person's dashboard cannot set the mark, and a person's touch never carries it.
+  it('marks a machine holder\'s touch end for the agent, and never a dashboard\'s, even one that sends the field', async () => {
+    const endAs = async (ws: WebSocket, requestId: string, extra: Record<string, unknown> = {}) => {
+      ws.send(JSON.stringify({ type: 'input:touch:start', sessionId, payload: { x: 0.5, y: 0.5 } }))
+      ws.send(JSON.stringify({ type: 'input:touch:end', sessionId, requestId, payload: { x: 0.5, y: 0.5 }, ...extra }))
+      const end = await waitForType<{ type: string; requestId: string; machine?: unknown }>(agent, 'input:touch:end')
+      expect(end.requestId).toBe(requestId)
+      agent.send(JSON.stringify({ type: 'input:done', sessionId, requestId }))
+      await waitForType(ws, 'input:done')
+      return end
+    }
+    const mcp = await client(1)
+    await join(mcp, 'mcp')
+    expect((await endAs(mcp, 'from-mcp')).machine).toBe(true)
+    mcp.send(JSON.stringify({ type: 'session:leave', sessionId }))
+    const person = await client(1)
+    await join(person, 'dashboard')
+    expect((await endAs(person, 'from-person', { machine: true })).machine).toBeUndefined()
+  })
+
   it('forwards an MCP holder\'s arming to the agent and says it is observing', async () => {
     const mcp = await client(1)
     await join(mcp, 'mcp')

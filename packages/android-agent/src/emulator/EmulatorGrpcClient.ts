@@ -229,6 +229,15 @@ export class EmulatorGrpcClient {
     return call
   }
 
+  /**
+   * Holds the touch queue until `gate` settles: what is sent next waits behind it, in order. Record-time observation
+   * holds a machine's tap's up here until its down's hit is read (`TouchWatch.heldUp`), and a down sent meanwhile still
+   * goes after that up. `gate` must not reject; it is swallowed if it does.
+   */
+  holdUntil(gate: Promise<unknown>): void {
+    void this.enqueue(() => gate.then(() => {}, () => {}))
+  }
+
   private sendTouch(touches: TouchMsg[], display = 0): Promise<void> {
     return new Promise((resolve, reject) => {
       this.raw.sendTouch(

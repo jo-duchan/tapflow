@@ -18,7 +18,7 @@ interface Answer { pkg?: string; type?: number; branch?: unknown[]; readAfterMs?
  * A watch on a fake clock: `hit` answers as the jar would, its branch read `readAfterMs` after the request (on the
  * device's clock); `sleep` moves the clock. `frames` is what the app drew, in host ms.
  */
-function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined; home?: string | null; gate?: Promise<void> } = {}) {
+function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); pid?: () => number; pkg?: string | undefined; pkgNow?: () => string | undefined; home?: string | null; gate?: Promise<void>; sleep?: (advance: (ms: number) => void) => (ms: number) => Promise<void> } = {}) {
   let now = 1_000
   const sent: CaptureTouched[] = []
   /** Landings (#1214), and the order both kinds were sent in. */
@@ -28,7 +28,7 @@ function rig(opts: { answers?: Answer[]; frames?: number[] | (() => number[]); p
   const answers = [...(opts.answers ?? [])]
   const deps = {
     now: () => now,
-    sleep: async (ms: number) => { now += ms },
+    sleep: opts.sleep ? opts.sleep((ms) => { now += ms }) : async (ms: number) => { now += ms },
     hit: vi.fn(async () => {
       const a = answers.shift() ?? {}
       if (a.none) return null
@@ -81,6 +81,81 @@ describe('TouchWatch', () => {
     }])
     // Read once the app had its 0.8 s after the lift.
     expect(clock()).toBeGreaterThanOrEqual(1_000 + 100 + 800)
+  })
+
+  // L6a E2E: a machine's tap is down and up back to back, so its hit always came after the up and was dropped. Its up
+  // now waits for the hit (`heldUp`), and the report judges by when the up was let go.
+  it('reports and lands a machine\'s instant tap whose up was held for its hit, which the same tap unheld never was', async () => {
+    // As on a device: the hit answers ~20 ms after the down, and a wait (the bound, the frames') ends after that.
+    const later = (advance: (ms: number) => void) => (ms: number) => new Promise<void>((r) => setTimeout(() => { advance(ms); r() }, 0))
+    const run = async (hold: boolean) => {
+      const w = rig({ frames: [1_200, 1_250, 1_300], sleep: later, home: 'com.google.android.apps.nexuslauncher' })
+      const answer = w.deps.hit.getMockImplementation()!
+      w.deps.hit.mockImplementationOnce(async (...a: Parameters<typeof answer>) => { const r = await answer(...a); w.advance(20); return r })
+      w.watch.down(0.2, 0.15, { x: 0.2, y: 0.15 })
+      w.advance(1)
+      const held = hold ? w.watch.heldUp() : undefined
+      if (hold) expect(held).toBeDefined()
+      w.watch.up('s1', 'rq', held)
+      await w.watch.settled()
+      await vi.waitFor(() => expect(w.landed.length + (hold ? 0 : 1)).toBeGreaterThan(0))
+      return w
+    }
+    const held = await run(true)
+    expect(held.sent).toHaveLength(1)
+    expect(held.sent[0]!.observation.element).toMatchObject({ identifier: 'form.submit' })
+    expect(held.landed).toEqual([expect.objectContaining({ requestId: 'rq', landed: { on: 'app' } })])
+    // The same tap without the hold: its hit came after the up, so nothing.
+    const plain = await run(false)
+    expect(plain.sent).toEqual([])
+    expect(plain.landed).toEqual([])
+  })
+
+  // CodeRabbit on #1256: a down queued behind a held up must be asked about once it has gone, not when it was queued,
+  // or its hit reads the screen before that up.
+  it('asks what a queued down hit only once the down has gone', async () => {
+    const { watch, deps } = rig()
+    let go!: () => void
+    watch.down(0.2, 0.15, { x: 0.2, y: 0.15 }, new Promise<void>((r) => { go = r }))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(deps.hit).not.toHaveBeenCalled()
+    go()
+    await vi.waitFor(() => expect(deps.hit).toHaveBeenCalledTimes(1))
+  })
+
+  // The bound opens the gate; a hit that answers after it read a screen the up may already have changed.
+  it('drops a held tap whose hit answered only after the bound let its up go', async () => {
+    const later = (advance: (ms: number) => void) => (ms: number) => new Promise<void>((r) => setTimeout(() => { advance(ms); r() }, 0))
+    const w = rig({ frames: [1_200, 1_250, 1_300], sleep: later, home: 'com.google.android.apps.nexuslauncher' })
+    const answer = w.deps.hit.getMockImplementation()!
+    let answerNow!: () => void
+    w.deps.hit.mockImplementationOnce((...a: Parameters<typeof answer>) => new Promise((r) => { answerNow = () => r(answer(...a)) }))
+    w.watch.down(0.2, 0.15, { x: 0.2, y: 0.15 })
+    w.advance(1)
+    const held = w.watch.heldUp()
+    w.watch.up('s1', 'rq-late', held)
+    await held
+    // The hit's read began 270 ms after the down, past the bound the up went at.
+    w.advance(20)
+    answerNow()
+    await w.watch.settled()
+    expect(w.sent).toEqual([])
+    expect(w.landed).toEqual([])
+  })
+
+  it('holds no up for a gesture that moved, or past the bound, and lets a hit that never answers go at the bound', async () => {
+    const { watch, advance, deps } = rig()
+    watch.down(0.2, 0.15, { x: 0.2, y: 0.15 })
+    watch.move(0.2, 0.4)
+    expect(watch.heldUp()).toBeUndefined()
+    watch.up('s1', 'rq-swipe')
+    watch.down(0.2, 0.15, { x: 0.2, y: 0.15 })
+    advance(260)
+    expect(watch.heldUp()).toBeUndefined()
+    watch.up('s1', 'rq-late')
+    deps.hit.mockImplementationOnce(() => new Promise(() => {}))
+    watch.down(0.5, 0.5, { x: 0.5, y: 0.5 })
+    await expect(watch.heldUp()).resolves.toBeUndefined()
   })
 
   it('reports nothing for a hit read after the up: the screen may already be the one the tap made', async () => {

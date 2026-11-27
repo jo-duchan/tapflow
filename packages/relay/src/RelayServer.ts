@@ -10,7 +10,7 @@ import { SessionManager, isAiClientKind } from './SessionManager.js'
 import type { AgentIdentity, InstalledBuild, Session } from './SessionManager.js'
 import type { AgentResources } from './types.js'
 import type { DeviceDetails, UIElement } from './types.js'
-import type { ReachResult, ReachTarget, TouchLanding, TouchObservation } from '@tapflowio/protocol'
+import type { ReachResult, ReachTarget, RelayedTouchEnd, TouchLanding, TouchObservation } from '@tapflowio/protocol'
 import type { AdmissionRefusal, BootRefusalReason, ChromePayload, LeaseRefusalReason, InputErrorReason, KeyboardState, MacAdmission, RelayOutbound, PosturesPayload, WatchActionKind, WatchRefusal } from '@tapflowio/protocol'
 import { gestureAction, keyForWatchers, pinchAction } from './lib/watchActions.js'
 import { HostBootGate, GATE_DEFAULTS, type BooterClass, type Effect, type GateEvent, type GateTiming } from './admission/HostBootGate.js'
@@ -3782,7 +3782,10 @@ export class RelayServer {
     }
 
     if (session?.agentSocket.readyState === WebSocket.OPEN) {
-      session.agentSocket.send(JSON.stringify(msg))
+      // A machine's tap is marked for the agent, after the parse that strips the field from what a browser sent: an
+      // Android agent observing touches holds such a tap's up until its down was read (`RelayedTouchEnd`).
+      const out: Acked | RelayedTouchEnd = msg.type === 'input:touch:end' && isAiClientKind(session.holderKind) ? { ...msg, machine: true } : msg
+      session.agentSocket.send(JSON.stringify(out))
       this.captures.recordInput(session.id, captureHolder(session), msg)
       this.tellWatchersInput(session, msg)
       if ((msg.type === 'input:touch:end' || msg.type === 'input:pinch:end') && session.observe && session.observe.owner === session.owner) {
