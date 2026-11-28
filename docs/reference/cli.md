@@ -375,13 +375,13 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 |--------|---------|-------------|
 | `--relay <url>` | `ws://localhost:4000` | Relay WebSocket URL. Does not read `relay.url`. |
 | `--token <token>` | `TAPFLOW_TOKEN` env, then the [token file](/ai-agents/mcp-server#token-file) | Personal access token (PAT) for a remote relay. Needs an API-type token (`view, builds:write`). |
-| `--session <id>` | — | Target session ID (from the MCP server's `list_devices`) |
+| `--session <id>` | — | Target session ID (from the MCP server's `list_devices`). Use it when several devices share a name and `--device` cannot pick one. |
 | `--device <name>` | — | Target device by name. Boots it when it is shut down. |
 | `--build <id>` | — | Build under test. Installed before the run and launched by the `launchApp` step. |
-| `--no-install` | — | Run without installing `--build` |
+| `--no-install` | — | Run without installing `--build`, to re-run against a build that is already installed |
 | `--junit <path>` | — | Where to write a JUnit XML report |
 | `--artifacts <dir>` | `.tapflow/artifacts` | Directory for failure screenshots |
-| `--timeout <seconds>` | `10` | Default wait per selector (seconds) |
+| `--timeout <seconds>` | `10` | Default wait per selector (seconds, at most 2147483.647) |
 | `--service-tier <tier>` | the agent's setting | Background services the device boots with: `stock` (all on), `lean`, or `slim` (almost all off). iOS 18.5 and later. See below. |
 | `--keep <features>` | — | Features to keep on under `--service-tier` (comma-separated), such as `push,photos` |
 | `--admission-timeout <seconds>` | `600` | Longest wait while another device boots on the same Mac, the Mac is critically short of memory, every automation device the Mac allows is in use, or it is over its CPU or memory limit (seconds). Past it, the run stops with exit code `2`. |
@@ -405,13 +405,7 @@ With `--parallel 3`, the relay chooses three devices of the platform and gives t
 
 With `--build`, a flow whose `appId` differs from that build's bundle ID is skipped rather than run. So is a flow the tag options filter out. A skipped flow does not count as a failure, but when no flow runs at all, the run stops with exit code `2` before choosing a device. See [Choosing flows](/automation/flows#choosing-flows).
 
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Every flow passed |
-| `1` | At least one flow failed on a product problem |
-| `2` | Environment or config error, every failed flow failed on an environment problem, or a `--parallel` run left flows that no device ran |
-| `130` | Cancelled by `SIGINT` |
-| `143` | Cancelled by `SIGTERM` |
+The exit codes (`0` passed, `1` a product failure, `2` an environment problem, `130`/`143` cancelled) are a contract CI can rely on. What each one covers is in the [Flow Reference](/automation/flows#exit-codes).
 
 With a token, the run is recorded on the relay. Recording never changes the exit code. See [Run records](/automation/flows#run-records).
 
