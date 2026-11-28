@@ -1,34 +1,30 @@
 ---
 title: AI Agent QA
-description: An overview of how an AI agent such as Claude Code tests your app by driving iOS simulators and Android emulators over MCP. Who does what, where to start, and how teammates watch the device.
+description: Test your app by having an AI agent such as Claude Code drive iOS simulators and Android emulators over MCP, and save the paths it checks as flows.
 ---
 
 # AI Agent QA {#ai-agent-qa}
 
-In AI Agent QA, an AI agent such as Claude Code tests your app by driving tapflow's devices. The AI agent reads the screen and sends taps and typing through the [MCP server](/ai-agents/mcp-server). The devices are the same simulators and emulators that teammates use in a QA Session. Pages here can differ in status, so check the banner at the top of each ([Page status](/get-started/introduction#page-status)).
+AI Agent QA is a way to test your app by having an AI agent such as Claude Code drive tapflow's devices. The AI agent reads the screen through the [MCP server](/ai-agents/mcp-server) and sends taps and typing. The devices are the same simulators and emulators that teammates use in a QA Session.
 
-## Who does what {#who-does-what}
+## Connect an AI agent {#connect}
 
-| Who | What they do |
-|---|---|
-| Operator | Runs the relay and the agents as usual. AI Agent QA needs nothing more installed where they run. |
-| Whoever uses the AI agent | Sets up the MCP server on their own computer and connects it to the relay with a token from the dashboard. Then asks the AI agent to test. |
-| Teammates | Open the link the AI agent hands over to watch the device screen in the browser. |
+Whoever uses the AI agent installs the MCP server with npm and registers it in the AI agent's MCP settings, along with the relay address and an API-type personal access token (PAT) issued in the dashboard. The operator has nothing more to set up, since the relay and the agents keep running as usual. See [MCP server](/ai-agents/mcp-server) for the steps.
 
-## Where to start {#start}
+## Test and save a flow {#test-and-save}
 
-1. [MCP server](/ai-agents/mcp-server): install `@tapflowio/mcp-server` and connect it to your AI agent. Then ask something like "test the login screen", and the AI agent picks a device, installs the app and tests it by reading the screen.
-2. [AI Agent Flow Capture](/ai-agents/agent-flow-capture): save the path the AI agent checked as a flow YAML. It resets the device, replays the flow and returns it only if it passes.
-3. [Run flows in CI](/automation/ci): replay the saved flow in CI with no AI model. From here on it is [Automation QA](/automation).
+Once it is connected, you can ask the AI agent something like "test the login screen". It can pick a device, install the app and test it by reading the screen. The AI agent also hands you a link to the device's screen. Anyone signed in to the dashboard can open the link to watch live, but cannot control the device from it.
 
-For a scenario not yet saved as a flow, [Exploratory runs in CI](/ai-agents/exploratory-runs) has an AI agent judge the screen in CI on every run. The result can differ between runs, and every run costs API calls.
+With [AI Agent Flow Capture](/ai-agents/agent-flow-capture), the AI agent can save the path it checked as a flow YAML. tapflow resets the device and replays the flow, and returns it only if the replay passes. The replay uses no AI model.
 
-## Watching the device {#watch}
+## Run in CI {#ci}
 
-When an AI agent connects to a device, it hands over a link that shows the device screen live. Any teammate signed in to the dashboard can open it. It is view-only, so clicking the screen sends nothing to the device. See [Watching the device an AI agent drives](/ai-agents/mcp-server#watch-the-device).
+A saved flow can be replayed in CI with no AI model. See [Run flows in CI](/automation/ci), part of [Automation QA](/automation).
+
+A scenario not saved as a flow yet can still run in CI: an AI agent then judges the screen on every run. Results can differ between runs, and every run costs API calls. See [Exploratory runs in CI](/ai-agents/exploratory-runs).
 
 ## Related {#related}
 
-- [Automation QA](/automation): where flows come from, replaying them, run records and CI.
+- [MCP server](/ai-agents/mcp-server): installing it, registering it with an AI agent, the tools it offers, and watching the device.
+- [Automation QA](/automation): where flows come from, replaying them, and their run records.
 - [Manual QA](/testing): how teammates test builds in the browser themselves.
-- [Page status](/get-started/introduction#page-status): what the Experimental and Deprecated banners mean.

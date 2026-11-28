@@ -41,14 +41,14 @@
 
 ## AI Agent QA
 
-- [AI Agent QA](https://www.tapflow.dev/ai-agents): Overview of an AI agent such as Claude Code testing the app by driving devices over MCP: who does what (the operator installs nothing more; whoever uses the AI agent sets up the MCP server; teammates watch through a link), where to start, and watching the device.
+- [AI Agent QA](https://www.tapflow.dev/ai-agents): Overview of testing your app by having an AI agent such as Claude Code drive iOS simulators and Android emulators over MCP: connecting an AI agent (the operator sets up nothing more), testing and saving a checked path as a flow, and running in CI.
 - [MCP Server](https://www.tapflow.dev/ai-agents/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow, list_runs, get_run, get_testing_guide, list_captured_steps, capture_flow. connect_device returns a dashboard link for watching the device live. (experimental)
 - [AI Agent Flow Capture](https://www.tapflow.dev/ai-agents/agent-flow-capture): Save a path an AI agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes. (experimental)
 - [Exploratory Runs in CI](https://www.tapflow.dev/ai-agents/exploratory-runs): Let an AI agent judge the app's screen in CI on every run with claude CLI + MCP. It is not deterministic and costs API calls, so it suits scenarios not yet pinned into a flow. Prerequisites and a GitHub Actions step. (experimental)
 
 ## Automation QA
 
-- [Automation QA](https://www.tapflow.dev/automation): Overview of replaying saved YAML flows with `tapflow flow run` and no AI model calls: who does what, where flows come from (Flow Capture in a QA Session, AI Agent Flow Capture, or by hand), run records on Flow Runs, and running in CI.
+- [Automation QA](https://www.tapflow.dev/automation): Overview of replaying saved YAML flows with `tapflow flow run` and no AI model, mostly in CI: where flows come from (Flow Capture in Manual QA, AI Agent Flow Capture, or by hand), the results on Flow Runs, and running in CI.
 - [Flow Reference](https://www.tapflow.dev/automation/flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, the link for watching a run, and how it relates to the `run_flow` MCP tool. (experimental)
 - [Flow Runs](https://www.tapflow.dev/automation/runs): The dashboard page for `tapflow flow run`'s records — CI and local runs apart, each flow's result, steps, the screen it failed on or ended on and a video of the whole flow, product vs environment failures, and a link to watch a run in progress. (experimental)
 - [Run Flows in CI](https://www.tapflow.dev/automation/ci): Replay saved flows in CI with `tapflow flow run` and no LLM calls (a GitHub Actions example on a self-hosted Mac runner), author those flows with an AI agent over MCP, and replay them inside an agent session with `run_flow`. (experimental)
