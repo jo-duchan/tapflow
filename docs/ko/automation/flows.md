@@ -326,20 +326,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 ```
 
-| 옵션 | 설명 |
-|------|------|
-| `--relay <url>` | 릴레이 URL (기본값 `ws://localhost:4000`) |
-| `--token <token>` | 원격 릴레이용 개인 액세스 토큰(PAT). 대시보드에서 만든 API 유형 토큰(`view, builds:write`)을 쓰세요. `TAPFLOW_TOKEN` 환경변수나 [토큰 파일](/ko/ai-agents/mcp-server#token-file)로도 지정할 수 있습니다 |
-| `--device <name>` | 대상 기기를 이름으로 지정. 꺼져 있으면 부팅합니다. |
-| `--session <id>` | 대상 기기의 세션 ID. 같은 이름의 기기가 여럿이라 `--device`로 하나를 고를 수 없을 때 씁니다. |
-| `--build <id>` | 테스트 대상 빌드. 실행 전 설치되고 `launchApp` 단계가 이 빌드를 실행합니다. |
-| `--no-install` | 실행 전에 `--build` 빌드를 설치하지 않습니다. 이미 설치된 빌드로 다시 실행할 때 씁니다. |
-| `--junit <path>` | JUnit XML 리포트를 지정한 경로에 씁니다. |
-| `--artifacts <dir>` | 실패 스크린샷 저장 디렉터리 (기본값 `.tapflow/artifacts`) |
-| `--timeout <seconds>` | 셀렉터 기본 대기 시간 (기본값 10, 최대 2147483.647) |
-| `--no-record` | 이 실행을 릴레이에 기록하지 않습니다. |
-| `--include-tags <tags>` | 이 태그 중 하나라도 있는 플로우만 실행합니다(쉼표로 구분). |
-| `--exclude-tags <tags>` | 이 태그 중 하나라도 있는 플로우는 건너뜁니다(쉼표로 구분). `--include-tags`보다 우선합니다. |
+실행할 기기는 `--device`로, 테스트할 빌드는 `--build`로 정하고 `--junit`으로 JUnit 리포트를 남깁니다. 모든 옵션과 기본값은 [CLI 레퍼런스](/ko/reference/cli#tapflow-flow-run)에 있습니다.
 
 `launchApp` 단계는 빌드 ID 없이 `--build`로 지정한 빌드를 실행합니다. 덕분에 플로우 파일에 빌드 ID를 하드코딩하지 않아도 되고 CI 실행마다 새 빌드에 그대로 재사용할 수 있습니다.
 
@@ -366,7 +353,9 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 - 토큰 없이 같은 Mac의 릴레이로 실행하면 기록하지 않고 그렇다고 한 줄 알립니다.
 - 빌드에 딸린 기록은 그 빌드가 지워질 때 함께 지워지고 빌드 없이 실행한 기록은 7일 뒤 지워집니다.
 
-### 종료 코드
+### 종료 코드 {#exit-codes}
+
+<a id="종료-코드"></a>
 
 CI가 결과를 판별할 수 있도록 종료 코드를 계약으로 고정했습니다.
 
@@ -374,7 +363,7 @@ CI가 결과를 판별할 수 있도록 종료 코드를 계약으로 고정했�
 |------|------|
 | `0` | 모든 플로우 통과 |
 | `1` | 하나 이상의 제품 실패. 제품과 환경 실패가 섞인 실행도 포함 |
-| `2` | 실행 전 환경·설정 오류 또는 모든 실패 플로우가 환경 문제인 경우 |
+| `2` | 실행 전 환경·설정 오류, 모든 실패 플로우가 환경 문제인 경우, 또는 제품 실패 없이 `--parallel`에서 아무 기기도 실행하지 못한 플로우가 남은 경우 |
 | `130` | `SIGINT`로 취소됨(Ctrl+C, GitHub Actions 잡 취소) |
 | `143` | `SIGTERM`으로 취소됨(`kill`의 기본 신호) |
 

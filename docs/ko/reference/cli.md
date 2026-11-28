@@ -354,13 +354,13 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 |------|--------|------|
 | `--relay <url>` | `ws://localhost:4000` | 릴레이 WebSocket URL. `relay.url` 설정을 읽지 않습니다. |
 | `--token <token>` | `TAPFLOW_TOKEN` 환경변수, 그다음 [토큰 파일](/ko/ai-agents/mcp-server#token-file) | 원격 릴레이에 접속할 개인 액세스 토큰(PAT). API 유형 토큰(`view, builds:write`)이 필요합니다. |
-| `--session <id>` | — | 대상 세션 ID(MCP 서버의 `list_devices`로 확인) |
+| `--session <id>` | — | 대상 세션 ID(MCP 서버의 `list_devices`로 확인). 같은 이름의 기기가 여럿이라 `--device`로 하나를 고를 수 없을 때 씁니다. |
 | `--device <name>` | — | 대상 기기 이름. 꺼져 있으면 부팅합니다. |
 | `--build <id>` | — | 테스트할 빌드 ID. 실행 전에 설치하고 `launchApp` 단계가 이 빌드를 실행합니다. |
-| `--no-install` | — | `--build`를 설치하지 않고 실행 |
+| `--no-install` | — | `--build`를 설치하지 않고 실행. 이미 설치된 빌드로 다시 실행할 때 씁니다. |
 | `--junit <path>` | — | JUnit XML 리포트를 쓸 경로 |
 | `--artifacts <dir>` | `.tapflow/artifacts` | 실패 스크린샷을 저장할 디렉터리 |
-| `--timeout <seconds>` | `10` | 셀렉터마다 기다리는 기본 시간(초) |
+| `--timeout <seconds>` | `10` | 셀렉터마다 기다리는 기본 시간(초, 최대 2147483.647) |
 | `--service-tier <tier>` | 에이전트 설정 | 기기가 켜질 때 끌 백그라운드 서비스 범위. `stock`(모두 켬), `lean`, `slim`(거의 모두 끔). iOS 18.5 이상. 아래 설명을 참고하세요. |
 | `--keep <features>` | — | `--service-tier`에서 켜 둘 기능(쉼표로 구분). 예: `push,photos` |
 | `--admission-timeout <seconds>` | `600` | Mac이 바빠서 기다리는 최대 시간(초). 바쁜 경우는 같은 Mac에서 다른 기기가 부팅 중일 때, 메모리가 심각하게 부족할 때, 허용된 자동화 기기를 모두 쓰는 중일 때, CPU·메모리 한도를 넘었을 때입니다. 넘으면 종료 코드 `2`로 멈춥니다. |
@@ -384,13 +384,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 
 `--build`를 주면 플로우의 `appId`가 그 빌드의 번들 ID와 다른 플로우는 실행하지 않고 건너뜁니다. 태그 옵션에 걸러진 플로우도 건너뜁니다. 건너뛴 플로우는 실패로 세지 않지만 실행된 플로우가 하나도 없으면 기기를 고르기 전에 종료 코드 `2`로 멈춥니다. 자세한 내용은 [실행할 플로우 고르기](/ko/automation/flows#choosing-flows)를 참고하세요.
 
-| 종료 코드 | 의미 |
-|-----------|------|
-| `0` | 모든 플로우 통과 |
-| `1` | 하나 이상의 플로우가 제품 문제로 실패 |
-| `2` | 환경·설정 오류, 실패한 플로우가 모두 환경 문제, 또는 `--parallel`에서 아무 기기도 실행하지 못한 플로우가 있음 |
-| `130` | `SIGINT`로 취소됨 |
-| `143` | `SIGTERM`으로 취소됨 |
+종료 코드(`0` 통과, `1` 제품 실패, `2` 환경 문제, `130`/`143` 취소)는 CI가 믿고 쓸 수 있는 계약입니다. 각 코드가 다루는 경우는 [플로우 레퍼런스](/ko/automation/flows#exit-codes)에 있습니다.
 
 토큰을 주면 실행 결과를 릴레이에 기록합니다. 기록은 종료 코드를 바꾸지 않습니다. 자세한 내용은 [실행 기록](/ko/automation/flows#run-records)을 참고하세요.
 

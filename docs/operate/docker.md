@@ -81,5 +81,5 @@ Notice the `./data:/app/.tapflow/data` volume above. It is strictly required. Th
 **A tunnel or proxy in the same network namespace:** set `TAPFLOW_TUNNEL_PORT` (or `local.tunnelPort`) and point it at the port it names. The relay does not ask connections that reach it over loopback to sign in, and a proxy sharing the container's namespace reaches it that way. Nothing here opens the tunnel port from a `tunnel` config: that is what `tapflow start` and `tapflow relay start` do, and this image runs neither. Naming the port is what opens it. A proxy on another host reaches the relay over the bridge and is remote already, so it needs nothing.
 
 ::: danger Do not deploy the relay directly to a cloud service
-Deploying the Docker container to fly.io or similar services puts the agent→relay path over the internet. RTT then exceeds the 30fps threshold (33ms/frame), causing persistent frame drops with no way to recover. tapflow does not support this configuration.
+Running this container on fly.io, Railway or a similar cloud service puts the agent→relay path over the internet, and tapflow does not support that. Why, and what to use instead, is in [External access](/operate/external-access#vps-rathole).
 :::
