@@ -162,6 +162,7 @@ What's included:
 - **Screenshot REST endpoint** — `GET /api/v1/sessions/:sessionId/screenshot` for CI and AI agents.
 - **Mac resource monitoring** — CPU & RAM per agent, to spot overloaded hosts before assigning sessions.
 - **Team management** — invite links, roles (Admin / Developer / QA / Viewer), and Personal Access Tokens.
+- **Flow Capture** — save the taps, swipes and typing from a QA Session as a flow YAML, replayed on the device to check it before you export it.
 - **Flow runner** — `tapflow flow run` replays a YAML flow with condition-based waits and a JUnit report, and calls no LLM at replay time. Experimental.
 - **MCP Server** — `@tapflowio/mcp-server` lets Claude Code and other LLM agents control simulators as native tools. Experimental.
 
@@ -243,7 +244,7 @@ Full docs: **[www.tapflow.dev](https://www.tapflow.dev)**
 
 - **Guides** — [Quick Start](https://www.tapflow.dev/get-started/quick-start) · [Environment Setup](https://www.tapflow.dev/operate/environment-setup) · [Self-Hosting](https://www.tapflow.dev/operate/deployment) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/testing/app-center) · [Troubleshooting](https://www.tapflow.dev/troubleshooting)
 - **Reference** — [CLI](https://www.tapflow.dev/reference/cli) · [Configuration](https://www.tapflow.dev/reference/configuration) · [REST API](https://www.tapflow.dev/reference/api) · [Security & Privacy](https://www.tapflow.dev/reference/security)
-- **AI Agent** — [MCP Server](https://www.tapflow.dev/ai-agents/mcp-server)
+- **AI Agent QA and Automation QA** — [MCP Server](https://www.tapflow.dev/automation/mcp-server) · [Flow reference](https://www.tapflow.dev/automation/flows) · [Flow Runs](https://www.tapflow.dev/automation/runs)
 
 ## Contributing
 
