@@ -75,7 +75,7 @@ tapflow setup android
 |--------|-------------|
 | `[platform]` | `ios` 또는 `android`. 생략하면 자동 감지 |
 
-한 번 실행으로 끝까지 진행하면서 설치 단계마다 동의를 구합니다(대화형 터미널만 해당. 비대화형에서는 아무것도 설치하지 않고, 빠진 항목과 설치 방법을 안내합니다). macOS에서는 두 플랫폼 모두 Homebrew가 없으면 먼저 설치하고, Windows의 `setup android`는 Homebrew를 쓰지 않습니다.
+한 번 실행으로 끝까지 진행하면서 설치 단계마다 동의를 구합니다(대화형 터미널만 해당. 비대화형에서는 아무것도 설치하지 않고 빠진 항목을 알려줍니다). macOS에서는 두 플랫폼 모두 Homebrew가 없으면 먼저 설치하고, Windows의 `setup android`는 Homebrew를 쓰지 않습니다.
 
 - **iOS**: App Store에서 Xcode 설치를 안내하고 라이선스 동의·초기 설정을 실행하며(sudo 필요) 시뮬레이터 런타임을 내려받습니다.
 - **Android**: JDK를 설치하고 `~/Library/Android/sdk`에 자기완결 SDK(명령행 도구·platform-tools·에뮬레이터·시스템 이미지 — Android Studio GUI 불필요)를 구성한 뒤 폼팩터별 AVD를 생성합니다. Windows에서는 SDK를 `%LOCALAPPDATA%\Android\Sdk`(`ANDROID_HOME`이나 `ANDROID_SDK_ROOT`가 설정되어 있으면 그 위치)에 두고 이미 있는 SDK는 빠진 패키지만 채우며, 마지막에 에뮬레이터의 하드웨어 가속을 쓸 수 있는지 알려줍니다. SDK 패키지를 설치한 실행에서는 `ANDROID_HOME`과 SDK 도구 폴더를 사용자 환경 변수에 추가하며, 사용자 PATH에 있던 `%변수%` 항목은 그대로 둡니다. 쓰기에 실패하면 그렇다고 알리고 직접 설정할 값을 안내합니다. 직접 만든 AVD가 이미 있으면 준비된 것으로 보고 `tapflow-*` AVD는 만들지 않습니다. Android 에뮬레이터가 Arm 기반 Windows에서는 실행되지 않으므로, 그런 PC에서는 아무것도 내려받지 않고 지원하지 않는다고 알려줍니다.

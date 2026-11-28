@@ -609,7 +609,17 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
     if (r.status === 0) created.push(spec.name)
     else failed.push(spec.name)
   }
-  const listed = listAvdsWindows(deps, sdk) ?? []
+  const relisted = listAvdsWindows(deps, sdk)
+  // A listing that fails now says nothing about what avdmanager made: report the creates as unchecked, not failed.
+  if (relisted === null) {
+    return {
+      label: 'AVD',
+      ok: false,
+      warn: true,
+      detail: `${created.length > 0 ? `Created: ${created.join(', ')}, but ` : ''}\`emulator -list-avds\` then failed, so the AVDs could not be checked.${failed.length > 0 ? ` Could not create: ${failed.join(', ')}.` : ''} Re-run tapflow setup android once it works.`,
+    }
+  }
+  const listed = relisted
   // What was agreed to and did not happen fails the step; a re-run offers exactly these names again.
   const notReady = [...failed, ...created.filter((n) => !listed.includes(n))]
   if (notReady.length > 0) {

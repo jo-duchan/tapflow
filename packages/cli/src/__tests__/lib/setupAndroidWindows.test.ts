@@ -282,6 +282,25 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(pc.calls.some((c) => c.args.join(' ').includes('avdmanager.bat'))).toBe(false)
   })
 
+  it('calls created AVDs unchecked, not failed, when the listing after creation fails', async () => {
+    let listings = 0
+    const pc = fakePc({
+      files: [...PARTIAL_SDK, SDKMANAGER, AVDMANAGER, p.join(IMAGE_DIR, 'system.img')],
+      respond: (c) => {
+        if (c.file === EMULATOR && c.args[0] === '-list-avds') {
+          listings += 1
+          if (listings > 1) return { status: 1, stdout: '', stderr: 'emulator: crashed' }
+        }
+        return undefined
+      },
+    })
+    const r = await checkAndFixAvdWindows(pc.deps, SDK, true, { javaHome: null, javaExe: JAVA17, major: 17 })
+    expect(r).toMatchObject({ label: 'AVD', ok: false, warn: true })
+    expect(r.detail).toContain('Created: tapflow-compact, tapflow-phone, tapflow-large, tapflow-tablet, but')
+    expect(r.detail).toContain('could not be checked')
+    expect(r.detail).not.toContain('Could not create')
+  })
+
   it('creates AVDs without --force, so an AVD of the same name is never overwritten', async () => {
     const pc = fakePc({ files: PARTIAL_SDK })
     await runSetupAndroidWindows(pc.deps)
