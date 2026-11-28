@@ -53,7 +53,7 @@ import {
 } from '@tapflowio/agent-core/utils'
 import { execFile } from 'child_process'
 import { AdbWrapper, DumpNoXmlError } from './AdbWrapper.js'
-import { toJpeg, withoutLeadingText } from './screenshotJpeg.js'
+import { toJpeg } from './screenshotJpeg.js'
 import { AppLogStream, APP_LOG_SOCKET_BUFFER_LIMIT } from './AppLogStream.js'
 import { spawn } from 'child_process'
 import { AppLogWatch, type AppLogWatchDeps } from './AppLogWatch.js'
@@ -3708,8 +3708,7 @@ export class AndroidAgent implements DeviceAgent, NetworkControlCapability {
           break
         }
         this.adb.screenshot(serial)
-          .then(async (shot) => {
-            const png = withoutLeadingText(shot)
+          .then(async (png) => {
             // `screencap -p` writes PNG and takes no format; JPEG is converted here, and when that cannot be done the
             // PNG goes out labelled as what it is.
             const jpeg = format === 'jpeg' ? await toJpeg(png) : null

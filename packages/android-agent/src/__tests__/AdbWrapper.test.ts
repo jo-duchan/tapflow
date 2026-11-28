@@ -666,6 +666,38 @@ describe('AdbWrapper', () => {
     })
   })
 
+  // #1118. On a device with several displays, `screencap -p` writes a warning ahead of the PNG, so the bytes
+  // are not an image. Every consumer reads them here, so the warning is cut here: the platform-neutral
+  // `DeviceAgent.screenshot()` and the relay's screenshot endpoint included, not only the MCP reply.
+  describe('screenshot', () => {
+    const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const WARNING = Buffer.from(
+      '[Warning] Multiple displays were found, but no display id was specified! ' +
+      'Defaulting to the first display found, however this default is not guaranteed to be ' +
+      'consistent across captures. A display id should be specified.\n',
+    )
+
+    it('answers the PNG alone, with the warning a multi-display device wrote ahead of it cut', async () => {
+      const png = Buffer.concat([PNG_SIG, Buffer.from([1, 2, 3])])
+      const execBinary = vi.fn(async () => Buffer.concat([WARNING, png]))
+      const adb = new AdbWrapper({ exec: vi.fn(), execBinary, listAvds: vi.fn(async () => []) } as AdbRunner)
+
+      const shot = await adb.screenshot('emulator-5554')
+
+      expect(shot.equals(png)).toBe(true)
+    })
+
+    it('answers a clean PNG unchanged', async () => {
+      const png = Buffer.concat([PNG_SIG, Buffer.from([1, 2, 3])])
+      const execBinary = vi.fn(async () => png)
+      const adb = new AdbWrapper({ exec: vi.fn(), execBinary, listAvds: vi.fn(async () => []) } as AdbRunner)
+
+      const shot = await adb.screenshot('emulator-5554')
+
+      expect(shot.equals(png)).toBe(true)
+    })
+  })
+
   describe('serial map', () => {
     it('setSerial / getSerial / clearSerial work correctly', () => {
       const wrapper = new AdbWrapper(mockRunner())
