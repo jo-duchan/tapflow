@@ -264,22 +264,22 @@
     },
     {
       "source": "/guide/mcp-server",
-      "destination": "/automation/mcp-server",
+      "destination": "/ai-agents/mcp-server",
       "permanent": true
     },
     {
       "source": "/ko/guide/mcp-server",
-      "destination": "/ko/automation/mcp-server",
+      "destination": "/ko/ai-agents/mcp-server",
       "permanent": true
     },
     {
       "source": "/guide/mcp-server.md",
-      "destination": "/automation/mcp-server.md",
+      "destination": "/ai-agents/mcp-server.md",
       "permanent": true
     },
     {
       "source": "/ko/guide/mcp-server.md",
-      "destination": "/ko/automation/mcp-server.md",
+      "destination": "/ko/ai-agents/mcp-server.md",
       "permanent": true
     },
     {
@@ -304,22 +304,22 @@
     },
     {
       "source": "/guide/mcp-ci",
-      "destination": "/automation/mcp-ci",
+      "destination": "/automation/ci",
       "permanent": true
     },
     {
       "source": "/ko/guide/mcp-ci",
-      "destination": "/ko/automation/mcp-ci",
+      "destination": "/ko/automation/ci",
       "permanent": true
     },
     {
       "source": "/guide/mcp-ci.md",
-      "destination": "/automation/mcp-ci.md",
+      "destination": "/automation/ci.md",
       "permanent": true
     },
     {
       "source": "/ko/guide/mcp-ci.md",
-      "destination": "/ko/automation/mcp-ci.md",
+      "destination": "/ko/automation/ci.md",
       "permanent": true
     },
     {
@@ -420,6 +420,46 @@
     {
       "source": "/ko/dashboard/setup.md",
       "destination": "/ko/get-started/quick-start.md",
+      "permanent": true
+    },
+    {
+      "source": "/automation/mcp-server",
+      "destination": "/ai-agents/mcp-server",
+      "permanent": true
+    },
+    {
+      "source": "/ko/automation/mcp-server",
+      "destination": "/ko/ai-agents/mcp-server",
+      "permanent": true
+    },
+    {
+      "source": "/automation/mcp-server.md",
+      "destination": "/ai-agents/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/automation/mcp-server.md",
+      "destination": "/ko/ai-agents/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/automation/mcp-ci",
+      "destination": "/automation/ci",
+      "permanent": true
+    },
+    {
+      "source": "/ko/automation/mcp-ci",
+      "destination": "/ko/automation/ci",
+      "permanent": true
+    },
+    {
+      "source": "/automation/mcp-ci.md",
+      "destination": "/automation/ci.md",
+      "permanent": true
+    },
+    {
+      "source": "/ko/automation/mcp-ci.md",
+      "destination": "/ko/automation/ci.md",
       "permanent": true
     },
     {

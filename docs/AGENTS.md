@@ -22,7 +22,7 @@ VitePress 표준 구조를 따른다. 사이드바·shiki 테마 주입은 `.vit
 
 - 한국어가 소스 언어다. 내용 변경 시 한국어를 먼저 수정하고 영어에 반영한다.
 - 새 페이지를 추가할 때는 `docs/ko/`와 `docs/` 양쪽에 파일을 만들고, `config.ts`의 `koSidebar`와 `enSidebar` 모두에 등록한다. `docs/public/llms.txt`에도 사이드바와 같은 섹션·같은 순서로 행을 추가한다(`scripts/__tests__/agentReadableDocs.test.mjs`가 영어 페이지 집합, 섹션 구성, KO 사이드바 대칭을 검사한다). 작성 절차 전체는 `/write-docs` 커맨드에 있다.
-- 페이지 URL은 섹션 접두사를 따른다(`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`, `/troubleshooting/`). 페이지를 옮기면 옛 URL을 `.vitepress/moves.json`에 추가하고 `node scripts/docs-redirects.mjs --write`로 `vercel.json`을 다시 만든다. 한 번 렌더된 헤딩 id는 `.vitepress/frozen-ids.json`에 고정되어 있어 없앨 수 없다(`docsMoves` 테스트). 자세한 규칙은 `/write-docs` §4·§5에 있다.
+- 페이지 URL은 섹션 접두사를 따른다(`/get-started/`, `/testing/`, `/ai-agents/`, `/automation/`, `/operate/`, `/reference/`, `/troubleshooting/`). `/testing/`·`/ai-agents/`·`/automation/`은 세 쓰임(수동 QA, AI 에이전트 QA, 자동화 QA) 섹션이다. 페이지를 옮기면 옛 URL을 `.vitepress/moves.json`에 추가하고 `node scripts/docs-redirects.mjs --write`로 `vercel.json`을 다시 만든다. 한 번 렌더된 헤딩 id는 `.vitepress/frozen-ids.json`에 고정되어 있어 없앨 수 없다(`docsMoves` 테스트). 자세한 규칙은 `/write-docs` §4·§5에 있다.
 - 내용·구조가 두 버전 간에 일치해야 한다. 한쪽에만 있는 섹션을 만들지 않는다.
 
 
@@ -58,6 +58,8 @@ iOS/Android 양쪽을 지원하는 기능을 설명할 때 특정 플랫폼 도�
 | relay | 릴레이 | relay | KO 산문의 `relay`, 리레이 |
 | tapflow agent | 에이전트 | agent | KO 산문의 `agent` |
 | Claude Code 같은 도구 | 코딩 에이전트 | coding agent | 맥락 없는 "에이전트"/"agent" |
+| 코딩 에이전트가 MCP로 기기를 쓰는 쓰임과 그 기능의 이름(행위자가 아님) | AI 에이전트(AI 에이전트 QA, AI 에이전트 Flow Capture) | AI Agent | 쓰임 이름으로서 "에이전트 QA", "Agents"(tapflow agent와 혼동) |
+| a flow's step (and a captured step) | 단계 | step | KO 산문의 "스텝" |
 | device | 기기 | device | 디바이스 |
 | directory | 디렉터리 | directory | 디렉토리 |
 | simulator / emulator | 시뮬레이터 / 에뮬레이터 | simulator / emulator | 시뮬 |

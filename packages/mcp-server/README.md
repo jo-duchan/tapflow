@@ -33,7 +33,7 @@ Point it at your tapflow relay:
 - `list_runs` and `get_run` read the run records `tapflow flow run` leaves on the relay, with the screen each failed flow stopped on — so an agent can repair a failed CI flow and check it with `run_flow`.
 - `run_flow` replays a [`@tapflowio/flow-runner`](https://www.npmjs.com/package/@tapflowio/flow-runner) YAML flow deterministically — author once with the agent, replay with zero LLM calls.
 
-Full guide: [tapflow.dev/automation/mcp-server](https://www.tapflow.dev/automation/mcp-server)
+Full guide: [tapflow.dev/ai-agents/mcp-server](https://www.tapflow.dev/ai-agents/mcp-server)
 
 ## License
 

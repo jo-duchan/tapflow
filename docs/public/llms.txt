@@ -20,9 +20,9 @@
 - [Quick Start](https://www.tapflow.dev/get-started/quick-start): Operator tutorial from install to the first tap: prerequisites, tapflow setup, optional tapflow init, tapflow start and its banner, the admin account, uploading your build, Start QA, picking a Mac and device, Launch app, and inviting a teammate with the dashboard's LAN address.
 - [For teammates](https://www.tapflow.dev/get-started/teammates): For a teammate who received an invite link: accept it, save the dashboard address, pick a build in App Center, start a QA Session, leave comments, what each role (Viewer / QA / Developer / Admin) may do, and profile settings.
 
-## Test apps
+## Manual QA
 
-- [Test apps](https://www.tapflow.dev/testing): How teammates test builds in the browser: pick a build in App Center, drive a simulator or emulator in a QA Session, and leave what you found.
+- [Manual QA](https://www.tapflow.dev/testing): How teammates test builds in the browser: pick a build in App Center, drive a simulator or emulator in a QA Session, and leave what you found.
 - [App Center](https://www.tapflow.dev/testing/app-center): The dashboard's build list, grouped by app and version: uploading builds (.app.zip / .tar.gz for iOS simulators, .apk), search and status filter, what each review status means, scheduled deletion, and the Start QA button (disabled for Done).
 
 ### QA Session
@@ -35,6 +35,18 @@
 - [Screenshots & recordings](https://www.tapflow.dev/testing/screenshots-and-recordings): ⌘S downloads a PNG locally and never uploads it; ⌘⇧Y records an mp4/webm that is saved to the relay, listed in the build's Recordings tab, and kept for 72 hours.
 - [Comments](https://www.tapflow.dev/testing/comments): A flat, per-build list of notes with png/jpg/webp images up to 5 MB, links to a single comment (need HTTPS to copy), and posting from CI.
 - [Flow Capture](https://www.tapflow.dev/testing/flow-capture): Save the taps, swipes and typing you did in a QA Session as a flow YAML: Capture my steps (on by default), the Capture flow dialog's Range, Match (replays from a clean start), Edit (fragile/auto/not in the flow, secret names), Verify (selectors only, as tapflow flow run) and Export.
+
+## AI Agent QA
+
+- [MCP Server](https://www.tapflow.dev/ai-agents/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow, list_runs, get_run, get_testing_guide, list_captured_steps, capture_flow. connect_device returns a dashboard link for watching the device live.
+- [AI Agent Flow Capture](https://www.tapflow.dev/ai-agents/agent-flow-capture): Save a path a coding agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
+- [Exploratory Runs in CI](https://www.tapflow.dev/ai-agents/exploratory-runs): Let a coding agent judge the app's screen in CI on every run with claude CLI + MCP. It is not deterministic and costs API calls, so it suits scenarios not yet pinned into a flow. Prerequisites and a GitHub Actions step.
+
+## Automation QA
+
+- [Flow Reference](https://www.tapflow.dev/automation/flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, the link for watching a run, and how it relates to the `run_flow` MCP tool.
+- [Flow Runs](https://www.tapflow.dev/automation/runs): The dashboard page for `tapflow flow run`'s records — CI and local runs apart, each flow's result, steps, the screen it failed on or ended on and a video of the whole flow, product vs environment failures, and a link to watch a run in progress.
+- [Run Flows in CI](https://www.tapflow.dev/automation/ci): Replay saved flows in CI with `tapflow flow run` and no LLM calls (a GitHub Actions example on a self-hosted Mac runner), author those flows with a coding agent over MCP, and replay them inside an agent session with `run_flow`.
 
 ## Operate
 
@@ -64,14 +76,6 @@
 
 - [Build Distribution](https://www.tapflow.dev/operate/ci-distribution): Connect your CI pipeline to upload builds automatically. Includes Personal Access Token setup, curl examples, GitHub Actions full example with branch/commit metadata, and build status reference.
 - [Webhooks](https://www.tapflow.dev/operate/webhooks): Register a URL that tapflow POSTs to when someone moves a build to Done or Rejected — the review verdict, not a build completion. Payload shape, signature verification, and when it fires.
-
-### AI agents and automation (MCP and flows — experimental)
-
-- [MCP Server](https://www.tapflow.dev/automation/mcp-server): Install and configure @tapflowio/mcp-server. Supports Claude Code, Codex, Cursor, and any MCP-compatible client. Available tools: list_builds, list_devices, connect_device, disconnect_device, boot_device, shutdown_device, screenshot, query_ui_tree, tap, swipe, type_text, press_key, press_button, install_app, launch_app, run_flow, list_runs, get_run, get_testing_guide, list_captured_steps, capture_flow. connect_device returns a dashboard link for watching the device live.
-- [AI Agent Flow Capture](https://www.tapflow.dev/automation/agent-flow-capture): Save a path a coding agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
-- [Flow Reference](https://www.tapflow.dev/automation/flows): The YAML flow format replayed deterministically by `tapflow flow run` with no LLM calls — file structure, every step type, selectors, running in CI, the link for watching a run, and how it relates to the `run_flow` MCP tool.
-- [Flow Runs](https://www.tapflow.dev/automation/runs): The dashboard page for `tapflow flow run`'s records — CI and local runs apart, each flow's result, steps, the screen it failed on or ended on and a video of the whole flow, product vs environment failures, and a link to watch a run in progress.
-- [MCP in CI/CD](https://www.tapflow.dev/automation/mcp-ci): Run automated smoke tests on every build using claude CLI + MCP. Includes GitHub Actions example, multi-device matrix, example test prompts, and tips for reliable agentic test scripts.
 
 ## Reference
 

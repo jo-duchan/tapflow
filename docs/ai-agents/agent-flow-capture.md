@@ -9,7 +9,7 @@ description: Save a path a coding agent checked on a device over MCP as a flow Y
 tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) are experimental. The manual QA dashboard is the most mature part of tapflow; these two are still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
 :::
 
-A coding agent such as Claude Code can save the path it checked on a device through the [MCP server](/automation/mcp-server) as a [flow](/automation/flows) YAML file. The MCP server records the coding agent's taps, swipes and typing, and `capture_flow` resets the device the way `tapflow flow run` does and replays the flow. It returns the YAML only if that replay passes, and no AI model runs in the replay. It is what [Flow Capture](/testing/flow-capture) does for a teammate in the dashboard, done by a coding agent. A capture opens only when the coding agent passes `capture: true` to `connect_device`.
+A coding agent such as Claude Code can save the path it checked on a device through the [MCP server](/ai-agents/mcp-server) as a [flow](/automation/flows) YAML file. The MCP server records the coding agent's taps, swipes and typing, and `capture_flow` resets the device the way `tapflow flow run` does and replays the flow. It returns the YAML only if that replay passes, and no AI model runs in the replay. It is what [Flow Capture](/testing/flow-capture) does for a teammate in the dashboard, done by a coding agent. A capture opens only when the coding agent passes `capture: true` to `connect_device`.
 
 ## How to use {#how-to-use}
 
@@ -184,7 +184,7 @@ An iOS app reads its accessibility setting when it starts, so taps in an app alr
 
 ## Related {#related}
 
-- [MCP server](/automation/mcp-server): installing it, connecting a coding agent, and the tools
+- [MCP server](/ai-agents/mcp-server): installing it, connecting a coding agent, and the tools
 - [Flow Capture](/testing/flow-capture): how a teammate saves their own steps as a flow in the dashboard
 - [Flow reference](/automation/flows): the flow file format, `tapflow flow run` and secrets
 - [Flow Runs](/automation/runs): the results of flows run in CI

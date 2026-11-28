@@ -61,7 +61,7 @@ description: "tapflow.config.json 스키마와 환경 변수 재정의: relay, a
 | `TAPFLOW_DATA_DIR` | `local.dataDir` | `<설치>/data` | DB·업로드 디렉터리. 환경변수는 현재 디렉터리 기준, `local.dataDir`은 설정 파일 기준으로 상대 경로를 풉니다. 이미 `.tapflow/data`나 `.tapflow-data`가 있는 설치는 그대로 씁니다. |
 | `TAPFLOW_RELAY_URL` | `relay.url` | *(비어있음)* | CLI 명령어의 기본 릴레이 URL |
 | `TAPFLOW_AGENT_TOKEN` | — | *(비어있음)* | 원격 릴레이 인증용 `agent` 스코프 토큰. `--token` 플래그가 우선합니다. [에이전트 설정](/ko/operate/agents#원격-릴레이-인증)을 참고하세요. |
-| `TAPFLOW_TOKEN` | — | *(비어있음)* | `tapflow flow run`과 MCP 서버가 원격 릴레이에 접속할 때 쓰는 개인 액세스 토큰(PAT). 대시보드에서 만든 API 유형 토큰(`view, builds:write`)을 쓰세요. `flow run`에서는 `--token` 플래그가 우선합니다. 비어 있으면 둘 다 [토큰 파일](/ko/automation/mcp-server#token-file)에서 읽습니다. |
+| `TAPFLOW_TOKEN` | — | *(비어있음)* | `tapflow flow run`과 MCP 서버가 원격 릴레이에 접속할 때 쓰는 개인 액세스 토큰(PAT). 대시보드에서 만든 API 유형 토큰(`view, builds:write`)을 쓰세요. `flow run`에서는 `--token` 플래그가 우선합니다. 비어 있으면 둘 다 [토큰 파일](/ko/ai-agents/mcp-server#token-file)에서 읽습니다. |
 | `TAPFLOW_TOKEN_FILE` | — | `~/.config/tapflow/credentials.json` | `tapflow flow run`과 MCP 서버가 읽는 토큰 파일의 경로. `XDG_CONFIG_HOME`이 있으면 기본값은 그 아래 `tapflow/credentials.json`입니다. |
 | `TAPFLOW_TUNNEL_TOKEN` | — | *(비어있음)* | rathole 터널 인증에 쓰는 비밀 문자열. `tunnel.provider`가 `rathole`일 때 필요합니다. |
 | `TAPFLOW_LEAN` | `agent.lean` | `off` | `on` 또는 `off`. 다른 값은 경고와 함께 무시하고 설정 파일의 값을 씁니다. |

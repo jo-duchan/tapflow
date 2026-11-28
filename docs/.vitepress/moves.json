@@ -14,14 +14,16 @@
     "/guide/upload-builds": "/testing/app-center",
     "/guide/audio": "/testing/audio",
     "/guide/network-control": "/testing/network-control",
-    "/guide/mcp-server": "/automation/mcp-server",
+    "/guide/mcp-server": "/ai-agents/mcp-server",
     "/guide/writing-flows": "/automation/flows",
-    "/guide/mcp-ci": "/automation/mcp-ci",
+    "/guide/mcp-ci": "/automation/ci",
     "/guide/contributing": "/contributing",
     "/guide/self-hosting": "/operate/deployment",
     "/guide/troubleshooting": "/troubleshooting",
     "/dashboard/overview": "/testing",
-    "/dashboard/setup": "/get-started/quick-start"
+    "/dashboard/setup": "/get-started/quick-start",
+    "/automation/mcp-server": "/ai-agents/mcp-server",
+    "/automation/mcp-ci": "/automation/ci"
   },
   "aliases": {
     "/guide": "/get-started/introduction",

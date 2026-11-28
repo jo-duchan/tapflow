@@ -1024,7 +1024,7 @@ Query:
 
 - `deviceReset`: 실행이 기기를 초기화했는지입니다. 초기화 기능보다 오래된 러너의 실행은 `null`입니다. `requested`는 요청 여부이고 기기를 켠 결과를 보고받으면 `booted`, `cold`, `report`가 더해집니다. 러너가 세션을 알려 주면 `devices`에 기기마다 `sessionId`, `deviceId`, `deviceName`, `cold`, `report`가 담깁니다. 기기가 여럿이면 바깥 필드는 첫 기기의 결과입니다. 이 필드는 목록 항목에도 있습니다.
 - `flows`: 계획된 플로우 순서대로입니다. 보고된 플로우는 `status`(`passed`·`failed`)와 `steps`, `device`, `durationMs`, `hasScreenshot`을 담습니다. 스크린샷이 없으면 `screenshotNote`에 이유를 담습니다. `too-large`·`not-image`·`storage-full`은 릴레이가 업로드를 거절한 이유입니다. `not-taken`은 러너가 스크린샷을 찍으려 했지만 받지 못한 경우입니다. 이유를 모르면 `null`입니다. 건너뛴 플로우는 `status: "skipped"`와 `skipReason`, 이유를 담은 `failureMessage`를 담습니다. 영상이 있는 플로우는 `video`에 `ended`, `endReason`, `evicted`, `notRecorded`, `bytes`를 담고 영상이 없으면 `null`입니다. `notRecorded`는 러너가 영상을 남길 수 없었던 이유(`jpeg`, `no-keyframe`)입니다. 아직 보고되지 않은 플로우는 진행 중인 실행에서 `running`(지금 실행 중)이나 `pending`, 끝난 실행에서 `not-run`입니다. 러너가 시작을 알린 `running` 플로우에는 `device`(`id`, `name`, `sessionId`)가 있습니다. 시작을 알리지 않는 옛 러너의 실행에서는 보고되지 않은 첫 플로우를 `running`으로 표시합니다.
-- `watchSessionId`: 러너가 지금 붙잡고 있는 세션 ID입니다. 진행 중일 때만 값이 있고 [AI 세션 보기](/ko/automation/mcp-server#watch-the-device) 페이지 주소에 씁니다.
+- `watchSessionId`: 러너가 지금 붙잡고 있는 세션 ID입니다. 진행 중일 때만 값이 있고 [AI 세션 보기](/ko/ai-agents/mcp-server#watch-the-device) 페이지 주소에 씁니다.
 - `watchSessionIds`: 러너가 지금 붙잡고 있는 세션 전부입니다. 여러 기기에서 도는 실행은 기기마다 하나씩이고 끝난 실행에서는 빈 배열입니다.
 
 존재하지 않는 실행이면 `404`를 받습니다.

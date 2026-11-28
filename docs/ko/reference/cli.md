@@ -353,10 +353,10 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--relay <url>` | `ws://localhost:4000` | 릴레이 WebSocket URL. `relay.url` 설정을 읽지 않습니다. |
-| `--token <token>` | `TAPFLOW_TOKEN` 환경변수, 그다음 [토큰 파일](/ko/automation/mcp-server#token-file) | 원격 릴레이에 접속할 개인 액세스 토큰(PAT). API 유형 토큰(`view, builds:write`)이 필요합니다. |
+| `--token <token>` | `TAPFLOW_TOKEN` 환경변수, 그다음 [토큰 파일](/ko/ai-agents/mcp-server#token-file) | 원격 릴레이에 접속할 개인 액세스 토큰(PAT). API 유형 토큰(`view, builds:write`)이 필요합니다. |
 | `--session <id>` | — | 대상 세션 ID(MCP 서버의 `list_devices`로 확인) |
 | `--device <name>` | — | 대상 기기 이름. 꺼져 있으면 부팅합니다. |
-| `--build <id>` | — | 테스트할 빌드 ID. 실행 전에 설치하고 `launchApp` 스텝이 이 빌드를 실행합니다. |
+| `--build <id>` | — | 테스트할 빌드 ID. 실행 전에 설치하고 `launchApp` 단계가 이 빌드를 실행합니다. |
 | `--no-install` | — | `--build`를 설치하지 않고 실행 |
 | `--junit <path>` | — | JUnit XML 리포트를 쓸 경로 |
 | `--artifacts <dir>` | `.tapflow/artifacts` | 실패 스크린샷을 저장할 디렉터리 |
@@ -396,7 +396,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 
 ## `tapflow token set`
 
-MCP 서버와 `tapflow flow run`이 읽는 [토큰 파일](/ko/automation/mcp-server#token-file)에 토큰을 저장합니다. 저장하기 전에 릴레이에 한 번 물어보고 릴레이가 받지 않는 토큰은 저장하지 않습니다.
+MCP 서버와 `tapflow flow run`이 읽는 [토큰 파일](/ko/ai-agents/mcp-server#token-file)에 토큰을 저장합니다. 저장하기 전에 릴레이에 한 번 물어보고 릴레이가 받지 않는 토큰은 저장하지 않습니다.
 
 ```sh
 tapflow token set --relay wss://tapflow.example.com

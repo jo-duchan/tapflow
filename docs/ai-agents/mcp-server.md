@@ -11,13 +11,13 @@ tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) ar
 
 `@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible LLM agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
 
-These three guides fit together: connect a coding agent here, learn the flow YAML format in the [Flow Reference](/automation/flows), then combine them in [MCP in CI/CD](/automation/mcp-ci), where an agent authors a flow once and CI replays it deterministically.
+These three guides fit together: connect a coding agent here, learn the flow YAML format in the [Flow Reference](/automation/flows), then combine them in [Run flows in CI](/automation/ci), where an agent authors a flow once and CI replays it deterministically.
 
 ## When to use this
 
 **Repeatable automated testing** is where this shines. One-off manual checks are still faster done by hand.
 
-- **CI/CD regression tests** — After each build, an agent boots a simulator, installs the build, walks through key flows, captures screenshots, and reports regressions. No human intervention needed. → [MCP in CI/CD](/automation/mcp-ci)
+- **CI/CD regression tests** — After each build, an agent boots a simulator, installs the build, walks through key flows, captures screenshots, and reports regressions. No human intervention needed. → [Exploratory runs in CI](/ai-agents/exploratory-runs)
 - **Multi-device matrix** — Run the same flow on iPhone SE (iOS 16), iPhone 15 Pro (iOS 17), and an Android emulator in sequence without manually switching devices.
 - **Natural language QA scripts** — Non-developers (QA, PM) describe test scenarios in plain text; the agent executes them. No coordinate mapping or brittle selectors.
 
@@ -126,7 +126,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 |------|-------------|
 | `list_builds` | List the apps and builds on the relay (where the `buildId` for `install_app` and `launch_app` comes from) |
 | `list_devices` | List connected simulators and emulators |
-| `connect_device` | Join a session (required before controlling a device). Also returns `watchUrl`, a dashboard link for watching the device. With `capture: true`, records what the coding agent does for a flow, and `capture: false` ends that ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
+| `connect_device` | Join a session (required before controlling a device). Also returns `watchUrl`, a dashboard link for watching the device. With `capture: true`, records what the coding agent does for a flow, and `capture: false` ends that ([AI Agent Flow Capture](/ai-agents/agent-flow-capture)) |
 | `disconnect_device` | End a session |
 | `boot_device` | Boot a simulator or emulator |
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
@@ -139,8 +139,8 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `press_button` | Press a hardware button (home, lock, etc.) |
 | `install_app` | Install an app |
 | `launch_app` | Launch an installed app. `arguments` and `env` pass [launch arguments](/automation/flows#launch-arguments). The result's `applied` names the keys the app received, [launch defaults](/reference/configuration#launch-defaults) included |
-| `list_captured_steps` | The open capture's numbered steps, how each is named, and what each may expect ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
-| `capture_flow` | Make a flow of the captured steps by the coding agent's choices, reset the device as CI does and replay it. Returns the YAML only if it passes ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
+| `list_captured_steps` | The open capture's numbered steps, how each is named, and what each may expect ([AI Agent Flow Capture](/ai-agents/agent-flow-capture)) |
+| `capture_flow` | Make a flow of the captured steps by the coding agent's choices, reset the device as CI does and replay it. Returns the YAML only if it passes ([AI Agent Flow Capture](/ai-agents/agent-flow-capture)) |
 | `run_flow` | Replay a YAML flow deterministically (no further LLM calls). Also how a coding agent pinches, turns or folds the device: a [`pinch`](/automation/flows#pinch), [`setOrientation` or `setPosture`](/automation/flows#orientation-and-posture) step |
 | `list_runs` | List the run records `tapflow flow run` left on the relay (filter by status, build, flow name, CI or local) |
 | `get_run` | Read one run record: each failed flow's steps (a passed flow's step count), failure message and file path, and screenshots of up to four failed flows |
@@ -164,7 +164,7 @@ capture_flow       → save the verified path as a flow (connect with capture: t
 disconnect_device  → end the session, freeing the device for others
 ```
 
-To save the verified path as a flow, the coding agent opens a capture with `connect_device` before walking it and ends with `list_captured_steps` and `capture_flow`. See [AI Agent Flow Capture](/automation/agent-flow-capture).
+To save the verified path as a flow, the coding agent opens a capture with `connect_device` before walking it and ends with `list_captured_steps` and `capture_flow`. See [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
 
 ::: info Device already booted
 If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_device`.
@@ -172,7 +172,7 @@ If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_
 
 A `list_devices` response can also carry values set in the dashboard: `displayName` (a name an Admin gave the device), `hidden` (an Admin hid it from the list) and `favourite` (the token owner starred it). They are for the dashboard's display and don't affect which devices you can use. A hidden device is still listed and can be connected to, and you refer to a device by its `name`, not its `displayName`. See [Organize the device list](/testing/qa-session#organize-devices).
 
-For running this in a CI pipeline, see [MCP in CI/CD](/automation/mcp-ci).
+For running this in a CI pipeline, see [Run flows in CI](/automation/ci).
 
 ## What the agent is told {#agent-guidance}
 

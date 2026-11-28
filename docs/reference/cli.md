@@ -374,7 +374,7 @@ tapflow flow run .tapflow/flows/login-smoke.yaml
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--relay <url>` | `ws://localhost:4000` | Relay WebSocket URL. Does not read `relay.url`. |
-| `--token <token>` | `TAPFLOW_TOKEN` env, then the [token file](/automation/mcp-server#token-file) | Personal access token (PAT) for a remote relay. Needs an API-type token (`view, builds:write`). |
+| `--token <token>` | `TAPFLOW_TOKEN` env, then the [token file](/ai-agents/mcp-server#token-file) | Personal access token (PAT) for a remote relay. Needs an API-type token (`view, builds:write`). |
 | `--session <id>` | — | Target session ID (from the MCP server's `list_devices`) |
 | `--device <name>` | — | Target device by name. Boots it when it is shut down. |
 | `--build <id>` | — | Build under test. Installed before the run and launched by the `launchApp` step. |
@@ -417,7 +417,7 @@ With a token, the run is recorded on the relay. Recording never changes the exit
 
 ## `tapflow token set`
 
-Store a token in the [token file](/automation/mcp-server#token-file) the MCP server and `tapflow flow run` read. The relay is asked first, and a token it does not accept is not stored.
+Store a token in the [token file](/ai-agents/mcp-server#token-file) the MCP server and `tapflow flow run` read. The relay is asked first, and a token it does not accept is not stored.
 
 ```sh
 tapflow token set --relay wss://tapflow.example.com

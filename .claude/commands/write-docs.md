@@ -134,10 +134,10 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 
 새 페이지는 세 곳에 등록한다.
 
-1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 독자가 하는 일로 나뉜다. EN은 Get started / Test apps(하위 그룹 QA Session) / Operate(하위 그룹 Set up a Mac / Deploy the relay / Run the team / Deliver builds / AI agents & automation (experimental)) / Reference / Troubleshooting / Contributing, KO는 시작하기 / 앱 테스트(QA 세션) / 운영(Mac 준비 / 릴레이 배포 / 팀 운영 / 빌드 전달 / AI 에이전트·자동화 (실험적)) / 레퍼런스 / 문제 해결 / 기여. KO 사이드바는 EN과 같은 트리여야 하고 링크에는 `/ko`만 붙는다(테스트가 검사한다).
+1. **`docs/.vitepress/config.ts`의 `enSidebar`와 `koSidebar` 양쪽.** 섹션은 독자가 하는 일로 나뉜다. EN은 Get started / Manual QA(하위 그룹 QA Session) / AI Agent QA / Automation QA / Operate(하위 그룹 Set up a Mac / Deploy the relay / Run the team / Deliver builds) / Reference / Troubleshooting / Contributing, KO는 시작하기 / 수동 QA(QA 세션) / AI 에이전트 QA / 자동화 QA / 운영(Mac 준비 / 릴레이 배포 / 팀 운영 / 빌드 전달) / 레퍼런스 / 문제 해결 / 기여. 가운데 세 섹션은 tapflow의 세 쓰임(VISION.md)이다. KO 사이드바는 EN과 같은 트리여야 하고 링크에는 `/ko`만 붙는다(테스트가 검사한다).
 2. **`docs/public/llms.txt`**: 해당 섹션에 `- [제목](https://www.tapflow.dev/{경로}): {한 줄 설명}` 행을 추가한다. `scripts/__tests__/agentReadableDocs.test.mjs`가 강제하는 것은 다음과 같다.
    - 링크 행의 URL 집합이 `docs/` 아래 영어 `.md` 페이지 전체(`ko/`, `AGENTS.md`/`CLAUDE.md`, `layout: home` 랜딩 제외)와 **정확히 같아야** 한다. 빠져도, 남아도 실패한다.
-   - `## ` 섹션 하나가 사이드바 최상위 그룹 하나다. 섹션 이름이 그룹 이름(EN)과 같고, 섹션 안의 링크가 그 그룹의 페이지와 **같은 순서**여야 한다. Operate와 Test apps의 하위 그룹은 `### `로 나눠 쓴다.
+   - `## ` 섹션 하나가 사이드바 최상위 그룹 하나다. 섹션 이름이 그룹 이름(EN)과 같고, 섹션 안의 링크가 그 그룹의 페이지와 **같은 순서**여야 한다. Operate와 Manual QA의 하위 그룹은 `### `로 나눠 쓴다.
    - 모든 URL은 `https://www.tapflow.dev/`로 시작한다(apex `tapflow.dev`는 307 리다이렉트).
    - 설명 문구 자체는 검사하지 않으므로 사람이 맞춘다. frontmatter `description`과 같은 내용으로 쓴다.
    - 확인: `pnpm test:scripts`
@@ -146,15 +146,16 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 | 위치 | EN | KO |
 |---|---|---|
 | Get started (튜토리얼·소개) | `docs/get-started/{slug}.md` | `docs/ko/get-started/{slug}.md` |
-| Test apps (기능 페이지) | `docs/testing/{slug}.md` | `docs/ko/testing/{slug}.md` |
+| Manual QA (기능 페이지) | `docs/testing/{slug}.md` | `docs/ko/testing/{slug}.md` |
+| AI Agent QA (코딩 에이전트가 MCP로 기기를 쓰는 페이지) | `docs/ai-agents/{slug}.md` | `docs/ko/ai-agents/{slug}.md` |
+| Automation QA (flow와 그 재생) | `docs/automation/{slug}.md` | `docs/ko/automation/{slug}.md` |
 | Operate (운영자 how-to) | `docs/operate/{slug}.md` | `docs/ko/operate/{slug}.md` |
-| AI agents & automation (실험적) | `docs/automation/{slug}.md` | `docs/ko/automation/{slug}.md` |
 | 레퍼런스 | `docs/reference/{slug}.md` | `docs/ko/reference/{slug}.md` |
 | 문제 해결 | `docs/troubleshooting/{slug}.md` | `docs/ko/troubleshooting/{slug}.md` |
 
 URL 접두사가 곧 섹션이다. slug는 UI 위치가 아니라 대상 이름으로 짓는다. 섹션 개요는 `index.md`가 아니라 형제 파일로 둔다(`docs/testing.md` → `/testing`, `docs/troubleshooting.md` → `/troubleshooting`).
 
-**페이지를 옮기거나 없앨 때**: 옛 URL을 `docs/.vitepress/moves.json`의 `pages`에 `"옛 경로": "새 경로"`로 추가하고 `node scripts/docs-redirects.mjs --write`로 `docs/vercel.json`을 다시 만든다. 항목 하나가 EN·KO·`.md` 네 개의 308 리다이렉트가 된다. 이미 옮긴 페이지를 또 옮기면 항목을 이어 붙이지 말고 기존 항목의 목적지를 고친다(연쇄 금지). 레포 안의 링크는 새 경로로 고치고, README처럼 이미 배포된 URL은 `docsAnchors`의 `LEGACY_URLS`가 옛 형태 그대로 계속 검사한다. 이 규칙은 `docsMoves` 테스트가 강제한다.
+**페이지를 옮기거나 없앨 때**: 옛 URL을 `docs/.vitepress/moves.json`의 `pages`에 `"옛 경로": "새 경로"`로 추가하고 `node scripts/docs-redirects.mjs --write`로 `docs/vercel.json`을 다시 만든다. 항목 하나가 EN·KO·`.md` 네 개의 308 리다이렉트가 된다. 이미 옮긴 페이지를 또 옮기면 항목을 이어 붙이지 말고 기존 항목의 목적지를 고친다(연쇄 금지). 레포 안의 링크는 새 경로로 고치고, README처럼 이미 배포된 URL 중 `#fragment`가 있는 것은 `docsAnchors`의 `LEGACY_URLS`에 넣어 옛 형태 그대로 계속 검사한다. fragment가 없는 URL은 넣지 않는다(`LEGACY_URLS`는 fragment만 보므로 항상 실패한다). 그 경우는 `docsMoves`가 목적지 페이지가 있는지 지킨다. 이 규칙은 `docsMoves` 테스트가 강제한다.
 
 ## 6. 미디어
 
@@ -187,7 +188,7 @@ URL 접두사가 곧 섹션이다. slug는 UI 위치가 아니라 대상 이름�
 ::: info Two testing paths
 This guide covers the **manual review path**: CI delivers the build; people do the testing.
 
-For automated testing where an LLM agent controls the simulator, see [MCP in CI/CD](/automation/mcp-ci). That is a separate, experimental feature.
+For automated testing where an LLM agent controls the simulator, see [Exploratory runs in CI](/ai-agents/exploratory-runs). That is a separate, experimental feature.
 :::
 ```
 
@@ -195,7 +196,7 @@ For automated testing where an LLM agent controls the simulator, see [MCP in CI/
 ::: info 두 가지 테스트 경로
 이 가이드는 **수동 리뷰 경로**를 다룹니다. CI가 빌드를 전달하고, 팀원이 직접 테스트하는 방식입니다.
 
-LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI/CD에서 MCP 활용](/ko/automation/mcp-ci)을 참고하세요. 이는 별도의 실험적 기능입니다.
+LLM 에이전트가 시뮬레이터를 자동으로 조작하는 방식은 [CI에서 탐색적 실행](/ko/ai-agents/exploratory-runs)을 참고하세요. 이는 별도의 실험적 기능입니다.
 :::
 ```
 

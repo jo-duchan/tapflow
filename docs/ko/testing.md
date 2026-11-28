@@ -1,11 +1,13 @@
 ---
-title: 앱 테스트
+title: 수동 QA
 description: 팀원이 브라우저로 빌드를 테스트하는 방법입니다. App Center에서 빌드를 고르고 QA 세션에서 시뮬레이터나 에뮬레이터를 직접 조작한 뒤 결과를 남깁니다.
 ---
 
 <a id="대시보드-개요"></a>
 
-# 앱 테스트
+# 수동 QA {#test-apps}
+
+<a id="앱-테스트"></a>
 
 이 섹션은 브라우저로 빌드를 확인하는 팀원을 위한 안내입니다. tapflow 자체는 설치할 것이 없고 운영자에게 받은 tapflow 대시보드 주소와 계정만 있으면 됩니다. 운영자가 Tailscale로 대시보드를 열어 두었다면 Tailscale 앱도 설치하세요([Tailscale](/ko/operate/external-access#tailscale-권장)).
 

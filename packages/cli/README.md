@@ -248,7 +248,7 @@ Full docs: **[www.tapflow.dev](https://www.tapflow.dev)**
 
 - **Guides** — [Quick Start](https://www.tapflow.dev/get-started/quick-start) · [Environment Setup](https://www.tapflow.dev/operate/environment-setup) · [Self-Hosting](https://www.tapflow.dev/operate/deployment) · [Uploading Builds (CI/CD)](https://www.tapflow.dev/testing/app-center) · [Troubleshooting](https://www.tapflow.dev/troubleshooting)
 - **Reference** — [CLI](https://www.tapflow.dev/reference/cli) · [Configuration](https://www.tapflow.dev/reference/configuration) · [REST API](https://www.tapflow.dev/reference/api) · [Security & Privacy](https://www.tapflow.dev/reference/security)
-- **AI Agent** — [MCP Server](https://www.tapflow.dev/automation/mcp-server)
+- **AI Agent** — [MCP Server](https://www.tapflow.dev/ai-agents/mcp-server)
 
 ## Contributing
 
