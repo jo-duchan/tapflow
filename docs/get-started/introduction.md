@@ -100,7 +100,7 @@ Some pages carry an **Experimental** or **Deprecated** banner at the top, and th
 - **Deprecated**: the feature still works but will be removed. The banner links to what replaces it.
 - **Stable**: a change adds to the feature rather than altering it. Names, arguments and what a field means (its unit or coordinate space, say) stay as they are. Changing something that already exists goes through Deprecated first.
 
-Where a stable feature carries an experimental one, that part follows the experimental feature's status. The content of a flow passed to the MCP tool `run_flow`, for example, follows the status of the [Flow reference](/automation/flows), and `connect_device`'s `capture` option and the replies while capturing follow [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
+Where a stable feature carries an experimental one, that part follows the experimental feature's status. This will hold for the MCP server once it is stable: the content of a flow passed to its `run_flow` tool will still follow the status of the [Flow reference](/automation/flows), and `connect_device`'s `capture` option and the replies while capturing will follow [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
 
 ## Next steps {#next-steps}
 
