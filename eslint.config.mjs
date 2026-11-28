@@ -56,12 +56,15 @@ const effectFetchSelectors = ['useEffect', 'useLayoutEffect'].flatMap((hook) =>
 // dozens of files use one, which is why `vitest/require-top-level-describe` (it flags hooks too) is not
 // used. Out of reach: an `it` imported under another name, a `test.extend()` fixture, and an `it`
 // inside a top-level helper that a describe calls (flagged, though it runs inside one). None exists.
+// Every callee shape a test or suite call takes, for either side alike: `x()`, up to three modifiers
+// (`x.concurrent.skip()`), and an `.each` called as a factory (`x.each([])()`) or as a tag
+// (`x.each\`\`()`), each with modifiers too. One list for both sides, so a form recognised for tests
+// is recognised for suites as well and neither drifts from the other.
+const calledAs = (names) => ['callee.name', ...['callee', 'callee.callee', 'callee.tag'].flatMap((base) =>
+  [1, 2, 3].map((depth) => `${base}${'.object'.repeat(depth)}.name`))]
+  .map((path) => `[${path}=/^(${names})$/]`).join(', ')
 const topLevelTestSelector = {
-  selector: [
-    'CallExpression',
-    ':matches([callee.name=/^(it|test)$/], [callee.object.name=/^(it|test)$/], [callee.object.object.name=/^(it|test)$/], [callee.callee.object.name=/^(it|test)$/], [callee.callee.object.object.name=/^(it|test)$/], [callee.tag.object.name=/^(it|test)$/])',
-    ':not(CallExpression[callee.name=/^(describe|suite)$/] *, CallExpression[callee.object.name=/^(describe|suite)$/] *, CallExpression[callee.callee.object.name=/^(describe|suite)$/] *)',
-  ].join(''),
+  selector: `CallExpression:matches(${calledAs('it|test')}):not(CallExpression:matches(${calledAs('describe|suite')}) *)`,
   message: 'Put the test inside a describe() named for the behaviour it checks, as the rest of the suite does.',
 }
 
