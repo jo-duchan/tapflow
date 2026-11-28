@@ -8,11 +8,11 @@ tapflow is a mobile QA platform for the whole team. Test by hand in the browser,
 
 **tapflow Core** is the shared infrastructure on machines you already own, with devices on your team's Macs and the relay beside them: devices, sessions, UI trees, builds, run records, and resource management. It is the name for the layer everything shares, not a separate package, product, or tier. Everything in tapflow is MIT-licensed open source.
 
-Manual QA, AI agents (via MCP), and Automation are three ways to use it:
+Manual QA, AI Agent QA (via MCP), and Automation QA are three ways to use it:
 
 - **Manual QA** (the browser dashboard) — a person tests on a real simulator or emulator.
-- **AI agents (via MCP)** — an LLM agent drives a device through the MCP server, in the same session a person can open and watch.
-- **Automation** (the flow runner) — deterministic flows replayed as regression tests, e.g. `tapflow flow run login.yaml` in CI.
+- **AI Agent QA** (via MCP) — an LLM agent drives a device through the MCP server, in the same session a person can open and watch.
+- **Automation QA** (the flow runner) — deterministic flows replayed as regression tests, e.g. `tapflow flow run login.yaml` in CI.
 
 Each is useful alone, and what sets tapflow apart is how they connect: a failed run is a record a person or an agent can read, an agent can author a flow through MCP and replay it, and what a person tests becomes a flow (Flow Capture, below). Those connections are possible because all three share the same session, app, and runtime: an agent's session is the same session on the same device, and a person can open it and watch live. Appium and similar tools start a separate test session with its own driver; tapflow reads the UI tree from the session people and agents already use.
 

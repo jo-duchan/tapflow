@@ -25,8 +25,8 @@ Remove friction. Anyone on the team can open a browser and test the app on a rea
 and resource management. It is a concept, not a package. A team can start from any of the three:
 
 - **Manual QA**: CI uploads a build → the team tests in the browser. The most mature path.
-- **AI agents via MCP** (experimental): an LLM agent drives a device through `@tapflowio/mcp-server`.
-- **Automation** (experimental): the flow runner replays YAML flows deterministically, mainly in CI.
+- **AI Agent QA** (experimental): an LLM agent drives a device through `@tapflowio/mcp-server`.
+- **Automation QA** (experimental): the flow runner replays YAML flows deterministically, mainly in CI.
 
 Don't design for a single entry point. Every change keeps the hard line in [VISION.md](./VISION.md):
 replay calls no model, tapflow saves agent or model output as a flow only after a deterministic replay passes, and
@@ -58,7 +58,7 @@ For the product direction and philosophy behind these — start anywhere, replay
   - **A push to `docs-production` is a production deploy of tapflow.dev.** Confirm before every one.
     The only manual push is a docs hotfix: a commit already on `main`, cherry-picked, with its diff
     checked for pages about unreleased features — procedure in CONTRIBUTING, "Docs follow releases".
-  - **Avoid breaking changes.** If unavoidable, report to the user and get approval before proceeding. Breaking change scope: public API / interface signature changes, DB schema changes, WebSocket message protocol changes, CLI command / flag changes.
+  - **Avoid breaking changes.** If unavoidable, report to the user and get approval before proceeding. Breaking change scope: public API / interface signature changes, DB schema changes, WebSocket message protocol changes, CLI command / flag changes, the flow file format, and MCP tool names, arguments and response fields (including what a field means, such as its unit or coordinate space). Experimental features are in scope too: the docs let them change in a minor release, but each such change still needs this approval and a CHANGELOG entry.
 
 ---
 
