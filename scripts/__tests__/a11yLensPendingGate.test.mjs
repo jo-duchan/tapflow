@@ -147,6 +147,12 @@ describe('a skipped check the session has not followed up', () => {
   it('still blocks when the transcript carries no timestamp to start from', () => {
     expect(blocked([JSON.stringify({ type: 'summary' })], { start: null })).toBe(true)
   })
+
+  it('still blocks when the start timestamp is one it cannot read', () => {
+    // BSD `touch -d` rejects an offset; GNU reads it as a time before the record. Both must block.
+    expect(blocked([bash('git status')], { start: '2000-01-01T00:00:00.000+09:00' })).toBe(true)
+    expect(blocked([bash('git status')], { start: 'not a time' })).toBe(true)
+  })
 })
 
 describe('a record left by an earlier session', () => {

@@ -89,9 +89,10 @@ docs-only. Stopping a second time passes, so the block is a prompt rather than a
 **A skipped accessibility check is followed up before the session ends.** The `a11y-lens`
 pre-commit job never blocks on its own infrastructure, so a timeout passes with the same ✔️ as a
 clean run (#827). a11y-lens records the files it could not review, and
-`.claude/hooks/a11y-lens-pending-gate.sh` blocks finishing while any recorded *during this session*
-remain, until `pnpm exec a11y-lens check --pending` has run in the session after the latest one was
-recorded. Records an earlier session left do not block a session that committed nothing.
+`.claude/hooks/a11y-lens-pending-gate.sh` blocks finishing while any written since the session's
+first transcript line remain, until `pnpm exec a11y-lens check --pending` has run in the session after
+the latest one was recorded. Records written before the session started do not block it; one written
+meanwhile by a concurrent session in another worktree still does.
 Stopping a second time passes.
 
 When starting a **new** task that requires code changes (not when continuing work on an existing branch):
