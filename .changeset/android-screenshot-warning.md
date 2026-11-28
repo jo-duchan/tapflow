@@ -2,6 +2,6 @@
 "@tapflowio/android-agent": patch
 ---
 
-A screenshot taken on a device with several displays is a PNG again: `screencap` writes a warning ahead of the image there, and the warning is cut from the bytes, so every consumer of a screenshot reads an image rather than text (#1118).
+<!-- changelog: internal — screenshot warning strip moved into AdbWrapper; no observable change -->
 
-Which display was captured is still the device's choice; pinning it is a separate change.
+The leading warning a multi-display device writes ahead of the PNG is now cut where the bytes are read, in `AdbWrapper.screenshot`, instead of in the MCP `screenshot:request` handler. Every consumer of a screenshot already went through that handler, so no user-visible behaviour changes.
