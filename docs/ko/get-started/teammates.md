@@ -79,7 +79,7 @@ Viewer가 **Upload build**나 **Add App**을 누르면 QA나 Developer 권한이
 
 ## 다음 단계 {#next-steps}
 
-- [앱 테스트](/ko/testing): App Center와 QA 세션에서 쓸 수 있는 기능 전체를 안내합니다.
+- [수동 QA](/ko/testing): App Center와 QA 세션에서 쓸 수 있는 기능 전체를 안내합니다.
 - [QA 세션](/ko/testing/qa-session): Mac과 기기를 고르는 화면, 정보 카드, 세션이 끝나는 경우를 설명합니다.
 - [App Center](/ko/testing/app-center): 빌드 목록, 리뷰 상태, 검색과 필터를 다룹니다.
 - [로그인과 계정 문제 해결](/ko/troubleshooting/accounts): 초대 링크나 비밀번호 재설정 링크가 만료되었을 때 볼 페이지입니다.

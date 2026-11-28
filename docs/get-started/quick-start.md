@@ -157,7 +157,7 @@ A teammate outside your network needs a tunnel to reach the relay; see [External
 ## Next steps {#next-steps}
 
 - [For teammates](/get-started/teammates): how an invited teammate signs up and tests. Send it along with the link.
-- [Test apps](/testing): everything a QA Session offers — deep links, network control, recordings, comments and more.
+- [Manual QA](/testing): everything a QA Session offers — deep links, network control, recordings, comments and more.
 - [Upload from CI](/operate/ci-distribution): let CI upload builds instead of doing it by hand.
 - [Deployment options](/operate/deployment): run the relay on its own host, or add more Macs.
 - [Troubleshooting](/troubleshooting): when an install or a connection gets stuck, find the symptom here, along with your `tapflow doctor` output.

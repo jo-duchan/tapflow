@@ -1,7 +1,8 @@
 // A docs page that moves keeps its old URL, and every `#fragment` the site ever rendered keeps landing.
 //
 // The docs were reorganised by reader task in 2026-09 (`/guide/*` → `/get-started/`, `/testing/`,
-// `/operate/`, `/automation/`). Old URLs are in READMEs published to npm, in shipped agent code, in
+// `/operate/`, `/automation/`), and in 2026-11 by the three ways to use tapflow (`/ai-agents/` beside
+// `/testing/` and `/automation/`). Old URLs are in READMEs published to npm, in shipped agent code, in
 // bookmarks and in other people's pages, none of which a docs PR can edit. Three things hold them:
 //
 //  - comment/`<pre>` stripping removed from render(): the fixture's commented-out and fenced ids count as present.

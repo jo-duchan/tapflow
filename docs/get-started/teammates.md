@@ -79,7 +79,7 @@ If you forget your password, ask an Admin. The Admin clicks **Reset pwd** in **S
 
 ## Next steps {#next-steps}
 
-- [Test apps](/testing): every feature App Center and a QA Session offer.
+- [Manual QA](/testing): every feature App Center and a QA Session offer.
 - [QA Session](/testing/qa-session): picking a Mac and a device, the info card, and why a session ends.
 - [App Center](/testing/app-center): the build list, review status, search and filters.
 - [Sign-in & accounts](/troubleshooting/accounts): what to do when an invite or password-reset link has expired.

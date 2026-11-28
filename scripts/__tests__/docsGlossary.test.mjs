@@ -46,6 +46,9 @@ const FORBIDDEN = [
   { re: /디바이스/g, use: '기기' },
   { re: /디렉토리/g, use: '디렉터리' },
   { re: /QA\s?팀/g, use: '팀원 / 팀 전체' },
+  // A flow's step. Manual Flow Capture said 단계 from the start; the MCP and flow pages said 스텝.
+  // The flows page's `## 단계 {#스텝}` keeps its frozen id, which the `{#...}` strip leaves alone.
+  { re: /스텝/g, use: '단계' },
   // A Latin word on its own. `tapflow-agent` and `agent.lean` are not words here. `/` is not a
   // boundary: link targets are already stripped, so `relay/agent` in prose is two words.
   { re: /(?<![A-Za-z0-9_.-])relays?(?![A-Za-z0-9_-])/gi, use: '릴레이' },
@@ -62,8 +65,8 @@ const ALLOW = [
   { text: '**AGENT ALREADY RUNNING**', files: ['troubleshooting/install-and-agents.md'], reason: 'literal CLI output the reader will see' },
   { text: '에이전트 (Agents)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '릴레이 (Relay)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
-  { text: '**Coding agent is driving it**', files: ['automation/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
-  { text: '**Agent activity**', files: ['automation/mcp-server.md'], reason: 'AI session watch page panel title, shown as-is in the dashboard' },
+  { text: '**Coding agent is driving it**', files: ['ai-agents/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
+  { text: '**Agent activity**', files: ['ai-agents/mcp-server.md'], reason: 'AI session watch page panel title, shown as-is in the dashboard' },
   { text: '디바이스 팜', files: ['reference/sustainability.md'], reason: 'industry term (device farm); "기기 팜" is not a phrase anyone searches for' },
 ]
 
@@ -139,11 +142,13 @@ describe('docs glossary (docs/AGENTS.md 용어집)', () => {
       '',
       '디바이스를 고르고 relay가 agent를 부릅니다. 디렉토리와 QA팀.',
       'relay/agent 구간',
+      '## 단계 {#스텝}',
+      '스텝을 고릅니다.',
     ].join('\n')
     const { found } = findViolations(body, 'operate/agents.md')
     expect(found.map((v) => [v.line, v.word])).toEqual([
       [13, '디바이스'], [13, '디렉토리'], [13, 'QA팀'], [13, 'relay'], [13, 'agent'],
-      [14, 'relay'], [14, 'agent'],
+      [14, 'relay'], [14, 'agent'], [16, '스텝'],
     ])
   })
 

@@ -14,7 +14,7 @@ A flow is a UI test scenario written in YAML, replayed deterministically by `tap
 ::: info Three ways to use tapflow
 There are three ways to use tapflow, all on the same devices and sessions: **Manual QA** in the browser dashboard, where your team tests by hand; **AI agents**, which drive a device through MCP; and **Automation**, the flow runner covered here, whose main stage is CI/CD.
 
-Flows are not a language you hand-write from scratch — they are an artifact a coding agent generates or a recording produces. To author them with an agent, see [MCP in CI/CD](/automation/mcp-ci).
+Flows are not a language you hand-write from scratch — they are an artifact a coding agent generates or a recording produces. To author them with an agent, see [Run flows in CI](/automation/ci).
 :::
 
 ## Flow file structure
@@ -329,7 +329,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 | Option | Description |
 |--------|-------------|
 | `--relay <url>` | Relay URL (default `ws://localhost:4000`) |
-| `--token <token>` | Personal access token (PAT) for a remote relay (or the `TAPFLOW_TOKEN` env var, or the [token file](/automation/mcp-server#token-file)). Use an API-type token from the dashboard (`view, builds:write`) |
+| `--token <token>` | Personal access token (PAT) for a remote relay (or the `TAPFLOW_TOKEN` env var, or the [token file](/ai-agents/mcp-server#token-file)). Use an API-type token from the dashboard (`view, builds:write`) |
 | `--device <name>` | Target device by name. Boots it when shut down. |
 | `--session <id>` | Session id of the target device. Use it when several devices share a name and `--device` cannot pick one. |
 | `--build <id>` | Build under test. Installed before the run; the `launchApp` step launches it. |
@@ -343,7 +343,7 @@ tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 
 The `launchApp` step names no build and launches the one passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
 
-When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. How the address is chosen, and who can watch, are the same as for the [MCP server](/automation/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
+When the run starts, the runner prints a dashboard link on a `watch this run:` line. Open it to watch, live, the flow driving the device; the watch ends when the run does. In CI the line is not printed (detected from the `CI` environment variable, Jenkins's `JENKINS_URL` or Azure Pipelines' `TF_BUILD`), because the link shows the relay's address and would stay in a public repository's log. How the address is chosen, and who can watch, are the same as for the [MCP server](/ai-agents/mcp-server#watch-the-device), with the `--relay` address in place of `TAPFLOW_RELAY_URL`.
 
 ### Choosing flows {#choosing-flows}
 
@@ -445,4 +445,4 @@ The exit-code contract makes the job fail when a step fails (`1` or `2`). `if: a
 
 The same flow engine runs through the MCP `run_flow` tool. A coding agent authors a scenario once while exploring the app, then replays that flow deterministically afterward. Exploratory work goes through the individual MCP tools; verified scenarios replay through `run_flow` — a hybrid of the two.
 
-Authoring by an agent and replaying with a deterministic runner is covered in more depth in [MCP in CI/CD](/automation/mcp-ci).
+Authoring by an agent and replaying with a deterministic runner is covered in more depth in [Run flows in CI](/automation/ci).

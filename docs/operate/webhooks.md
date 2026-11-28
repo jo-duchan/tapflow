@@ -16,7 +16,7 @@ Someone reviews the build in App Center
 ::: info Manual review
 This guide covers **manual review**: CI delivers the build, and people test it.
 
-To have CI replay flows, or to let an LLM agent drive the device, see [MCP in CI/CD](/automation/mcp-ci). Both are experimental.
+To have CI replay flows, or to let an LLM agent drive the device, see [Run flows in CI](/automation/ci) and [Exploratory runs in CI](/ai-agents/exploratory-runs). Both are experimental.
 :::
 
 ## Register an endpoint

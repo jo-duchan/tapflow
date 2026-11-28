@@ -1,11 +1,11 @@
 ---
-title: Test apps
+title: Manual QA
 description: "How teammates test builds in the browser: pick a build in App Center, drive a simulator or emulator in a QA Session, and leave what you found."
 ---
 
 <a id="dashboard-overview"></a>
 
-# Test apps
+# Manual QA {#test-apps}
 
 This section is for teammates who check builds in the browser. tapflow itself needs nothing installed: all you need is the tapflow dashboard address and an account from whoever runs tapflow. If they open the dashboard to you through Tailscale, install the Tailscale app too ([Tailscale](/operate/external-access#tailscale-recommended)).
 

@@ -1,10 +1,17 @@
-# MCP in CI/CD
+---
+title: Run flows in CI
+description: "Replay saved flows in CI with tapflow flow run, with no LLM calls, and author those flows with a coding agent over MCP."
+---
+
+# Run flows in CI
+
+<a id="mcp-in-ci-cd"></a>
 
 ::: warning Experimental
 tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) are experimental. The manual QA dashboard is the most mature part of tapflow; these two are still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
 :::
 
-Using an agent with the flow runner splits the work into two stages: an LLM agent explores the app and **authors** a scenario, and a deterministic runner **replays** it. The guiding principle is simple — an LLM is involved only at authoring time, and replay is deterministic. Exploratory runs, covered below, are the one exception: they read the screen with an LLM on every run.
+Using an agent with the flow runner splits the work into two stages: an LLM agent explores the app and **authors** a scenario, and a deterministic runner **replays** it. The guiding principle is simple — an LLM is involved only at authoring time, and replay is deterministic. Exploratory runs, covered on [their own page](/ai-agents/exploratory-runs), are the one exception: they read the screen with an LLM on every run.
 
 That distinction changes CI. If an LLM judges the screen on every run, the result varies run to run and you pay for API calls each time. Save a verified scenario as a [flow](/automation/flows) instead, and CI replays that flow with no LLM calls — idempotent, and free.
 
@@ -76,39 +83,15 @@ The agent reads screen elements with `query_ui_tree`, drives them with `tap` and
 
 You can use deterministic replay from within an agent session too. The `run_flow` tool replays a saved flow through the same deterministic engine, so an agent goes through the individual MCP tools while exploring and replays a verified scenario through `run_flow` — a hybrid of the two.
 
-## Exploratory runs — optional
-
-When you are exploring a new screen or debugging a flow, you can let an LLM judge the screen directly in CI. This path reads the screen with an LLM on every run, so it is not deterministic and it costs API calls, but it is useful for quickly checking a scenario you have not yet pinned into a flow.
-
-This path needs a few more prerequisites.
-
-| Requirement | Notes |
-|-------------|-------|
-| tapflow relay (always-on) | A Mac with the agent connected. Can be a dedicated Mac mini on your LAN. |
-| `TAPFLOW_TOKEN` | An **API**-type personal access token (PAT, `view, builds:write`), created in **Settings → Tokens** (shown to Admins, Developers and QA). Store as a CI secret. |
-| `ANTHROPIC_API_KEY` | Required to run `claude` non-interactively. Store as a CI secret. |
-| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
-
-```yaml
-      - name: Exploratory check
-        env:
-          TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
-          TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          WORKSPACE: ${{ github.workspace }}
-        run: |
-          claude --mcp-config .mcp.json -p "
-            List available devices and connect to a booted iOS simulator.
-            Install the build at $WORKSPACE/MyApp.app.zip and launch the app.
-            Take a screenshot and verify the main screen loaded correctly.
-            If there are error messages or blank screens, describe the issue and exit with a failure.
-          "
-```
-
-Exploratory prompts work best when they describe outcomes. "Verify the home screen loaded" holds up better than "tap the third item in the list" when the UI changes. For a regression test you run repeatedly, though, pinning the confirmed scenario into a flow is deterministic and free.
-
 ## Tips
 
 - **Flows for regression, coding agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an agent.
 - **The `env` values in `.mcp.json` are overridden at runtime by the shell environment**, so secrets never land in the repo.
 - **One session per device.** The relay routes by session, so running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.
+
+## Moved sections {#moved-sections}
+
+Sections that used to be on this page now live on these pages.
+
+- [Exploratory runs in CI](/ai-agents/exploratory-runs)
+  - <a id="exploratory-runs-—-optional" data-moved-to="/ai-agents/exploratory-runs"></a>[Exploratory runs in CI](/ai-agents/exploratory-runs)

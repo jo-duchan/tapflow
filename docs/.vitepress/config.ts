@@ -27,8 +27,9 @@ function nfcSlugify(str: string): string {
 }
 
 // Sections follow what the reader is doing, and a page's URL prefix names its section
-// (`/get-started/`, `/testing/`, `/operate/`, `/automation/`, `/reference/`, `/troubleshooting/`).
-// One sidebar for
+// (`/get-started/`, `/testing/`, `/ai-agents/`, `/automation/`, `/operate/`, `/reference/`,
+// `/troubleshooting/`). The three QA sections are VISION's three ways to use tapflow, side by side
+// because a team can start from any of them. One sidebar for
 // every page rather than one per section, so each reader can see the other's pages.
 //
 // `koSidebar` must mirror this one — same groups, same order, every link prefixed with `/ko` —
@@ -44,7 +45,7 @@ const enSidebar = [
     ],
   },
   {
-    text: 'Test apps',
+    text: 'Manual QA',
     items: [
       { text: 'Overview', link: '/testing' },
       { text: 'App Center', link: '/testing/app-center' },
@@ -52,6 +53,7 @@ const enSidebar = [
         // The group label is the QA Session page itself, so the page is not listed a second time.
         text: 'QA Session',
         link: '/testing/qa-session',
+        collapsed: true,
         items: [
           { text: 'Device controls', link: '/testing/device-controls' },
           { text: 'Deep links', link: '/testing/deep-links' },
@@ -62,6 +64,22 @@ const enSidebar = [
           { text: 'Flow Capture', link: '/testing/flow-capture' },
         ],
       },
+    ],
+  },
+  {
+    text: 'AI Agent QA',
+    items: [
+      { text: 'MCP server', link: '/ai-agents/mcp-server' },
+      { text: 'AI Agent Flow Capture', link: '/ai-agents/agent-flow-capture' },
+      { text: 'Exploratory runs in CI', link: '/ai-agents/exploratory-runs' },
+    ],
+  },
+  {
+    text: 'Automation QA',
+    items: [
+      { text: 'Flow reference', link: '/automation/flows' },
+      { text: 'Flow Runs', link: '/automation/runs' },
+      { text: 'Run flows in CI', link: '/automation/ci' },
     ],
   },
   {
@@ -104,17 +122,6 @@ const enSidebar = [
         items: [
           { text: 'Upload from CI', link: '/operate/ci-distribution' },
           { text: 'Review webhooks', link: '/operate/webhooks' },
-        ],
-      },
-      {
-        text: 'AI agents & automation (experimental)',
-        collapsed: true,
-        items: [
-          { text: 'MCP server', link: '/automation/mcp-server' },
-          { text: 'AI Agent Flow Capture', link: '/automation/agent-flow-capture' },
-          { text: 'Flow reference', link: '/automation/flows' },
-          { text: 'Flow Runs', link: '/automation/runs' },
-          { text: 'MCP in CI/CD', link: '/automation/mcp-ci' },
         ],
       },
     ],
@@ -161,13 +168,14 @@ const koSidebar = [
     ],
   },
   {
-    text: '앱 테스트',
+    text: '수동 QA',
     items: [
       { text: '개요', link: '/ko/testing' },
       { text: 'App Center', link: '/ko/testing/app-center' },
       {
         text: 'QA 세션',
         link: '/ko/testing/qa-session',
+        collapsed: true,
         items: [
           { text: '기기 조작', link: '/ko/testing/device-controls' },
           { text: '딥 링크', link: '/ko/testing/deep-links' },
@@ -178,6 +186,22 @@ const koSidebar = [
           { text: 'Flow Capture', link: '/ko/testing/flow-capture' },
         ],
       },
+    ],
+  },
+  {
+    text: 'AI 에이전트 QA',
+    items: [
+      { text: 'MCP 서버', link: '/ko/ai-agents/mcp-server' },
+      { text: 'AI 에이전트 Flow Capture', link: '/ko/ai-agents/agent-flow-capture' },
+      { text: 'CI에서 탐색적 실행', link: '/ko/ai-agents/exploratory-runs' },
+    ],
+  },
+  {
+    text: '자동화 QA',
+    items: [
+      { text: '플로우 레퍼런스', link: '/ko/automation/flows' },
+      { text: '플로우 실행 기록 (Flow Runs)', link: '/ko/automation/runs' },
+      { text: 'CI에서 플로우 실행', link: '/ko/automation/ci' },
     ],
   },
   {
@@ -222,17 +246,6 @@ const koSidebar = [
           { text: '리뷰 웹훅', link: '/ko/operate/webhooks' },
         ],
       },
-      {
-        text: 'AI 에이전트·자동화 (실험적)',
-        collapsed: true,
-        items: [
-          { text: 'MCP 서버', link: '/ko/automation/mcp-server' },
-          { text: 'AI 에이전트 Flow Capture', link: '/ko/automation/agent-flow-capture' },
-          { text: '플로우 레퍼런스', link: '/ko/automation/flows' },
-          { text: '플로우 실행 기록 (Flow Runs)', link: '/ko/automation/runs' },
-          { text: 'CI/CD에서 MCP 활용', link: '/ko/automation/mcp-ci' },
-        ],
-      },
     ],
   },
   {
@@ -266,6 +279,24 @@ const koSidebar = [
     ],
   },
 ]
+
+// The top nav holds one link into the docs, not one per section: the sidebar already lists every
+// section, and the home page (no sidebar) needs only a way in. The link is active on any page under a
+// prefix the sidebar uses, read from the sidebar so a new section cannot be left out. `(/|$)` because a
+// section overview is a sibling file (`testing.md` → `/testing`), not `testing/index.md`.
+type SidebarItem = { link?: string; items?: SidebarItem[] }
+function docsActiveMatch(sidebar: SidebarItem[], locale = ''): string {
+  const prefixes = new Set<string>()
+  const walk = (items: SidebarItem[]) => {
+    for (const item of items) {
+      const m = item.link?.match(/^(\/ko)?\/([^/]+)/)
+      if (m) prefixes.add(m[2])
+      if (item.items) walk(item.items)
+    }
+  }
+  walk(sidebar)
+  return `^${locale}/(${[...prefixes].join('|')})(/|$)`
+}
 
 export default withMermaid(defineConfig({
   title: 'tapflow',
@@ -305,12 +336,7 @@ export default withMermaid(defineConfig({
       lang: 'en-US',
       themeConfig: {
         nav: [
-          // `^/testing` without a slash also matches the section
-          // overview, which is the sibling file `testing.md` rather than `testing/index.md`.
-          { text: 'Get started', link: '/get-started/introduction', activeMatch: '^/get-started/' },
-          { text: 'Test apps', link: '/testing', activeMatch: '^/testing(/|$)' },
-          { text: 'Operate', link: '/operate/requirements', activeMatch: '^/(operate|automation)/' },
-          { text: 'Reference', link: '/reference/cli', activeMatch: '^/reference/' },
+          { text: 'Docs', link: '/get-started/introduction', activeMatch: docsActiveMatch(enSidebar) },
           { text: 'Changelog', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: enSidebar,
@@ -321,10 +347,7 @@ export default withMermaid(defineConfig({
       lang: 'ko-KR',
       themeConfig: {
         nav: [
-          { text: '시작하기', link: '/ko/get-started/introduction', activeMatch: '^/ko/get-started/' },
-          { text: '앱 테스트', link: '/ko/testing', activeMatch: '^/ko/testing(/|$)' },
-          { text: '운영', link: '/ko/operate/requirements', activeMatch: '^/ko/(operate|automation)/' },
-          { text: '레퍼런스', link: '/ko/reference/cli', activeMatch: '^/ko/reference/' },
+          { text: '문서', link: '/ko/get-started/introduction', activeMatch: docsActiveMatch(koSidebar, '/ko') },
           { text: '변경 기록', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
         sidebar: koSidebar,

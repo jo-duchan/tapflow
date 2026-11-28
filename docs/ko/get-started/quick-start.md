@@ -166,7 +166,7 @@ tapflow가 파일에서 bundle ID, 버전, 빌드 번호를 읽어 앱 항목을
 ## 다음 단계 {#next-steps}
 
 - [팀원 시작 가이드](/ko/get-started/teammates): 초대받은 팀원이 가입하고 테스트하는 과정입니다. 링크와 함께 보내 주세요.
-- [앱 테스트](/ko/testing): QA 세션에서 쓸 수 있는 기능(딥 링크, 네트워크 제어, 녹화, 댓글 등)을 안내합니다.
+- [수동 QA](/ko/testing): QA 세션에서 쓸 수 있는 기능(딥 링크, 네트워크 제어, 녹화, 댓글 등)을 안내합니다.
 - [CI에서 빌드 올리기](/ko/operate/ci-distribution): 빌드를 손으로 올리지 않고 CI가 올리게 합니다.
 - [배포 방식 선택](/ko/operate/deployment): 릴레이를 따로 두거나 Mac을 늘리는 구성을 고릅니다.
 - [문제 해결](/ko/troubleshooting): 설치나 연결이 막히면 `tapflow doctor` 결과와 함께 여기서 증상을 찾습니다.

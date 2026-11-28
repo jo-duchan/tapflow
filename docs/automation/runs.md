@@ -61,7 +61,7 @@ A run across several devices (`--parallel`) lists them at the top of its page, e
 
 ## Recording runs (operator) {#recording}
 
-- Give `tapflow flow run` an API-type token (`view, builds:write`) and every run is recorded. Pass it with `--token` or `TAPFLOW_TOKEN`, or keep it in the [token file](/automation/mcp-server#token-file). The details are in the [Flow reference's run records](/automation/flows#run-records).
+- Give `tapflow flow run` an API-type token (`view, builds:write`) and every run is recorded. Pass it with `--token` or `TAPFLOW_TOKEN`, or keep it in the [token file](/ai-agents/mcp-server#token-file). The details are in the [Flow reference's run records](/automation/flows#run-records).
 - Add `--no-record` to skip recording.
 - Video retention is set in the **Flow run videos** card of **Settings → Default** (Admin): how many days passed flows' videos are kept and how much storage videos may use, with what is in use now. The defaults are 3 days and 20 GB. A failed flow's video is kept as long as its run unless storage runs out: when storage is full the oldest passed videos go first, and failed ones only after every passed one has gone.
 - When you run it locally, the runner prints a link to the run's page when it ends. In CI it prints the run's id only, so the relay's address stays out of the log.
@@ -70,5 +70,5 @@ A run across several devices (`--parallel`) lists them at the top of its page, e
 ## Related {#related}
 
 - [Flow reference](/automation/flows): writing flows and the `tapflow flow run` options
-- [MCP in CI/CD](/automation/mcp-ci): running flows in CI
+- [Run flows in CI](/automation/ci): running flows in CI
 - [Runs in the REST API](/reference/api#runs): the endpoints that write and read run records
