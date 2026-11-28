@@ -10,7 +10,7 @@
 
 에이전트는 macOS에서 실행됩니다. iOS와 Android를 한 Mac에서 함께 실행할 수 있습니다. Android만 쓴다면 Windows에서도 실행할 수 있습니다([Windows](#windows)).
 
-- **Apple Silicon**(M 시리즈) macOS
+- Mac이라면 **Apple Silicon**(M 시리즈) macOS
 - Node.js ≥ 22
 
 ::: warning Intel Mac은 지원하지 않습니다
@@ -21,7 +21,7 @@ tapflow가 개발과 검증에 사용해온 환경이 Apple Silicon입니다. In
 [#464](https://github.com/jo-duchan/tapflow/issues/464)에서 다루고 있지만 아직 예정에 없습니다.
 유니버설 빌드가 필요하고, 메인테이너가 갖고 있지 않은 하드웨어에서 검증해야 합니다.
 
-릴레이에는 이 제약이 없습니다. **에이전트**를 실행하는 머신만 Apple Silicon이어야 합니다.
+릴레이에는 이 제약이 없습니다. **에이전트**를 실행하는 Mac만 Apple Silicon이어야 합니다.
 :::
 
 ### iOS

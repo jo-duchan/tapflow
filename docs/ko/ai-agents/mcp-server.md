@@ -1,36 +1,36 @@
 ---
 title: MCP 서버
-description: "@tapflowio/mcp-server를 설치하고 AI 에이전트에 연결합니다. AI 에이전트가 건네주는 링크로 에이전트가 조작하는 기기를 실시간으로 볼 수 있습니다."
+description: "@tapflowio/mcp-server를 설치하고 AI 에이전트에 연결합니다. AI 에이전트가 건네주는 링크로 AI 에이전트가 조작하는 기기를 실시간으로 볼 수 있습니다."
 status: experimental
 ---
 
 # MCP 서버
 
-`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
+`@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 AI 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
 
-세 문서는 이렇게 이어집니다. 여기서 AI 에이전트를 연결하고, [플로우 레퍼런스](/ko/automation/flows)에서 플로우 YAML 형식을 익힌 뒤, [CI에서 플로우 실행](/ko/automation/ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
+세 문서는 이렇게 이어집니다. 여기서 AI 에이전트를 연결하고, [플로우 레퍼런스](/ko/automation/flows)에서 플로우 YAML 형식을 익힌 뒤, [CI에서 플로우 실행](/ko/automation/ci)에서 둘을 합칩니다. AI 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
 
 ## 이럴 때 쓰세요
 
 **반복적인 자동화 테스트**에서 진가를 발휘합니다. 단발성 수동 확인은 여전히 직접 하는 게 빠릅니다.
 
-- **CI/CD 회귀 테스트** — 빌드마다 에이전트가 시뮬레이터를 부팅하고, 빌드를 설치하고, 주요 플로우를 순회하고, 스크린샷을 캡처해 회귀를 감지합니다. 사람이 개입할 필요가 없습니다. → [CI에서 탐색적 실행](/ko/ai-agents/exploratory-runs)
+- **CI/CD 회귀 테스트** — 빌드마다 AI 에이전트가 시뮬레이터를 부팅하고, 빌드를 설치하고, 주요 플로우를 순회하고, 스크린샷을 캡처해 회귀를 감지합니다. 사람이 개입할 필요가 없습니다. → [CI에서 탐색적 실행](/ko/ai-agents/exploratory-runs)
 - **다중 기기 매트릭스** — iPhone SE (iOS 16), iPhone 15 Pro (iOS 17), Android 에뮬레이터를 직접 전환하지 않고 동일한 플로우를 순차 실행할 수 있습니다.
-- **자연어 QA 스크립트** — 개발자가 아닌 QA·PM도 테스트 시나리오를 평문으로 작성하면 에이전트가 실행합니다. 셀렉터나 좌표 매핑이 불필요합니다.
+- **자연어 QA 스크립트** — 개발자가 아닌 QA·PM도 테스트 시나리오를 평문으로 작성하면 AI 에이전트가 실행합니다. 셀렉터나 좌표 매핑이 불필요합니다.
 
 ## 연결 구조
 
 ```text
-LLM 에이전트 (Claude Code 등)
+AI 에이전트 (Claude Code 등)
     ↓  MCP 프로토콜 (stdio)
 @tapflowio/mcp-server
     ↓  WebSocket + REST
 tapflow relay
     ↓  WebSocket
-Mac 에이전트 (iOS · Android)
+에이전트 (iOS · Android)
 ```
 
-MCP 서버는 LLM 에이전트와 자체 호스팅 릴레이를 연결하는 로컬 프로세스입니다. 앱 데이터는 네트워크 밖으로 나가지 않습니다.
+MCP 서버는 AI 에이전트와 자체 호스팅 릴레이를 연결하는 로컬 프로세스입니다. 앱 데이터는 네트워크 밖으로 나가지 않습니다.
 
 ## 사전 조건
 
@@ -145,7 +145,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 
 ## 일반적인 워크플로우
 
-LLM 에이전트는 보통 아래 순서로 도구를 호출합니다.
+AI 에이전트는 보통 아래 순서로 도구를 호출합니다.
 
 ```text
 get_testing_guide  → 무엇을 다루고 어떻게 보고할지 확인 (테스트 전에 한 번)
@@ -171,14 +171,14 @@ disconnect_device  → 세션 종료, 다른 사람이 기기를 쓸 수 있게 
 
 CI 파이프라인에서 실행하는 방법은 [CI에서 플로우 실행](/ko/automation/ci)을 참고하세요.
 
-## 에이전트가 받는 안내 {#agent-guidance}
+## AI 에이전트가 받는 안내 {#agent-guidance}
 
 MCP 서버는 AI 에이전트에게 두 가지 안내를 줍니다. 그래서 경우를 하나하나 적지 않고 "로그인 화면 테스트해 줘"라고만 요청해도 꼼꼼히 테스트합니다.
 
-- **서버 instructions**: 에이전트가 연결할 때 한 번 전달됩니다. 도구 호출 순서, 화면은 스크린샷보다 `query_ui_tree`로 읽기, 끝나면 기기 반납하기, 부팅 거절이나 확인되지 않은 입력이 무슨 뜻인지를 담습니다. MCP 서버 instructions를 지원하는 클라이언트가 이 내용을 에이전트 컨텍스트에 넣습니다. Claude Code와 VS Code가 지원하고, Gemini CLI는 신뢰한 폴더에서만 넣습니다. Codex는 tapflow 도구 묶음의 설명으로 보여 줍니다. 지원하지 않는 클라이언트를 위해 가장 중요한 두 규칙은 `connect_device` 설명에도 들어 있습니다.
-- **`get_testing_guide`**: 에이전트가 테스트 전에 부르는 도구입니다. 다룰 경우, 이 도구들로 테스트할 수 없는 것, 버그로 판단하기 전에 확인할 것, 검증된 경로를 플로우로 남기는 법, 보고 형식을 돌려줍니다.
+- **서버 instructions**: AI 에이전트가 연결할 때 한 번 전달됩니다. 도구 호출 순서, 화면은 스크린샷보다 `query_ui_tree`로 읽기, 끝나면 기기 반납하기, 부팅 거절이나 확인되지 않은 입력이 무슨 뜻인지를 담습니다. MCP 서버 instructions를 지원하는 클라이언트가 이 내용을 에이전트 컨텍스트에 넣습니다. Claude Code와 VS Code가 지원하고, Gemini CLI는 신뢰한 폴더에서만 넣습니다. Codex는 tapflow 도구 묶음의 설명으로 보여 줍니다. 지원하지 않는 클라이언트를 위해 가장 중요한 두 규칙은 `connect_device` 설명에도 들어 있습니다.
+- **`get_testing_guide`**: AI 에이전트가 테스트 전에 부르는 도구입니다. 다룰 경우, 이 도구들로 테스트할 수 없는 것, 버그로 판단하기 전에 확인할 것, 검증된 경로를 플로우로 남기는 법, 보고 형식을 돌려줍니다.
 
-instructions는 세션마다 약 400토큰이 듭니다. 테스트 가이드는 약 1,200토큰이고, 에이전트가 부를 때만 듭니다.
+instructions는 세션마다 약 400토큰이 듭니다. 테스트 가이드는 약 1,200토큰이고 AI 에이전트가 부를 때만 듭니다.
 
 ## AI 에이전트가 조작하는 기기 보기 {#watch-the-device}
 

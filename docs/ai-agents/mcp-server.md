@@ -6,31 +6,31 @@ status: experimental
 
 # MCP Server
 
-`@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible LLM agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
+`@tapflowio/mcp-server` exposes tapflow as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server. Claude Code, Codex, and any other MCP-compatible AI agent can control iOS simulators and Android emulators as native tools — no scripting, no hardcoded selectors.
 
-These three guides fit together: connect an AI agent here, learn the flow YAML format in the [Flow Reference](/automation/flows), then combine them in [Run flows in CI](/automation/ci), where an agent authors a flow once and CI replays it deterministically.
+These three guides fit together: connect an AI agent here, learn the flow YAML format in the [Flow Reference](/automation/flows), then combine them in [Run flows in CI](/automation/ci), where an AI agent authors a flow once and CI replays it deterministically.
 
 ## When to use this
 
 **Repeatable automated testing** is where this shines. One-off manual checks are still faster done by hand.
 
-- **CI/CD regression tests** — After each build, an agent boots a simulator, installs the build, walks through key flows, captures screenshots, and reports regressions. No human intervention needed. → [Exploratory runs in CI](/ai-agents/exploratory-runs)
+- **CI/CD regression tests** — After each build, an AI agent boots a simulator, installs the build, walks through key flows, captures screenshots, and reports regressions. No human intervention needed. → [Exploratory runs in CI](/ai-agents/exploratory-runs)
 - **Multi-device matrix** — Run the same flow on iPhone SE (iOS 16), iPhone 15 Pro (iOS 17), and an Android emulator in sequence without manually switching devices.
-- **Natural language QA scripts** — Non-developers (QA, PM) describe test scenarios in plain text; the agent executes them. No coordinate mapping or brittle selectors.
+- **Natural language QA scripts** — Non-developers (QA, PM) describe test scenarios in plain text; the AI agent executes them. No coordinate mapping or brittle selectors.
 
 ## How it connects
 
 ```text
-LLM Agent (Claude Code, etc.)
+AI Agent (Claude Code, etc.)
     ↓  MCP protocol (stdio)
 @tapflowio/mcp-server
     ↓  WebSocket + REST
 tapflow relay
     ↓  WebSocket
-Mac Agent (iOS · Android)
+Agent (iOS · Android)
 ```
 
-The MCP server is a local process that bridges the LLM agent to your self-hosted relay. App data never leaves your network.
+The MCP server is a local process that bridges the AI agent to your self-hosted relay. App data never leaves your network.
 
 ## Prerequisites
 
@@ -145,7 +145,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 
 ## Typical workflow
 
-An LLM agent typically calls tools in this order:
+An AI agent typically calls tools in this order:
 
 ```text
 get_testing_guide  → read what to cover and how to report (once, before testing)
@@ -171,14 +171,14 @@ A `list_devices` response can also carry values set in the dashboard: `displayNa
 
 For running this in a CI pipeline, see [Run flows in CI](/automation/ci).
 
-## What the agent is told {#agent-guidance}
+## What the AI agent is told {#agent-guidance}
 
 The server gives the AI agent two pieces of guidance, so a request as short as "test the login screen" gets a thorough run without you listing every case.
 
-- **Server instructions**, sent once when the agent connects: the order of the tools, reading the screen with `query_ui_tree` rather than screenshots, releasing the device when done, and what a refused boot or an unconfirmed input means. Clients that support MCP server instructions add them to the agent's context: Claude Code and VS Code do, Gemini CLI does in trusted folders, and Codex shows them as the description of tapflow's tools. `connect_device`'s description repeats the two rules that matter most, for clients that do not.
-- **`get_testing_guide`**, a tool the agent calls before it tests: which cases to cover, what these tools cannot test, how to check a finding before calling it a bug, how to save the verified path as a flow, and the report format.
+- **Server instructions**, sent once when the AI agent connects: the order of the tools, reading the screen with `query_ui_tree` rather than screenshots, releasing the device when done, and what a refused boot or an unconfirmed input means. Clients that support MCP server instructions add them to the agent's context: Claude Code and VS Code do, Gemini CLI does in trusted folders, and Codex shows them as the description of tapflow's tools. `connect_device`'s description repeats the two rules that matter most, for clients that do not.
+- **`get_testing_guide`**, a tool the AI agent calls before it tests: which cases to cover, what these tools cannot test, how to check a finding before calling it a bug, how to save the verified path as a flow, and the report format.
 
-The instructions are about 400 tokens in every session. The testing guide is about 1,200 tokens, spent only when the agent calls it.
+The instructions are about 400 tokens in every session. The testing guide is about 1,200 tokens, spent only when the AI agent calls it.
 
 ## Watch the device an AI agent drives {#watch-the-device}
 

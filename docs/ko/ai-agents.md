@@ -5,13 +5,13 @@ description: Claude Code 같은 AI 에이전트가 MCP로 iOS 시뮬레이터와
 
 # AI 에이전트 QA {#ai-agent-qa}
 
-AI 에이전트 QA는 Claude Code 같은 AI 에이전트가 tapflow의 기기를 조작해 앱을 테스트하는 방식입니다. AI 에이전트는 [MCP 서버](/ko/ai-agents/mcp-server)를 거쳐 화면을 읽고 탭과 입력을 보냅니다. 기기는 팀원이 QA 세션에서 쓰는 것과 같은 Mac의 시뮬레이터와 에뮬레이터입니다. 페이지마다 상태가 다를 수 있으니 맨 위 배너를 확인하세요([페이지 상태](/ko/get-started/introduction#page-status)).
+AI 에이전트 QA는 Claude Code 같은 AI 에이전트가 tapflow의 기기를 조작해 앱을 테스트하는 방식입니다. AI 에이전트는 [MCP 서버](/ko/ai-agents/mcp-server)를 거쳐 화면을 읽고 탭과 입력을 보냅니다. 기기는 팀원이 QA 세션에서 쓰는 것과 같은 시뮬레이터와 에뮬레이터입니다. 페이지마다 상태가 다를 수 있으니 맨 위 배너를 확인하세요([페이지 상태](/ko/get-started/introduction#page-status)).
 
 ## 누가 무엇을 하나요 {#who-does-what}
 
 | 누구 | 하는 일 |
 |---|---|
-| 운영자 | 릴레이와 에이전트 Mac을 평소처럼 실행합니다. AI 에이전트 QA를 위해 Mac에 더 설치할 것은 없습니다. |
+| 운영자 | 릴레이와 에이전트를 평소처럼 실행합니다. AI 에이전트 QA를 위해 더 설치할 것은 없습니다. |
 | AI 에이전트를 쓰는 사람 | 자기 컴퓨터에 MCP 서버를 설정하고 대시보드에서 발급한 토큰으로 릴레이에 연결합니다. 그다음 AI 에이전트에게 테스트를 부탁합니다. |
 | 팀원 | AI 에이전트가 건네주는 링크를 열어 기기 화면을 브라우저에서 지켜봅니다. |
 

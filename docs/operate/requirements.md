@@ -10,7 +10,7 @@
 
 The agent runs on macOS. iOS and Android can run together on the same Mac. For Android alone, it can also run on Windows ([Windows](#windows)).
 
-- macOS on **Apple Silicon** (M-series)
+- On a Mac: macOS on **Apple Silicon** (M-series)
 - Node.js ≥ 22
 
 ::: warning Intel Macs are not supported
@@ -21,7 +21,7 @@ Apple Silicon is what tapflow has been developed and verified against. Intel sup
 tracked in [#464](https://github.com/jo-duchan/tapflow/issues/464), but it is not scheduled — it needs
 a universal build plus verification on hardware the maintainers do not have.
 
-The relay has no such constraint. Only the machine running the **agent** needs Apple Silicon.
+The relay has no such constraint. Only a Mac running the **agent** needs Apple Silicon.
 :::
 
 ### iOS

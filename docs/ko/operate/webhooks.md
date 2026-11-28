@@ -16,7 +16,7 @@ tapflow는 빌드를 직접 만들지 않으므로, 여기서 알리는 것은 �
 ::: info 수동 리뷰
 이 가이드는 **수동 리뷰**를 다룹니다. CI가 빌드를 전달하면 팀원이 직접 테스트합니다.
 
-CI에서 플로우를 재생하거나 LLM 에이전트가 기기를 조작하게 하려면 [CI에서 플로우 실행](/ko/automation/ci)과 [CI에서 탐색적 실행](/ko/ai-agents/exploratory-runs)을 참고하세요. 둘 다 실험적 기능입니다.
+CI에서 플로우를 재생하거나 AI 에이전트가 기기를 조작하게 하려면 [CI에서 플로우 실행](/ko/automation/ci)과 [CI에서 탐색적 실행](/ko/ai-agents/exploratory-runs)을 참고하세요. 둘 다 실험적 기능입니다.
 :::
 
 ## 엔드포인트 등록

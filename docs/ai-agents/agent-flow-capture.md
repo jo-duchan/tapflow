@@ -1,6 +1,6 @@
 ---
 title: AI Agent Flow Capture
-description: Save a path an AI agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
+description: Save a path an AI agent checked on a device over MCP as a flow YAML. The MCP server records the AI agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
 status: experimental
 ---
 
@@ -66,7 +66,7 @@ The AI agent chooses only these in `capture_flow`. There is no way for it to wri
 - If it passes, it returns `verified: true` with the YAML (`yaml`) and the contents of its header comment (`notes`).
 - If it fails, it returns no YAML: `verified: false`, the failed step's number (`failedStep`, in `list_captured_steps`' numbers), the failure message and the kind of failure (`failureKind`). When a tap found nothing, it also returns selectors that would have found the element on that screen (`suggestions`). The capture stays, so the AI agent leaves that step out and verifies again, or captures the path again. A failed step left out is noted in the YAML's header comment.
 - Inputs sent to the device while verifying are not recorded in the capture.
-- If the device's agent (the tapflow process on the Mac that runs the simulators and emulators) predates the reset a run does, only the app's data is cleared before the replay, and the result's `resetNote` says so.
+- If the device's agent (the tapflow process that runs the simulators and emulators) predates the reset a run does, only the app's data is cleared before the replay, and the result's `resetNote` says so.
 
 ### 5. Save the flow {#save}
 

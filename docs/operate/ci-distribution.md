@@ -20,7 +20,7 @@ The CI job uploads the build artifact. From there, anyone on the team can test d
 ::: info Manual review
 This guide covers **manual review**: CI delivers the build, and people test it.
 
-To have CI replay flows, or to let an LLM agent drive the device, see [Run flows in CI](/automation/ci) and [Exploratory runs in CI](/ai-agents/exploratory-runs). Both are experimental.
+To have CI replay flows, or to let an AI agent drive the device, see [Run flows in CI](/automation/ci) and [Exploratory runs in CI](/ai-agents/exploratory-runs). Both are experimental.
 :::
 
 ## Any build tool
