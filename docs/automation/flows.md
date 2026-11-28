@@ -361,7 +361,7 @@ The exit codes are a contract so CI can tell what happened.
 |------|---------|
 | `0` | All flows passed |
 | `1` | At least one product failure, including a run with both product and environment failures |
-| `2` | Environment/config error before execution, every failed flow was environmental, or a `--parallel` run left flows that no device ran |
+| `2` | Environment/config error before execution, every failed flow was environmental, or a `--parallel` run with no product failure left flows that no device ran |
 | `130` | Cancelled by `SIGINT` (Ctrl+C, or a cancelled GitHub Actions job) |
 | `143` | Cancelled by `SIGTERM` (what `kill` sends by default) |
 
