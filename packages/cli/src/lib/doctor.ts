@@ -1,7 +1,7 @@
 import { execSync, spawnSync } from 'node:child_process'
 import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { LeanStore } from '@tapflowio/ios-agent'
 import { androidSdkCandidates as hostSdkCandidates, findOnPath, hostExecutableName } from '@tapflowio/agent-core/utils'
 import {
@@ -424,7 +424,7 @@ function checkAdbStatus(adb: AdbResolution | null): DoctorCheck {
     ok: false,
     warn: true,
     detail: process.platform === 'win32'
-      ? `adb found at ${adb.path} but not in PATH. Open a new terminal (tapflow setup android adds it to your user PATH), then re-run tapflow doctor`
+      ? `adb found at ${adb.path} but not in PATH. Add ${win32.dirname(adb.path)} to your user PATH (Environment Variables), open a new terminal, then re-run tapflow doctor`
       : `adb found at ${adb.path} but not in PATH. Open a new terminal or run: exec $SHELL, then re-run tapflow doctor`,
   }
 }

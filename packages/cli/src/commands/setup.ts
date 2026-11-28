@@ -16,7 +16,7 @@ async function detectPlatforms(): Promise<string[]> {
   if (process.platform === 'darwin') platforms.push('ios')
   if (resolveAdb() !== null) {
     platforms.push('android')
-  } else if (process.platform === 'darwin' && isInteractive()) {
+  } else if ((process.platform === 'darwin' || process.platform === 'win32') && isInteractive()) {
     const also = await confirm({ message: 'Also set up Android? (adb not found)' })
     if (!isCancel(also) && also) platforms.push('android')
   }
@@ -76,7 +76,12 @@ export async function cmdSetup(platform?: string): Promise<void> {
 
   // env가 rc에 있지만 현재 쉘엔 반영 안 됨 → 새 터미널 안내(doctor가 PATH 경고를 내지 않도록).
   if (needsNewShell) {
-    step("Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
+    // Windows has no rc file or `exec $SHELL`: the user environment is read only by a terminal opened
+    // afterwards. Worded so it is true whether setup wrote it or a failed write left it to the person
+    // (WINDOWS_ENV_WRITE_FAILED also mentions a new terminal, which is what sets needsNewShell).
+    step(process.platform === 'win32'
+      ? 'Open a new terminal, then `tapflow doctor` to verify — a terminal that was already open does not see changes to your user environment.'
+      : "Open a new terminal (or run: exec $SHELL), then `tapflow doctor` to verify — ANDROID_HOME/PATH is configured in your shell, but the current session hasn't loaded it yet.")
   }
 
   // **The exit code says what the banner says.** This command returned 0 whatever it printed, so

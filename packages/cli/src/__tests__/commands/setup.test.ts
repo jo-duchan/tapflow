@@ -16,6 +16,7 @@ import { runSetupAndroid, runSetupIos } from '../../lib/setup.js'
 import { resolveAdb } from '../../lib/doctor.js'
 import { confirm } from '@clack/prompts'
 import { cmdSetup } from '../../commands/setup.js'
+import { WINDOWS_ENV_WRITE_FAILED } from '../../lib/setup-android-windows.js'
 
 const mockRunSetupAndroid = vi.mocked(runSetupAndroid)
 const mockRunSetupIos = vi.mocked(runSetupIos)
@@ -71,6 +72,24 @@ describe('cmdSetup', () => {
     await cmdSetup('android')
     expect(mockRunSetupAndroid).toHaveBeenCalled()
     expect(mockRunSetupIos).not.toHaveBeenCalled()
+  })
+
+  it('tells Windows to open a new terminal, without the POSIX `exec $SHELL`', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: 'open a new terminal to use them.' }])
+    await cmdSetup('android')
+    const out = logLines.join('\n')
+    expect(out).toContain('Open a new terminal, then `tapflow doctor`')
+    expect(out).not.toContain('exec $SHELL')
+  })
+
+  it('on Windows, does not say the environment was written when writing it failed', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: `SDK at C:\\sdk. ${WINDOWS_ENV_WRITE_FAILED}` }])
+    await cmdSetup('android')
+    const out = logLines.join('\n')
+    expect(out).toContain('Open a new terminal, then `tapflow doctor`')
+    expect(out).not.toMatch(/were added|was added|has added/)
   })
 
   it('인자 없음 + darwin + adb 있음 → ios와 android 둘 다', async () => {

@@ -13,7 +13,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { runDoctorChecks } from '../../lib/doctor.js'
 
 const mockExistsSync = vi.mocked(existsSync)
@@ -358,6 +358,25 @@ describe('runDoctorChecks', () => {
     expect(adbCheck?.detail).toContain('new terminal')
     expect(adbCheck?.detail).toContain('tapflow doctor')
     expect(adbCheck?.detail).toContain(sdkAdb)
+  })
+
+  // Setup writes PATH only on a run that installs SDK packages, so on a complete SDK "setup adds it" was not true.
+  it('on Windows, names the folder to add to PATH rather than promising setup will add it', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    vi.stubEnv('ANDROID_HOME', '')
+    vi.stubEnv('ANDROID_SDK_ROOT', '')
+    vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\dev\\AppData\\Local')
+    vi.stubEnv('PATH', 'C:\\Windows\\System32')
+    const sdkAdb = join('C:\\Users\\dev\\AppData\\Local\\Android\\Sdk', 'platform-tools', 'adb.exe')
+    mockExistsSync.mockImplementation((p) => p === sdkAdb)
+    vi.mocked(statSync).mockImplementation((() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) }) as never)
+    mockExecSync.mockImplementation(() => '')
+
+    const result = await runDoctorChecks('android')
+    const adbCheck = result.android?.find((c) => c.label.includes('not in PATH'))
+    expect(adbCheck?.detail).toContain(`Add ${win32.dirname(sdkAdb)} to your user PATH`)
+    expect(adbCheck?.detail).toContain('new terminal')
+    expect(adbCheck?.detail).not.toContain('tapflow setup android')
   })
 
   it("platform 'android' 지정 시 Android만 진단 (iOS null)", async () => {
