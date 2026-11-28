@@ -27,11 +27,13 @@ This path needs a few more prerequisites.
           TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          set -o pipefail
           # The MCP server takes the relay's ws:// address; the upload API is the same relay over http.
           RELAY_HTTP="${TAPFLOW_RELAY_URL/#ws/http}"
           BUILD_ID=$(curl -sf -X POST "$RELAY_HTTP/api/v1/builds" \
             -H "Authorization: Bearer $TAPFLOW_TOKEN" \
-            -F "file=@MyApp.app.zip" | jq -r '.id')
+            -F "file=@MyApp.app.zip" | jq -er '.id')
+          [[ "$BUILD_ID" =~ ^[0-9]+$ ]]
 
           claude --mcp-config .mcp.json --allowedTools "mcp__tapflow" -p "
             List available devices and connect to a booted iOS simulator.
@@ -41,18 +43,18 @@ This path needs a few more prerequisites.
             End your answer with one line: TAPFLOW_VERDICT: pass, or TAPFLOW_VERDICT: fail followed by the reason.
           " | tee claude-output.txt
 
-          grep -Eq '^TAPFLOW_VERDICT: pass[[:space:]]*$' claude-output.txt
+          tail -n 1 claude-output.txt | grep -Eq '^TAPFLOW_VERDICT: pass[[:space:]]*$'
 ```
 
 Three parts of the step matter:
 
-- `install_app` installs a build the relay already has, by its ID, not a file on the runner. The step uploads the build it made (here `MyApp.app.zip`) with the [builds API](/operate/ci-distribution) first and gives the coding agent the ID it gets back. `TAPFLOW_TOKEN` is an API-type token, so it may upload.
-- A `claude -p` run has no one to approve a tool call, so a tool it is not allowed to use is refused. `--allowedTools "mcp__tapflow"` allows the tapflow MCP server's tools and nothing else.
-- `claude` exits with `0` when it finishes answering, even when its answer says the app is broken. The last line decides the step instead: it passes only when the coding agent wrote `TAPFLOW_VERDICT: pass`, so a run that ended early or wrote no verdict fails too.
+- `install_app` installs a build the relay already has, by its ID, not a file on the runner. The step uploads the build it made (here `MyApp.app.zip`) with the [builds API](/operate/ci-distribution) first and gives the coding agent the ID it gets back. `TAPFLOW_TOKEN` is an API-type token, so it may upload. `pipefail` and the ID check stop the step when the upload fails, before `claude` runs.
+- A `claude -p` run has no one to approve a tool call, so a call that needs approval is refused. `--allowedTools "mcp__tapflow"` approves the tapflow MCP server's tools in advance. It adds no other tool: one that needs approval is still refused.
+- `claude` exits with `0` when it finishes answering, even when its answer says the app is broken. The last line decides the step instead: it passes only when the output's final line is `TAPFLOW_VERDICT: pass`, so a run that ended early, wrote no verdict or ended on a fail fails too.
 
 Exploratory prompts work best when they describe outcomes. "Verify the home screen loaded" holds up better than "tap the third item in the list" when the UI changes. For a regression test you run repeatedly, though, pinning the confirmed scenario into a flow is deterministic and free.
 
-The example uses the `.mcp.json` from [Authoring flows with a coding agent](/automation/ci#authoring-flows-with-an-agent).
+The example uses the `.mcp.json` from [Authoring flows with a coding agent](/automation/ci#authoring-flows-with-an-agent), which hands the MCP server the step's `TAPFLOW_RELAY_URL` and `TAPFLOW_TOKEN`, so the coding agent reaches the relay the build was uploaded to.
 
 ## Related
 

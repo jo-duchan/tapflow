@@ -62,8 +62,8 @@ To connect the coding agent to the relay, keep a `.mcp.json` at the repo root po
     "tapflow": {
       "command": "tapflow-mcp",
       "env": {
-        "TAPFLOW_RELAY_URL": "ws://localhost:4000",
-        "TAPFLOW_TOKEN": "INJECTED_AT_RUNTIME"
+        "TAPFLOW_RELAY_URL": "${TAPFLOW_RELAY_URL:-ws://localhost:4000}",
+        "TAPFLOW_TOKEN": "${TAPFLOW_TOKEN:-}"
       }
     }
   }
@@ -86,7 +86,7 @@ You can use deterministic replay from within an agent session too. The `run_flow
 ## Tips
 
 - **Flows for regression, coding agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an agent.
-- **The `env` values in `.mcp.json` are overridden at runtime by the shell environment**, so secrets never land in the repo.
+- **`.mcp.json` takes the relay address and token from the environment** (`${TAPFLOW_TOKEN:-}`), so secrets never land in the repo. A value written into `env` as it is wins over the environment, so do not put a placeholder there. With `TAPFLOW_TOKEN` unset, the MCP server reads the [token file](/ai-agents/mcp-server#token-file).
 - **One session per device.** The relay routes by session, so running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.
 
 ## Moved sections {#moved-sections}
