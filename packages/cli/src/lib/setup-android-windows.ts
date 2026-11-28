@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir, machine, tmpdir } from 'node:os'
 import { win32 as winPath } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -66,7 +66,7 @@ export interface WindowsSetupDeps {
   env: NodeJS.ProcessEnv
   arch: string
   home: string
-  /** The per-machine tapflow home for downloaded tools: `TAPFLOW_HOME`, else `~/.tapflow`. */
+  /** The per-machine home for downloaded tools: `~/.tapflow`, as the tunnel binaries' cache. */
   toolsHome: () => string
   exists: (p: string) => boolean
   readdir: (p: string) => string[]
@@ -123,11 +123,12 @@ export function windowsSdkDir(deps: Pick<WindowsSetupDeps, 'env' | 'home'>): str
 }
 
 /**
- * Where a JDK tapflow downloads itself lives: the per-machine tapflow home (`TAPFLOW_HOME`, else
- * `~/.tapflow`), like the tunnel binaries cached in `~/.tapflow/bin` — a tool, not install state.
- * Deliberately not `resolveInstallDir()`: that answers the current directory when it holds an install,
- * which would unpack ~300 MB of JDK into whatever repo setup was run from (and fetch it again from
- * anywhere else).
+ * Where a JDK tapflow downloads itself lives: `~/.tapflow/tools/jdk`, beside the tunnel binaries
+ * `download-binary.ts` caches in `~/.tapflow/bin` and, like them, by the home directory alone — a tool,
+ * not install state. Deliberately not `resolveInstallDir()`, nor `TAPFLOW_HOME`: the first answers the
+ * current directory when it holds an install, which would unpack ~300 MB of JDK into whatever repo setup
+ * was run from (and fetch it again from anywhere else); with `TAPFLOW_HOME` both name the install, and a
+ * `tools` folder there would make `tapflow init` read it as a folder shared with something else.
  */
 export function managedJdkRoot(deps: Pick<WindowsSetupDeps, 'toolsHome'>): string {
   return winPath.join(deps.toolsHome(), 'tools', 'jdk')
@@ -631,6 +632,18 @@ export function checkAccelWindows(deps: WindowsSetupDeps, sdk: string): SetupSte
 
 // ── entry point ────────────────────────────────────────────────────────────
 
+/**
+ * The PC's own architecture, not Node's. `process.arch` is what the Node binary was built for, so an x64
+ * Node under emulation on a Windows on Arm PC reports `x64`. Any one Arm signal counts: the OS's machine
+ * type, the WOW64 native-architecture variable, the processor architecture, or the processor identifier.
+ * Which of them survive emulation was not measured on Arm hardware; reading all of them is the safe side,
+ * since none of them names Arm on an x64 PC.
+ */
+export function windowsHostArch(env: NodeJS.ProcessEnv, nodeArch: string, osMachine: string): string {
+  const signals = [nodeArch, osMachine, env['PROCESSOR_ARCHITEW6432'], env['PROCESSOR_ARCHITECTURE'], env['PROCESSOR_IDENTIFIER']]
+  return signals.some((s) => s !== undefined && /\barm|aarch64/i.test(s)) ? 'arm64' : nodeArch
+}
+
 /** Said instead of setting anything up on an ARM64 PC, before any download. */
 export const WINDOWS_ARM64_UNSUPPORTED =
   'The Android Emulator does not run on Windows on Arm (Google requires an x86_64 CPU on Windows), so tapflow ' +
@@ -651,9 +664,9 @@ export async function runSetupAndroidWindows(deps: WindowsSetupDeps = realWindow
 export function realWindowsDeps(): WindowsSetupDeps {
   return {
     env: process.env,
-    arch: process.arch,
+    arch: windowsHostArch(process.env, process.arch, machine()),
     home: homedir(),
-    toolsHome: () => (process.env['TAPFLOW_HOME'] ? winPath.resolve(process.env['TAPFLOW_HOME']) : winPath.join(homedir(), '.tapflow')),
+    toolsHome: () => winPath.join(homedir(), '.tapflow'),
     exists: existsSync,
     readdir: (p) => readdirSync(p),
     mkdirp: (p) => { mkdirSync(p, { recursive: true }) },

@@ -5,7 +5,7 @@ import {
   ACCEL_GUIDANCE, REGISTER_ENV_SCRIPT, SDKMANAGER_INSTALL_ATTEMPTS, WINDOWS_ARM64_UNSUPPORTED, WINDOWS_ENV_WRITE_FAILED, WINGET_JDK_ID, adoptiumApiUrl,
   checkAccelWindows, checkAndFixAvdWindows, checkAndFixJdkWindows, cmdLine, missingSdkPackages,
   parseAdoptiumAssets, parseCmdlineToolsArchive, parseDeviceIds, parseJavaMajor, runSetupAndroidWindows,
-  runTool, sdkToolEnv, windowsSdkDir, windowsSystemImage,
+  runTool, sdkToolEnv, windowsHostArch, windowsSdkDir, windowsSystemImage,
   type JdkFound, type RunOptions, type RunResult, type WindowsSetupDeps,
 } from '../../lib/setup-android-windows.js'
 
@@ -60,7 +60,7 @@ function fakePc(opts: {
     env,
     arch: 'x64',
     home: HOME,
-    toolsHome: () => env['TAPFLOW_HOME'] || p.join(HOME, '.tapflow'),
+    toolsHome: () => p.join(HOME, '.tapflow'),
     exists: (f) => files.has(f) || [...files].some((x) => x.startsWith(`${f}\\`)),
     readdir: (dir) => [...new Set([...files].filter((x) => x.startsWith(`${dir}\\`)).map((x) => x.slice(dir.length + 1).split('\\')[0]!))],
     mkdirp: () => {},
@@ -201,6 +201,17 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(install.args[3]).toContain('"platform-tools" "emulator" "build-tools;35.0.0" "platforms;android-35" "system-images;android-35;google_apis;x86_64"')
   })
 
+  it('reads the PC architecture, not only Node\'s, so an x64 Node under emulation on Arm is caught', () => {
+    const x64Pc = { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'AMD64 Family 23 Model 17 Stepping 0, AuthenticAMD' }
+    expect(windowsHostArch(x64Pc, 'x64', 'x86_64')).toBe('x64')
+    expect(windowsHostArch({ PROCESSOR_IDENTIFIER: 'Intel64 Family 6 Model 140 Stepping 1, GenuineIntel' }, 'x64', 'x86_64')).toBe('x64')
+    // x64 Node emulated on Windows on Arm: Node says x64, the processor still says Arm.
+    const emulated = { PROCESSOR_ARCHITECTURE: 'AMD64', PROCESSOR_IDENTIFIER: 'ARMv8 (64-bit) Family 8 Model D4B Revision   0, Qualcomm Technologies Inc' }
+    expect(windowsHostArch(emulated, 'x64', 'x86_64')).toBe('arm64')
+    expect(windowsHostArch({}, 'x64', 'arm64')).toBe('arm64')
+    expect(windowsHostArch({}, 'arm64', 'arm64')).toBe('arm64')
+  })
+
   it('stops on ARM64 Windows before asking, downloading or running anything', async () => {
     const pc = fakePc({ files: [] })
     pc.deps.arch = 'arm64'
@@ -259,7 +270,7 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(r.detail).toContain('Skipped.')
   })
 
-  it('keeps the managed JDK in the per-machine tapflow home (TAPFLOW_HOME here), not the current directory', async () => {
+  it('keeps the managed JDK in the per-machine tools home it is given, not the current directory', async () => {
     const install = 'D:\\work\\my-tapflow'
     const pc = fakePc({
       files: [TAR],
