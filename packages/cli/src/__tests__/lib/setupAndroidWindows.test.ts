@@ -243,7 +243,7 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     expect(results[2]).toMatchObject({ label: 'AVD', ok: false, warn: true })
     expect(results[2]!.detail).toContain('Could not create: tapflow-tablet.')
     expect(results[2]!.detail).toContain('Created: tapflow-compact, tapflow-phone, tapflow-large.')
-    expect(results[2]!.detail).toContain('Re-run tapflow setup android to try it again.')
+    expect(results[2]!.detail).toContain('Re-run tapflow setup android to try it again; if avdmanager says one already exists')
   })
 
   it('leaves out a set member avdmanager offers no device for, without failing or promising a re-run', async () => {
@@ -268,6 +268,55 @@ describe('Windows setup android: a partial SDK without Android Studio pieces', (
     const r = await checkAndFixAvdWindows(pc.deps, SDK, true, { javaHome: null, javaExe: JAVA17, major: 17 })
     expect(r).toMatchObject({ label: 'AVD ready: 1 device(s)', ok: true })
     expect(r.detail).toContain('Skipped.')
+  })
+
+  it('stops before any prompt when `emulator -list-avds` fails, rather than reading it as no AVDs', async () => {
+    const pc = fakePc({
+      files: [...PARTIAL_SDK, SDKMANAGER, AVDMANAGER, p.join(IMAGE_DIR, 'system.img')],
+      respond: (c) => (c.file === EMULATOR && c.args[0] === '-list-avds' ? { status: 1, stdout: '', stderr: 'emulator: crashed' } : undefined),
+    })
+    const r = await checkAndFixAvdWindows(pc.deps, SDK, true, { javaHome: null, javaExe: JAVA17, major: 17 })
+    expect(r).toMatchObject({ label: 'AVD', ok: false })
+    expect(r.detail).toContain('`emulator -list-avds` failed')
+    expect(pc.prompts).toEqual([])
+    expect(pc.calls.some((c) => c.args.join(' ').includes('avdmanager.bat'))).toBe(false)
+  })
+
+  it('creates AVDs without --force, so an AVD of the same name is never overwritten', async () => {
+    const pc = fakePc({ files: PARTIAL_SDK })
+    await runSetupAndroidWindows(pc.deps)
+    const creates = pc.calls.filter((c) => c.args.join(' ').includes('"create" "avd"'))
+    expect(creates).toHaveLength(4)
+    expect(creates.some((c) => c.args.join(' ').includes('--force'))).toBe(false)
+  })
+
+  it('offers cmdline-tools again when sdkmanager.bat is there but avdmanager.bat is not', async () => {
+    const pc = fakePc({ files: [...PARTIAL_SDK, SDKMANAGER, p.join(IMAGE_DIR, 'system.img')] })
+    const results = await runSetupAndroidWindows(pc.deps)
+    expect(pc.prompts[0]).toContain('cmdline-tools')
+    expect(pc.downloads).toEqual(['https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip'])
+    expect(pc.files.has(AVDMANAGER)).toBe(true)
+    expect(results[1]).toMatchObject({ ok: true })
+  })
+
+  it('removes each download workspace when a download rejects', async () => {
+    const removed: string[] = []
+    const jdkPc = fakePc({ files: [TAR] })
+    const jdkRemove = jdkPc.deps.remove
+    jdkPc.deps.remove = (d) => { removed.push(d); jdkRemove(d) }
+    jdkPc.deps.download = async () => { throw new Error('connection reset') }
+    const { result } = await checkAndFixJdkWindows(jdkPc.deps)
+    expect(result).toMatchObject({ ok: false })
+    expect(removed).toContain('C:\\Temp\\tf')
+
+    removed.length = 0
+    const sdkPc = fakePc({ files: PARTIAL_SDK })
+    const sdkRemove = sdkPc.deps.remove
+    sdkPc.deps.remove = (d) => { removed.push(d); sdkRemove(d) }
+    sdkPc.deps.download = async () => { throw new Error('connection reset') }
+    const results = await runSetupAndroidWindows(sdkPc.deps)
+    expect(results[1]).toMatchObject({ ok: false })
+    expect(removed).toContain(p.join(SDK, 'cmdline-tools', '.tapflow-download'))
   })
 
   it('keeps the managed JDK in the per-machine tools home it is given, not the current directory', async () => {

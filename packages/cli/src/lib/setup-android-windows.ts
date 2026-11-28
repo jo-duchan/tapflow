@@ -140,6 +140,8 @@ export function windowsSystemImage(arch: string): string {
 
 const sdkmanagerOf = (sdk: string) => winPath.join(sdk, 'cmdline-tools', 'latest', 'bin', 'sdkmanager.bat')
 const avdmanagerOf = (sdk: string) => winPath.join(sdk, 'cmdline-tools', 'latest', 'bin', 'avdmanager.bat')
+/** Both manager scripts, since the AVD step needs avdmanager: a lone sdkmanager would pass the SDK step and fail every run after. */
+const cmdlineToolsReady = (deps: Pick<WindowsSetupDeps, 'exists'>, sdk: string) => deps.exists(sdkmanagerOf(sdk)) && deps.exists(avdmanagerOf(sdk))
 const emulatorOf = (sdk: string) => winPath.join(sdk, 'emulator', 'emulator.exe')
 
 // ── JDK ────────────────────────────────────────────────────────────────────
@@ -224,17 +226,20 @@ async function installJdkFromZip(deps: WindowsSetupDeps): Promise<JdkFound | nul
   const pkg = parseAdoptiumAssets(await deps.fetchText(adoptiumApiUrl(deps.arch)))
   if (!pkg) return null
   const work = deps.tempDir()
-  const zip = winPath.join(work, pkg.name)
-  deps.log(`Downloading ${pkg.name}…`)
-  await deps.download(pkg.link, zip)
-  if ((await deps.fileHash(zip, 'sha256')).toLowerCase() !== pkg.checksum.toLowerCase()) {
+  // One cleanup for the workspace's whole life: a rejected download or hash leaves no partial archive behind.
+  try {
+    const zip = winPath.join(work, pkg.name)
+    deps.log(`Downloading ${pkg.name}…`)
+    await deps.download(pkg.link, zip)
+    if ((await deps.fileHash(zip, 'sha256')).toLowerCase() !== pkg.checksum.toLowerCase()) {
+      throw new Error(`checksum mismatch for ${pkg.name}`)
+    }
+    const root = managedJdkRoot(deps)
+    deps.mkdirp(root)
+    if (!extractZip(deps, zip, root)) return null
+  } finally {
     deps.remove(work)
-    throw new Error(`checksum mismatch for ${pkg.name}`)
   }
-  const root = managedJdkRoot(deps)
-  deps.mkdirp(root)
-  if (!extractZip(deps, zip, root)) { deps.remove(work); return null }
-  deps.remove(work)
   return findUsableJdk(deps)
 }
 
@@ -336,26 +341,26 @@ async function installCmdlineTools(deps: WindowsSetupDeps, sdk: string): Promise
   const work = winPath.join(sdk, 'cmdline-tools', '.tapflow-download')
   if (deps.exists(work)) deps.remove(work)
   deps.mkdirp(work)
-  const zip = winPath.join(work, 'cmdline-tools.zip')
-  deps.log(`Downloading Android command-line tools ${archive.revision} (${Math.round(archive.size / 1_000_000)} MB)…`)
-  await deps.download(archive.url, zip)
-  if ((await deps.fileHash(zip, 'sha1')).toLowerCase() !== archive.sha1) {
-    deps.remove(work)
-    throw new Error('checksum mismatch for the Android command-line tools')
-  }
-  const unpacked = winPath.join(work, 'unpacked')
-  deps.mkdirp(unpacked)
-  if (!extractZip(deps, zip, unpacked)) { deps.remove(work); return null }
-  // The zip holds `cmdline-tools/{bin,lib,…}`; sdkmanager expects it at `<sdk>\cmdline-tools\latest`.
-  const target = winPath.join(sdk, 'cmdline-tools', 'latest')
-  deps.mkdirp(winPath.join(sdk, 'cmdline-tools'))
-  if (deps.exists(target)) deps.remove(target)
+  // One cleanup for the workspace's whole life: a rejected download or hash leaves no partial archive behind.
   try {
+    const zip = winPath.join(work, 'cmdline-tools.zip')
+    deps.log(`Downloading Android command-line tools ${archive.revision} (${Math.round(archive.size / 1_000_000)} MB)…`)
+    await deps.download(archive.url, zip)
+    if ((await deps.fileHash(zip, 'sha1')).toLowerCase() !== archive.sha1) {
+      throw new Error('checksum mismatch for the Android command-line tools')
+    }
+    const unpacked = winPath.join(work, 'unpacked')
+    deps.mkdirp(unpacked)
+    if (!extractZip(deps, zip, unpacked)) return null
+    // The zip holds `cmdline-tools/{bin,lib,…}`; sdkmanager expects it at `<sdk>\cmdline-tools\latest`.
+    const target = winPath.join(sdk, 'cmdline-tools', 'latest')
+    deps.mkdirp(winPath.join(sdk, 'cmdline-tools'))
+    if (deps.exists(target)) deps.remove(target)
     deps.rename(winPath.join(unpacked, 'cmdline-tools'), target)
   } finally {
     deps.remove(work)
   }
-  return deps.exists(sdkmanagerOf(sdk)) ? sdkmanagerOf(sdk) : null
+  return cmdlineToolsReady(deps, sdk) ? sdkmanagerOf(sdk) : null
 }
 
 // ── SDK packages ───────────────────────────────────────────────────────────
@@ -419,7 +424,9 @@ export async function checkAndFixAndroidSdkWindows(
   jdk: JdkFound | null,
 ): Promise<{ result: SetupStepResult; sdk: string; ok: boolean }> {
   const sdk = windowsSdkDir(deps)
-  let sdkmanager = deps.exists(sdkmanagerOf(sdk)) ? sdkmanagerOf(sdk) : null
+  // Not ready unless avdmanager.bat is there too; then cmdline-tools is offered again, which replaces only
+  // `<sdk>\cmdline-tools\latest`.
+  let sdkmanager = cmdlineToolsReady(deps, sdk) ? sdkmanagerOf(sdk) : null
   const missing = missingSdkPackages(deps, sdk)
   if (sdkmanager && missing.length === 0) {
     return { result: { label: `Android SDK ready: ${sdk}`, ok: true, state: 'found' }, sdk, ok: true }
@@ -528,15 +535,15 @@ export function registerWindowsUserEnv(deps: WindowsSetupDeps, sdk: string): 'ad
 // ── AVDs ───────────────────────────────────────────────────────────────────
 
 /**
- * The exit status is not read: a failed `-list-avds` would read as "no AVDs", and the AVD step would then
- * offer to create the whole set with `--force`. No path to that was found — the SDK step requires
- * emulator.exe, and listing and creating share `sdkToolEnv`, so they look in the same AVD home — but a change
- * to either assumption should make a failed listing "unknown" rather than empty.
+ * The AVD names `emulator -list-avds` reports, or `null` when that listing failed. A failed listing is
+ * "unknown", never "no AVDs": read as empty, the AVD step would offer to create the whole set over AVDs that
+ * exist.
  */
-export function listAvdsWindows(deps: WindowsSetupDeps, sdk: string): string[] {
+export function listAvdsWindows(deps: WindowsSetupDeps, sdk: string): string[] | null {
   const emulator = emulatorOf(sdk)
   if (!deps.exists(emulator)) return []
   const r = deps.run(emulator, ['-list-avds'], { env: sdkToolEnv(deps, sdk, null) })
+  if (r.status !== 0) return null
   return r.stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('INFO') && !l.startsWith('WARNING'))
 }
 
@@ -547,6 +554,10 @@ export function parseDeviceIds(out: string): string[] {
 export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string, sdkOk: boolean, jdk: JdkFound | null): Promise<SetupStepResult> {
   if (!sdkOk) return { label: 'AVD', ok: false, detail: 'Set up the Android SDK first.' }
   const avds = listAvdsWindows(deps, sdk)
+  // Before any prompt: with the listing unknown, nothing here can tell which AVDs exist.
+  if (avds === null) {
+    return { label: 'AVD', ok: false, detail: '`emulator -list-avds` failed, so the existing AVDs are unknown and none were created. Run it to see why, then re-run tapflow setup android.' }
+  }
   const ready: SetupStepResult = { label: `AVD ready: ${avds.length} device(s)`, ok: true, state: 'found' }
   // AVDs of the person's own, with no tapflow-* set started, are enough, as they always were. A tapflow-*
   // set an earlier run left incomplete is offered to be finished: only the names still missing are made,
@@ -591,12 +602,14 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
   const created: string[] = []
   const failed: string[] = []
   for (const { spec, device } of creatable) {
-    // `--force` only replaces a half-made AVD of a name -list-avds does not show: `todo` holds no listed name.
-    const r = runTool(deps, avdmanager, ['create', 'avd', '-n', spec.name, '-k', image, '-d', device, '--force'], { env, input: 'no\n', inherit: true })
+    // No `--force`: it would overwrite an AVD of the same name, one that appeared while the prompt was open
+    // or one the listing missed. A half-made AVD left by an earlier failure then makes this create fail, and
+    // the result says how to remove it; setup itself deletes no AVD.
+    const r = runTool(deps, avdmanager, ['create', 'avd', '-n', spec.name, '-k', image, '-d', device], { env, input: 'no\n', inherit: true })
     if (r.status === 0) created.push(spec.name)
     else failed.push(spec.name)
   }
-  const listed = listAvdsWindows(deps, sdk)
+  const listed = listAvdsWindows(deps, sdk) ?? []
   // What was agreed to and did not happen fails the step; a re-run offers exactly these names again.
   const notReady = [...failed, ...created.filter((n) => !listed.includes(n))]
   if (notReady.length > 0) {
@@ -605,7 +618,7 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
       label: 'AVD',
       ok: false,
       warn: true,
-      detail: `Could not create: ${notReady.join(', ')}.${made.length > 0 ? ` Created: ${made.join(', ')}.` : ''} Re-run tapflow setup android to try ${notReady.length === 1 ? 'it' : 'them'} again.${unavailableNote}`,
+      detail: `Could not create: ${notReady.join(', ')}.${made.length > 0 ? ` Created: ${made.join(', ')}.` : ''} Re-run tapflow setup android to try ${notReady.length === 1 ? 'it' : 'them'} again; if avdmanager says one already exists, remove it first with \`avdmanager delete avd -n <name>\`.${unavailableNote}`,
     }
   }
   return { label: `AVDs created: ${created.join(', ')}`, ok: true, state: 'created', ...(unavailableNote ? { detail: unavailableNote.trim() } : {}) }
