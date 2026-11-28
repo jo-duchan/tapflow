@@ -86,11 +86,21 @@ Visual quality and latency may differ between the two. Resolution and decoder ad
 
 There are three ways to use tapflow, and a team can start from any of them. All three run on the same devices and sessions.
 
-- **Manual QA**: CI or the operator uploads a build, and teammates test it in the browser. This is the most mature path, and the Get started and Manual QA sections cover it.
-- **AI agents** (experimental): the [MCP server](/ai-agents/mcp-server) lets a coding agent drive a simulator or emulator.
-- **Automation** (experimental): the [flow runner](/automation/flows) replays YAML flows with no LLM calls, mainly in CI.
+- **[Manual QA](/testing)**: CI or the operator uploads a build, and teammates test it in the browser. This is the most mature way.
+- **[AI Agent QA](/ai-agents)** (experimental): a coding agent drives a simulator or emulator through the [MCP server](/ai-agents/mcp-server).
+- **[Automation QA](/automation)** (experimental): `tapflow flow run` replays YAML flows with no AI model calls, mainly in CI.
 
 Each one works on its own, and manual testing never depends on the other two.
+
+## Page status {#page-status}
+
+Some pages carry an **Experimental** or **Deprecated** banner at the top, and the same badge beside their entry in the sidebar. A page without one describes a stable feature.
+
+- **Experimental**: the feature works, but its names, options and behavior can still change in a minor release. Each change is listed in the [CHANGELOG](https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md).
+- **Deprecated**: the feature still works but will be removed. The banner links to what replaces it.
+- **Stable**: a change adds to the feature rather than altering it. Names, arguments and what a field means (its unit or coordinate space, say) stay as they are. Changing something that already exists goes through Deprecated first.
+
+Where a stable feature carries an experimental one, that part follows the experimental feature's status. This will hold for the MCP server once it is stable: the content of a flow passed to its `run_flow` tool will still follow the status of the [Flow reference](/automation/flows), and `connect_device`'s `capture` option and the replies while capturing will follow [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
 
 ## Next steps {#next-steps}
 

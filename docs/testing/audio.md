@@ -5,8 +5,6 @@ description: "The device's sound plays in the browser alongside the video, on by
 
 # Audio
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 tapflow streams the device's audio to the browser alongside video, so your whole team hears the app — not just sees it. App sound, web audio (e.g. a video playing in the in-app browser), and system sounds all come through.
 
 ## On by default

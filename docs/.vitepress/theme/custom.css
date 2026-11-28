@@ -326,3 +326,29 @@
 .vp-doc :is(h1, h2, h3) + .VPBadge {
   margin-left: 0;
 }
+
+/* ─── Page status badge (sidebar) ───────────────────────── */
+/* An icon appended to a page's sidebar text by `page-status.mjs`; the label rides along as a tooltip
+   and as hidden text for screen readers. VitePress renders the same text in the prev/next footer,
+   where it would read as part of the page title, so it is hidden there. */
+.status-badge {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: -3px;
+}
+.status-badge svg {
+  width: 15px;
+  height: 15px;
+}
+.status-badge-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.VPDocFooter .status-badge {
+  display: none;
+}

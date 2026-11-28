@@ -32,6 +32,8 @@ description: 팀원이 브라우저로 빌드를 테스트하는 방법입니다
   - [댓글](/ko/testing/comments): 빌드에 글과 이미지를 남겨 팀과 공유합니다.
   - [Flow Capture](/ko/testing/flow-capture): 세션에서 한 동작을 플로우 YAML로 저장합니다.
 
+Flow Capture로 저장한 플로우는 CI에서 AI 모델 없이 재생할 수 있습니다. [자동화 QA](/ko/automation)를 참고하세요.
+
 ## 옮겨진 섹션 {#moved-sections}
 
 이 페이지에 있던 섹션은 아래 페이지로 옮겨졌습니다.

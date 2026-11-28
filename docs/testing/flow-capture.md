@@ -5,8 +5,6 @@ description: Save the taps, swipes and typing you did in a QA Session as a flow 
 
 # Flow Capture
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 Save the taps, swipes and typing you did in a [QA Session](/testing/qa-session) as a [flow](/automation/flows) YAML file. CI then repeats them with `tapflow flow run`. You do not write the flow file by hand, and no AI model runs when it replays. Recording your steps is on by default, and each teammate can turn it off.
 
 ## How to use {#how-to-use}

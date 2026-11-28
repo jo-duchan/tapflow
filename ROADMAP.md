@@ -24,10 +24,12 @@ it is ready for.
 **tapflow Core** is the layer every part of tapflow shares: devices, sessions, UI trees, builds, run records, and resource management. It is a concept, not a separate package or product. There are three ways to use it, and a team can start from any of them (see [VISION.md](./VISION.md) for the why).
 
 - **Manual QA** — the browser dashboard: the team tests by hand on a real simulator or emulator. Shipping today (Phases 1–4).
-- **AI agents (via MCP)** — the MCP server lets an LLM agent drive a device, in the same session a person can open and watch. Shipping today but **experimental** (Phase 5 foundation).
-- **Automation** — the deterministic flow runner (`tapflow flow run`), mainly in CI. Shipping today but **experimental**: still maturing, with rough edges in selector matching and post-launch timing (Phase 5 foundation).
+- **AI Agent QA (via MCP)** — the MCP server lets an LLM agent drive a device, in the same session a person can open and watch. Shipping today but **experimental** (Phase 5 foundation).
+- **Automation QA** — the deterministic flow runner (`tapflow flow run`), mainly in CI. Shipping today but **experimental** (Phase 5 foundation).
 
-What sets tapflow apart is how the three connect. Today an agent can author a flow through the MCP tools and replay it, and a failed run is a record a person or an agent can read. The larger goal is **Flow Capture**: a person or an agent operates the app and tapflow records each action as a flow, with no model required (Phase 5+, not built yet). It drops the cost of turning QA already done into automation to nearly zero.
+**Experimental** means the names, options and behavior can still change in a minor release, and every such change is listed in the CHANGELOG; the docs mark each experimental page with a banner ([Page status](https://www.tapflow.dev/get-started/introduction#page-status)). What decides each move to stable: the MCP server after [#1119](https://github.com/jo-duchan/tapflow/issues/1119) settles the `query_ui_tree` output, and the flow format and Flow Runs after the official CI recipe ([#1211](https://github.com/jo-duchan/tapflow/issues/1211)).
+
+What sets tapflow apart is how the three connect. An agent can author a flow through the MCP tools and replay it, and a failed run is a record a person or an agent can read. **Flow Capture** turns what a person did in a QA Session into a flow, checked by replaying it on the device with no model involved (shipped in 0.33). The same for a coding agent over MCP is in the next release. It drops the cost of turning QA already done into automation to nearly zero.
 
 ## Current status
 
@@ -52,6 +54,7 @@ What sets tapflow apart is how the three connect. Today an agent can author a fl
 | `@tapflowio/mcp-server` (MCP tools + screenshot REST) | ✅ Working — experimental |
 | UI tree query (`query_ui_tree`) | ✅ Working — experimental |
 | Deterministic flow runner (`tapflow flow run`, `run_flow`) | ✅ Working — experimental |
+| Flow Capture (QA Session → flow YAML) | ✅ Working |
 
 The groundwork behind these (structured logging, WebSocket backpressure, the platform registry,
 test coverage) is the record kept in Phases 1–3 below.
@@ -135,8 +138,8 @@ only toolchain is the new one.
 
 ## Phase 5 — Agent Experience (AX)
 
-Phase 5 covers the two ways of using tapflow beyond the dashboard: **AI agents**, which drive a
-device through MCP, and **Automation**, the flow runner whose main stage is CI/CD. Both run on the
+Phase 5 covers the two ways of using tapflow beyond the dashboard: **AI Agent QA**, where a coding
+agent drives a device through MCP, and **Automation QA**, the flow runner whose main stage is CI/CD. Both run on the
 same session infrastructure as manual QA (relay, agents, dashboard observation), are opt-in, and
 never affect the manual path.
 
@@ -145,8 +148,8 @@ is deterministic.** Agents explore the app through MCP tools and generate flow f
 those flows with zero LLM calls, which keeps runs idempotent and API cost at zero. Flow files are
 a generated artifact, not a language users must learn.
 
-The foundation shipped; both are still marked experimental because selector matching and
-post-launch timing are where it breaks. Hardening is tracked under the
+The foundation shipped, and both are still experimental (see [Three ways to use tapflow](#three-ways-to-use-tapflow)
+for what that means and what moves each to stable). Hardening is tracked under the
 [`phase-5` label](https://github.com/jo-duchan/tapflow/issues?q=is%3Aopen+label%3Aphase-5).
 
 - [x] Screenshot REST endpoint — `GET /api/v1/sessions/:sessionId/screenshot` for programmatic capture
@@ -154,7 +157,8 @@ post-launch timing are where it breaks. Hardening is tracked under the
 - [x] [#133](https://github.com/jo-duchan/tapflow/issues/133) — UI accessibility tree query (`query_ui_tree`) — unified element schema with normalized frames, so agents tap by element instead of guessing coordinates
 - [x] Deterministic YAML flow format + headless CLI runner — `tapflow flow run`, with state reset, condition-based waits, JUnit report and failure screenshots, and no LLM at replay time ([flow reference](https://www.tapflow.dev/automation/flows))
 - [x] `run_flow` MCP tool — agents replay verified flows through the same deterministic engine
-- [ ] **Flow Capture** (the manual↔AI bridge) — a person operates the app in the dashboard; tapflow records the actions as tree-based selectors and drafts a YAML flow, no agent required. Selector-based (via the UI tree), not coordinate recording, so captures stay robust. Blocked on tree fidelity: the selectors have to be trustworthy before capturing them means anything.
+- [x] **Flow Capture** (the manual↔AI bridge) — a person operates the app in a QA Session; tapflow names each step by a selector from the UI tree where something there can be named, keeps a point marked fragile where nothing can, and replays the flow on the device before it is exported, no agent required (0.33, [Flow Capture](https://www.tapflow.dev/testing/flow-capture))
+- [x] **MCP Flow Capture** — the same for a coding agent: `capture_flow` resets the device, replays the captured steps and returns the YAML only if it passes. With an agent that cannot reset the device, it clears only the app's data, or nothing, and its reply says so in `resetNote` (unreleased)
 
 ### Reviewable automation
 

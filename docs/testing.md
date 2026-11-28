@@ -30,6 +30,8 @@ The dashboard is tapflow's web interface. The devices (iOS simulators and Androi
   - [Comments](/testing/comments): leave notes and images on a build for the team.
   - [Flow Capture](/testing/flow-capture): save the steps you took in a session as a flow YAML.
 
+A flow saved with Flow Capture can be replayed in CI with no AI model. See [Automation QA](/automation).
+
 ## Moved sections {#moved-sections}
 
 Sections that used to be on this page now live on these pages.
