@@ -159,7 +159,7 @@ describe('the watch page', () => {
     renderAt('/automation/sessions/sess-a')
     await deliver({ type: 'agents:listed', sessions: AGENTS })
     expect(await screen.findByRole('heading', { name: 'iPhone 15' })).toBeTruthy()
-    expect(screen.getByText('Coding agent · qa@example.test')).toBeTruthy()
+    expect(screen.getByText('AI agent · qa@example.test')).toBeTruthy()
   })
 
   // Mutation: let a reconnect start a new watch. The relay ended it because the session became someone
@@ -202,6 +202,15 @@ describe('the watch page', () => {
     await deliver({ type: 'watch:holder-left', sessionId: 'sess-a' })
     await deliver({ type: 'agents:listed', sessions: AGENTS })
     expect(screen.getByRole('status').textContent).toBe('Watching. Nothing you do here reaches the device.')
+  })
+
+  // The driver's name sits mid-sentence. Lowercasing the label printed "ai agent". Mutation: put back
+  // `holderKindLabel(...).toLowerCase()` in AISessionWatch.
+  it('names an MCP driver as an AI agent inside a sentence', async () => {
+    renderAt('/automation/sessions/sess-a')
+    await deliver({ type: 'watch:started', sessionId: 'sess-a' })
+    await deliver({ type: 'agents:listed', sessions: AGENTS })
+    expect(screen.getByRole('status').textContent).toBe('Waiting for the AI agent to start the device.')
   })
 
   it('ignores what another session says', async () => {

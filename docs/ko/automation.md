@@ -18,7 +18,7 @@ description: 저장한 YAML 플로우를 tapflow flow run이 AI 모델 호출 �
 ## 플로우를 얻는 방법 {#where-flows-come-from}
 
 - **QA 세션에서 저장**: 팀원이 직접 해 본 탭, 스와이프, 입력을 [Flow Capture](/ko/testing/flow-capture)로 내보냅니다.
-- **코딩 에이전트가 저장**: 코딩 에이전트가 MCP로 확인한 경로를 [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)로 남깁니다.
+- **AI 에이전트가 저장**: AI 에이전트가 MCP로 확인한 경로를 [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)로 남깁니다.
 - **직접 작성**: [플로우 레퍼런스](/ko/automation/flows)의 형식에 맞춰 YAML을 쓰거나 저장한 플로우를 고칩니다.
 
 ## 재생과 실행 기록 {#replay-and-results}
@@ -27,10 +27,10 @@ description: 저장한 YAML 플로우를 tapflow flow run이 AI 모델 호출 �
 
 ## CI에서 실행 {#ci}
 
-[CI에서 플로우 실행](/ko/automation/ci)은 self-hosted Mac 러너에서 플로우를 재생하는 GitHub Actions 예시와 코딩 에이전트로 플로우를 작성하는 방법을 다룹니다.
+[CI에서 플로우 실행](/ko/automation/ci)은 self-hosted Mac 러너에서 플로우를 재생하는 GitHub Actions 예시와 AI 에이전트로 플로우를 작성하는 방법을 다룹니다.
 
 ## 관련 문서 {#related}
 
 - [수동 QA](/ko/testing): 팀원이 브라우저에서 직접 빌드를 테스트하는 방법입니다.
-- [AI 에이전트 QA](/ko/ai-agents): 코딩 에이전트가 MCP로 기기를 조작해 테스트하는 방법입니다.
+- [AI 에이전트 QA](/ko/ai-agents): AI 에이전트가 MCP로 기기를 조작해 테스트하는 방법입니다.
 - [페이지 상태](/ko/get-started/introduction#page-status): 실험적 배너와 지원 중단 예정 배너가 무엇을 뜻하는지 설명합니다.

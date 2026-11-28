@@ -468,7 +468,7 @@ function QASessionPage() {
                     // booted and is still refused.
                     const needsMemory = selectedSession?.admission.memoryRefuses.includes(d.id) ?? false
                     // **Says who is driving an AI-held device, and offers no way in.** Watching an AI session
-                    // is for the person who started it, through the link their coding agent hands them; the
+                    // is for the person who started it, through the link their AI agent hands them; the
                     // device list only explains why the device is taken.
                     // A dropped session waiting for its owner (#1087). The tester's own resumes it; someone else's asks first.
                     const yours = d.waiting?.yours === true

@@ -1,16 +1,16 @@
 ---
 title: AI Agent Flow Capture
-description: Save a path a coding agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
+description: Save a path an AI agent checked on a device over MCP as a flow YAML. The MCP server records the AI agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
 status: experimental
 ---
 
 # AI Agent Flow Capture
 
-A coding agent such as Claude Code can save the path it checked on a device through the [MCP server](/ai-agents/mcp-server) as a [flow](/automation/flows) YAML file. The MCP server records the coding agent's taps, swipes and typing, and `capture_flow` resets the device the way `tapflow flow run` does and replays the flow. It returns the YAML only if that replay passes, and no AI model runs in the replay. It is what [Flow Capture](/testing/flow-capture) does for a teammate in the dashboard, done by a coding agent. A capture opens only when the coding agent passes `capture: true` to `connect_device`.
+An AI agent such as Claude Code can save the path it checked on a device through the [MCP server](/ai-agents/mcp-server) as a [flow](/automation/flows) YAML file. The MCP server records the AI agent's taps, swipes and typing, and `capture_flow` resets the device the way `tapflow flow run` does and replays the flow. It returns the YAML only if that replay passes, and no AI model runs in the replay. It is what [Flow Capture](/testing/flow-capture) does for a teammate in the dashboard, done by an AI agent. A capture opens only when the AI agent passes `capture: true` to `connect_device`.
 
 ## How to use {#how-to-use}
 
-Ask your coding agent something like "test the login screen and save the path you checked as a flow". The coding agent learns this order from `get_testing_guide`:
+Ask your AI agent something like "test the login screen and save the path you checked as a flow". The AI agent learns this order from `get_testing_guide`:
 
 ```text
 connect_device (capture: true) → open a capture
@@ -29,12 +29,12 @@ capture_flow                   → reset the device, replay the chosen steps, ge
 
 ### 2. Walk the path {#walk-the-path}
 
-While the capture is open, the MCP server records what the coding agent does on that session:
+While the capture is open, the MCP server records what the AI agent does on that session:
 
-- A `tap` with `element` is recorded with the selector the coding agent named.
+- A `tap` with `element` is recorded with the selector the AI agent named.
 - A `tap` or `swipe` by coordinates is recorded with its points and what the device reported it hit.
 - Text typed with `type_text`, screens read with `query_ui_tree`, keys, buttons, installs and launches are recorded.
-- The steps of a `run_flow` are recorded as one block of steps the coding agent wrote itself.
+- The steps of a `run_flow` are recorded as one block of steps the AI agent wrote itself.
 
 While a capture is open, the tools that type work differently, because what is typed may be a password:
 
@@ -48,7 +48,7 @@ While a capture is open, the tools that type work differently, because what is t
 
 `expect` lists only the elements the step brought on screen. An element already on screen before the step proves nothing about the touch, so it is left out and counted in `alreadyShown`. A step that brought nothing new lists all of them with a `before` warning. If only such elements are chosen, the flow counts as having no expectation that checks the touch, and the header comment says so.
 
-The coding agent chooses only these in `capture_flow`. There is no way for it to write YAML here, so every step in the flow is one the coding agent did or the device saw.
+The AI agent chooses only these in `capture_flow`. There is no way for it to write YAML here, so every step in the flow is one the AI agent did or the device saw.
 
 | Argument | Meaning |
 |---|---|
@@ -64,17 +64,17 @@ The coding agent chooses only these in `capture_flow`. There is no way for it to
 `capture_flow` makes the flow from the chosen steps, resets the device the way `tapflow flow run` does before a run ([Flow Capture's reset](/testing/flow-capture#range)), and replays it on the same engine as CI.
 
 - If it passes, it returns `verified: true` with the YAML (`yaml`) and the contents of its header comment (`notes`).
-- If it fails, it returns no YAML: `verified: false`, the failed step's number (`failedStep`, in `list_captured_steps`' numbers), the failure message and the kind of failure (`failureKind`). When a tap found nothing, it also returns selectors that would have found the element on that screen (`suggestions`). The capture stays, so the coding agent leaves that step out and verifies again, or captures the path again. A failed step left out is noted in the YAML's header comment.
+- If it fails, it returns no YAML: `verified: false`, the failed step's number (`failedStep`, in `list_captured_steps`' numbers), the failure message and the kind of failure (`failureKind`). When a tap found nothing, it also returns selectors that would have found the element on that screen (`suggestions`). The capture stays, so the AI agent leaves that step out and verifies again, or captures the path again. A failed step left out is noted in the YAML's header comment.
 - Inputs sent to the device while verifying are not recorded in the capture.
-- If the device's agent (the tapflow process on the Mac that runs the simulators and emulators) predates the reset a run does, only the app's data is cleared before the replay, and the result's `resetNote` says so.
+- If the device's agent (the tapflow process that runs the simulators and emulators) predates the reset a run does, only the app's data is cleared before the replay, and the result's `resetNote` says so.
 
 ### 5. Save the flow {#save}
 
-Save the YAML the coding agent received in your app repository, for example as `.tapflow/flows/<name>.yaml`, and CI runs it with `tapflow flow run`. The YAML has already passed its replay, so keep it as it is. For a flow with a secret, pass the value with `--secret` when it runs ([Secrets](#secrets)).
+Save the YAML the AI agent received in your app repository, for example as `.tapflow/flows/<name>.yaml`, and CI runs it with `tapflow flow run`. The YAML has already passed its replay, so keep it as it is. For a flow with a secret, pass the value with `--secret` when it runs ([Secrets](#secrets)).
 
 ## Read the header comment {#header-comment}
 
-The YAML `capture_flow` returns says where it came from and what was left out in a comment at the top. The person reviewing the file in a pull request never sees the answer the coding agent got, so what the review needs is kept in the file.
+The YAML `capture_flow` returns says where it came from and what was left out in a comment at the top. The person reviewing the file in a pull request never sees the answer the AI agent got, so what the review needs is kept in the file.
 
 ```yaml
 # Captured from an AI agent's session over MCP, verified on try 1: 8 steps recorded.
@@ -103,11 +103,11 @@ steps:
 |---|---|
 | `Captured from an AI agent's session over MCP, verified on try N: M steps recorded.` | Which Verify passed, and how many steps were recorded |
 | `Outside the range (a–b): ...` | Steps outside the chosen range |
-| `Left out by the agent: ...` | Steps the coding agent left out |
+| `Left out by the agent: ...` | Steps the AI agent left out |
 | `Left out after they failed in an earlier Verify (dropped-after-verify-failure): ...` | Steps left out after an earlier Verify failed on them |
 | `Fragile: #N reason` | A step replayed by its position on the screen rather than an element, and why |
-| `The touch was seen to hit another element than the agent named: ...` | The device saw the touch hit another element than the one the coding agent named. An overlay you cannot see may be covering it |
-| `Written by the agent (run_flow), not observed: N blocks` | How many blocks of steps the coding agent wrote itself with `run_flow` |
+| `The touch was seen to hit another element than the agent named: ...` | The device saw the touch hit another element than the one the AI agent named. An overlay you cannot see may be covering it |
+| `Written by the agent (run_flow), not observed: N blocks` | How many blocks of steps the AI agent wrote itself with `run_flow` |
 | `Not named by an element whose name holds a typed secret: ...` | A step named another way than by an element showing a secret's value |
 | `Left out, a step holding a typed secret: ...` | A step left out because it held a secret's value |
 | `Warning: no expectation — the flow checks only that each step could be done` | No expectation: the flow checks only that each step could be done |
@@ -119,7 +119,7 @@ The comment is for the review. Reading the flow ignores it.
 
 Each step is named by what was known when it was done. Nothing is replayed beforehand to find the names.
 
-1. **A tap on an element** uses the selector the coding agent named. If the device reports the touch hit another element, the selector stays and the header comment says so.
+1. **A tap on an element** uses the selector the AI agent named. If the device reports the touch hit another element, the selector stays and the header comment says so.
 2. **A tap by coordinates** uses the element the device reported it hit, when the screen read just before the tap finds that element alone and the element's centre is that element.
 3. Otherwise, it uses the element at that point on the screen read just before the tap.
 4. Failing that, it stays a position on the screen, marked `fragile`. A flow with position steps carries the size of the capture's screen as `viewport`, and a device of another size is refused before the run.
@@ -134,7 +134,7 @@ Text treated as a secret is not written in the flow file. The flow keeps only an
 
 - Name it with `capture_flow`'s `secrets`. Unnamed, it is `PASSWORD` when the field said it hides its text and `SECRET` otherwise, numbered from the second.
 - A name starts with a letter or `_` and holds only letters, digits and `_`. One name holds one value, so giving the same name to two steps that typed different values is refused.
-- A secret's value is used only for Verify, and is in neither the YAML nor the result the coding agent gets.
+- A secret's value is used only for Verify, and is in neither the YAML nor the result the AI agent gets.
 - An element that shows a secret's value on screen (a Copy button showing the token just typed, say) is not offered as an expectation and does not name a tap. Such a step is named another way or left out, and the header comment says so.
 
 ## Edit a captured flow {#edit-a-captured-flow}
@@ -163,8 +163,8 @@ An iOS app reads its accessibility setting when it starts, so taps in an app alr
 - A capture lives only in the MCP server process's memory and is never written to disk or a log. The relay stores none of it either.
 - A capture stays while you hold the device. After `disconnect_device` lets the device go, it is dropped an hour later; connecting to the same device again before then restarts that hour from the next release. It is also dropped when a new capture opens, when `capture: false` ends it, or when the MCP server process ends.
 - Verify resets the device before it replays. On iOS that resets the keychain, privacy permissions, clipboard and location of every app on the device, so do not use one whose other apps must stay signed in.
-- On Android, while observing, a coding agent's tap is lifted only once the device knows what it touched, at most a quarter of a second later. A person's taps, drags and flings are not delayed.
-- The steps the capture makes from taps and typing have no `assertNotVisible` and no `timeout`. Steps from a `run_flow` are kept as written, so one the coding agent wrote with them keeps them. Add them elsewhere as in [Edit a captured flow](#edit-a-captured-flow).
+- On Android, while observing, an AI agent's tap is lifted only once the device knows what it touched, at most a quarter of a second later. A person's taps, drags and flings are not delayed.
+- The steps the capture makes from taps and typing have no `assertNotVisible` and no `timeout`. Steps from a `run_flow` are kept as written, so one the AI agent wrote with them keeps them. Add them elsewhere as in [Edit a captured flow](#edit-a-captured-flow).
 - If the app was launched with launch arguments, the flow's `launchApp` does not carry them. `list_captured_steps` says so.
 
 ## Troubleshooting {#troubleshooting}
@@ -181,7 +181,7 @@ An iOS app reads its accessibility setting when it starts, so taps in an app alr
 
 ## Related {#related}
 
-- [MCP server](/ai-agents/mcp-server): installing it, connecting a coding agent, and the tools
+- [MCP server](/ai-agents/mcp-server): installing it, connecting an AI agent, and the tools
 - [Flow Capture](/testing/flow-capture): how a teammate saves their own steps as a flow in the dashboard
 - [Flow reference](/automation/flows): the flow file format, `tapflow flow run` and secrets
 - [Flow Runs](/automation/runs): the results of flows run in CI

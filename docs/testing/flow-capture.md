@@ -148,6 +148,6 @@ The file name (`flows/<name>.yaml`) and the YAML are shown.
 ## Related {#related}
 
 - [Flows](/automation/flows): the flow file format, `tapflow flow run` and secrets
-- [AI Agent Flow Capture](/ai-agents/agent-flow-capture): how a coding agent saves the path it checked as a flow over MCP
+- [AI Agent Flow Capture](/ai-agents/agent-flow-capture): how an AI agent saves the path it checked as a flow over MCP
 - [QA Session](/testing/qa-session): what a session offers and its info card
 - [Device controls](/testing/device-controls): how to tap, swipe and type in a session
