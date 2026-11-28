@@ -362,27 +362,6 @@ describe('Windows setup android: the JDK', () => {
     expect(results[0]!.detail).toContain(managed)
   })
 
-  it('with --yes skips winget (it can raise UAC) and takes the per-user Temurin zip', async () => {
-    const managed = `${HOME}\\.tapflow\\tools\\jdk`
-    const pc = fakePc({
-      files: ['winget', TAR],
-      interactive: false,
-      respond: (c, state) => {
-        if (c.file === TAR && c.args[1]!.endsWith('.zip') && c.args.includes(managed)) {
-          state.files.add(`${managed}\\jdk-21.0.13.1+2\\bin\\java.exe`)
-          return { status: 0, stdout: '', stderr: '' }
-        }
-        if (c.file.endsWith('java.exe')) return { status: 0, stdout: '', stderr: 'openjdk version "21.0.13"\n' }
-        return undefined
-      },
-    })
-    const { result } = await checkAndFixJdkWindows({ ...pc.deps, interactive: () => true, unattended: true })
-
-    expect(pc.calls.some((c) => c.file.endsWith('winget.exe'))).toBe(false)
-    expect(pc.downloads[0]).toBe('https://example.invalid/jdk.zip')
-    expect(result).toMatchObject({ ok: true, state: 'created' })
-  })
-
   it('rejects a Temurin zip whose SHA-256 does not match', async () => {
     const pc = fakePc({ files: [TAR], hashes: { 'OpenJDK21U-jdk_x64_windows_hotspot_21.0.13.1_2.zip': 'bad' } })
     const results = await runSetupAndroidWindows(pc.deps)

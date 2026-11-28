@@ -80,18 +80,10 @@ function hasIosDevice(): boolean {
   }
 }
 
-export interface SetupOptions {
-  /**
-   * `tapflow setup --yes`. Only the Windows Android flow reads it, and only for its own
-   * download/install/create-AVD prompts; macOS, Linux, iOS and the network filter ignore it.
-   */
-  assumeYes?: boolean
-}
-
-export async function runSetupAndroid(opts: SetupOptions = {}): Promise<SetupStepResult[]> {
+export async function runSetupAndroid(): Promise<SetupStepResult[]> {
   // Windows has no Homebrew: winget/Temurin zip, Google's cmdline-tools zip, then the same SDK
   // packages and AVD set as below (setup-android-windows.ts). macOS and Linux are unchanged.
-  if (process.platform === 'win32') return runSetupAndroidWindows(realWindowsDeps({ assumeYes: opts.assumeYes }))
+  if (process.platform === 'win32') return runSetupAndroidWindows(realWindowsDeps())
   const results: SetupStepResult[] = []
   const brew = await checkAndFixHomebrew()
   results.push(brew)

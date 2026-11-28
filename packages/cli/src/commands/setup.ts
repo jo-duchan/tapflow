@@ -1,13 +1,12 @@
 import { confirm, isCancel } from '@clack/prompts'
-import { runSetupAndroid, runSetupIos, type SetupOptions, type SetupStepResult } from '../lib/setup.js'
+import { runSetupAndroid, runSetupIos, type SetupStepResult } from '../lib/setup.js'
 import { resolveAdb } from '../lib/doctor.js'
 import { isInteractive } from '../lib/interactive.js'
 import { warn, banner, step, BOLD, GREEN, RED, YELLOW, DIM, R } from '../lib/print.js'
 
-// `--yes` reaches the Windows Android flow only. iOS (sudo, the network-filter approval) never sees it.
-const RUNNERS: Record<string, (opts: SetupOptions) => Promise<SetupStepResult[]>> = {
-  ios: () => runSetupIos(),
-  android: (opts) => runSetupAndroid(opts),
+const RUNNERS: Record<string, () => Promise<SetupStepResult[]>> = {
+  ios: runSetupIos,
+  android: runSetupAndroid,
 }
 
 // 인자 없이 실행 시 환경을 보고 가능한 플랫폼을 고른다.
@@ -40,7 +39,7 @@ function printResults(results: SetupStepResult[]): void {
   }
 }
 
-export async function cmdSetup(platform?: string, opts: SetupOptions = {}): Promise<void> {
+export async function cmdSetup(platform?: string): Promise<void> {
   let targets: string[]
   if (platform) {
     if (!RUNNERS[platform]) {
@@ -56,17 +55,13 @@ export async function cmdSetup(platform?: string, opts: SetupOptions = {}): Prom
     }
   }
 
-  if (opts.assumeYes && !(process.platform === 'win32' && targets.includes('android'))) {
-    warn('--yes only answers the prompts of `tapflow setup android` on Windows; it is ignored here.')
-  }
-
   // 각 플랫폼 실행 후, 마지막에 relay/agent READY 톤의 요약 배너로 준비 상태를 알린다.
   const summary: string[] = []
   let allReady = true
   let needsNewShell = false
   for (const t of targets) {
     console.log(`\n${BOLD}tapflow setup ${t}${R}\n`)
-    const results = await RUNNERS[t](opts)
+    const results = await RUNNERS[t]()
     printResults(results)
     if (results.some((r) => r.detail?.includes('new terminal'))) needsNewShell = true
     const pending = results.filter((r) => !r.ok)

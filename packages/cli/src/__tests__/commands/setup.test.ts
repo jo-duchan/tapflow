@@ -74,20 +74,10 @@ describe('cmdSetup', () => {
     expect(mockRunSetupIos).not.toHaveBeenCalled()
   })
 
-  it('--yes reaches runSetupAndroid only, never runSetupIos', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    await cmdSetup('android', { assumeYes: true })
-    expect(mockRunSetupAndroid).toHaveBeenCalledWith({ assumeYes: true })
-    expect(errLines.join('\n')).not.toContain('--yes')
-
-    await cmdSetup('ios', { assumeYes: true })
-    expect(mockRunSetupIos).toHaveBeenCalledWith()
-  })
-
   it('tells Windows to open a new terminal, without the POSIX `exec $SHELL`', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: 'open a new terminal to use them.' }])
-    await cmdSetup('android', {})
+    await cmdSetup('android')
     const out = logLines.join('\n')
     expect(out).toContain('Open a new terminal, then `tapflow doctor`')
     expect(out).not.toContain('exec $SHELL')
@@ -96,16 +86,10 @@ describe('cmdSetup', () => {
   it('on Windows, does not say the environment was written when writing it failed', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     mockRunSetupAndroid.mockResolvedValue([{ label: 'Android SDK installed', ok: true, detail: `SDK at C:\\sdk. ${WINDOWS_ENV_WRITE_FAILED}` }])
-    await cmdSetup('android', {})
+    await cmdSetup('android')
     const out = logLines.join('\n')
     expect(out).toContain('Open a new terminal, then `tapflow doctor`')
     expect(out).not.toMatch(/were added|was added|has added/)
-  })
-
-  it('--yes off Windows is ignored, with a warning', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    await cmdSetup('android', { assumeYes: true })
-    expect(errLines.join('\n')).toContain('--yes only answers')
   })
 
   it('인자 없음 + darwin + adb 있음 → ios와 android 둘 다', async () => {

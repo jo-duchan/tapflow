@@ -81,12 +81,6 @@ export interface WindowsSetupDeps {
   fileHash: (file: string, algorithm: 'sha1' | 'sha256') => Promise<string>
   interactive: () => boolean
   confirm: (message: string) => Promise<boolean>
-  /**
-   * `tapflow setup android --yes`: the download/install/create-AVD confirms answer themselves, even
-   * without a TTY. It never elevates: winget is skipped (its MSI can raise UAC), so a missing JDK
-   * comes from the per-user Temurin zip instead.
-   */
-  unattended?: boolean
   log: (line: string) => void
 }
 
@@ -255,7 +249,7 @@ export async function checkAndFixJdkWindows(deps: WindowsSetupDeps): Promise<{ r
   if (!deps.interactive()) {
     return { result: { ...jdkFailure(`${JDK_MANUAL} (skipped in non-interactive mode)`), warn: true }, jdk: null }
   }
-  const winget = deps.unattended ? null : deps.which('winget')
+  const winget = deps.which('winget')
   const how = winget ? `with winget (${WINGET_JDK_ID})` : 'from adoptium.net into the tapflow folder'
   if (!(await deps.confirm(`A JDK ${WINDOWS_JDK_MIN_MAJOR}+ is required for the Android SDK tools. Install Temurin ${WINDOWS_JDK_MAJOR} ${how}?`))) {
     return { result: { ...jdkFailure(`Skipped. ${JDK_MANUAL}`), warn: true }, jdk: null }
@@ -583,8 +577,8 @@ export async function checkAndFixAvdWindows(deps: WindowsSetupDeps, sdk: string,
     ? ` This avdmanager offers no device for ${unavailable.map((s) => `${s.name} (${s.deviceCandidates.join(', ')})`).join('; ')}, so ${unavailable.length === 1 ? 'it cannot' : 'they cannot'} be created here.`
     : ''
   if (creatable.length === 0) return stop({ label: 'AVD', ok: false, warn: true, detail: `${situation}${unavailableNote} ${manualHint}` })
-  // A decline is not remembered: the next run offers the same names again, and `--yes` (the person's
-  // consent for every prompt) creates them. That is the meaning of "offered", not an oversight.
+  // A decline is not remembered: the next run offers the same names again. That is the meaning of
+  // "offered", not an oversight.
   const names = creatable.map((c) => c.spec.name).join(', ')
   const question = finishing
     ? `An earlier run did not create every tapflow AVD. Create ${names} now?`
@@ -654,13 +648,7 @@ export async function runSetupAndroidWindows(deps: WindowsSetupDeps = realWindow
   return results
 }
 
-export interface WindowsSetupOptions {
-  /** `--yes`: answer the install/download/create-AVD prompts, also when not interactive. */
-  assumeYes?: boolean
-}
-
-export function realWindowsDeps(opts: WindowsSetupOptions = {}): WindowsSetupDeps {
-  const assumeYes = opts.assumeYes === true
+export function realWindowsDeps(): WindowsSetupDeps {
   return {
     env: process.env,
     arch: process.arch,
@@ -704,13 +692,9 @@ export function realWindowsDeps(opts: WindowsSetupOptions = {}): WindowsSetupDep
       const h = createHash(algorithm)
       createReadStream(file).on('error', reject).on('data', (c) => h.update(c)).on('end', () => resolve(h.digest('hex')))
     }),
-    interactive: () => assumeYes || isInteractive(),
-    unattended: assumeYes,
+    // Interactive only, as packages/cli/AGENTS.md requires: no terminal, no installs.
+    interactive: () => isInteractive(),
     confirm: async (message) => {
-      if (assumeYes) {
-        console.log(`${message} yes (--yes)`)
-        return true
-      }
       const answer = await confirm({ message })
       return !isCancel(answer) && answer === true
     },
