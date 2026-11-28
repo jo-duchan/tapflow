@@ -63,7 +63,7 @@ description: {한 문장. llms.txt 설명과 맞춘다}
 ---
 ```
 
-**실험적이거나 지원 중단 예정인 페이지는 frontmatter에 `status`를 단다.** `status: experimental`, 또는 `status: deprecated`와 대체 페이지 `replacedBy: /경로`(`/ko` 없이, KO 페이지도 같은 값)다. 값이 없으면 정식이다. 페이지 맨 위 배너와 사이드바 배지, `llms-full.txt`의 `Status:` 줄은 이 값에서 만들어지므로 **경고 박스를 본문에 손으로 쓰지 않는다.** `llms.txt` 행 끝에는 `(experimental)` 또는 `(deprecated → https://www.tapflow.dev/{replacedBy})`를 직접 붙이고, `pageStatus` 테스트가 frontmatter와 맞는지 검사한다. 정식 페이지 안의 실험적 절 하나는 H2 아래에 `<Badge type="warning" text="Experimental" />`(KO `text="실험적"`)를 단다. 상태의 뜻은 `/get-started/introduction#page-status`에 있다. `pnpm docs:dev` 중 `status`를 바꾸면 사이드바는 dev 서버를 다시 띄워야 반영된다(config는 시작할 때 한 번 읽는다).
+**실험적이거나 지원 중단 예정인 페이지는 frontmatter에 `status`를 단다.** `status: experimental`, 또는 `status: deprecated`와 대체 페이지 `replacedBy: /경로`(`/ko` 없이, KO 페이지도 같은 값)다. 값이 없으면 정식이다. 페이지 맨 위 배너와 사이드바 배지, `llms-full.txt`의 `Status:` 줄은 이 값에서 만들어지므로 **경고 박스를 본문에 손으로 쓰지 않는다.** `llms.txt` 행 끝에는 `(experimental)` 또는 `(deprecated → https://www.tapflow.dev{replacedBy})`를 직접 붙이고, `pageStatus` 테스트가 frontmatter와 맞는지 검사한다. 정식 페이지 안의 실험적 절 하나는 H2 아래에 `<Badge type="warning" text="Experimental" />`(KO `text="실험적"`)를 단다. 상태의 뜻은 `/get-started/introduction#page-status`에 있다. `pnpm docs:dev` 중 `status`를 바꾸면 사이드바는 dev 서버를 다시 띄워야 반영된다(config는 시작할 때 한 번 읽는다).
 
 템플릿의 섹션 순서는 유지하되, 해당 없는 섹션은 생략한다.
 

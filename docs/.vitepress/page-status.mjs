@@ -59,11 +59,11 @@ function frontmatterOf(source) {
   return /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(source)?.[1] ?? ''
 }
 
-/** One top-level scalar key, quotes stripped, or a trailing ` # comment` dropped when unquoted. */
+/** One top-level scalar key, quotes stripped and a trailing ` # comment` dropped, keeping a `#` inside quotes. */
 function scalar(frontmatter, key) {
   const m = new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`, 'm').exec(frontmatter)
   if (!m) return undefined
-  const quoted = /^(['"])(.*)\1$/.exec(m[1])
+  const quoted = /^(['"])(.*?)\1(?:[ \t]+#.*)?$/.exec(m[1])
   return quoted ? quoted[2] : m[1].replace(/[ \t]+#.*$/, '')
 }
 

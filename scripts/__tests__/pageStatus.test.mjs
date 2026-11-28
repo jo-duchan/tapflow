@@ -98,6 +98,10 @@ describe('readPageStatus', () => {
     expect(
       readPageStatus('---\nstatus: deprecated # old\nreplacedBy: "/a/b#c"\n---\n'),
     ).toEqual({ status: 'deprecated', replacedBy: '/a/b#c' })
+    expect(readPageStatus('---\nstatus: "experimental" # until #1211\n---\n')).toEqual({ status: 'experimental' })
+    expect(
+      readPageStatus(`---\nstatus: deprecated\nreplacedBy: '/a/b#c' # moved\n---\n`),
+    ).toEqual({ status: 'deprecated', replacedBy: '/a/b#c' })
   })
 
   it('refuses a value it does not know, instead of reading it as stable', () => {
@@ -234,7 +238,8 @@ describe('the real docs', () => {
     const dangling = pages
       .map((p) => ({ p, s: readPageStatus(read(p), p) }))
       .filter(({ s }) => s?.status === 'deprecated')
-      .filter(({ s }) => !pages.includes(linkToPage(s.replacedBy)))
+      // The banner and llms.txt keep a `#fragment`; the file lookup does not.
+      .filter(({ s }) => !pages.includes(linkToPage(s.replacedBy.replace(/#.*$/, ''))))
       .map(({ p }) => p)
     expect(dangling).toEqual([])
   })
