@@ -119,18 +119,7 @@ The tabs under the card hold [Comments](/testing/comments) (**Comments**) and [R
 
 ## Keyboard shortcuts {#keyboard-shortcuts}
 
-These shortcuts do not fire while the cursor is in one of the dashboard's text fields.
-
-| Shortcut | Action | Platform |
-|---|---|---|
-| <kbd>⌘</kbd> <kbd>K</kbd> | Open the [deep link](/testing/deep-links) box | iOS, Android |
-| <kbd>⌘</kbd> <kbd>S</kbd> | [Screenshot](/testing/screenshots-and-recordings#screenshots) | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Y</kbd> | Start or stop a [recording](/testing/screenshots-and-recordings#recordings) | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> | [Rotate](/testing/device-controls#rotate) | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd> | [Home button](/testing/device-controls#device-buttons) | iOS |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd> | Show or hide the [software keyboard](/testing/device-controls#software-keyboard) | iOS |
-| <kbd>⌥</kbd> + drag | [Pinch](/testing/device-controls#touch-and-gestures) | iOS, Android |
-| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>C</kbd>·<kbd>X</kbd>·<kbd>V</kbd> | [Clipboard](/testing/device-controls#clipboard) copy, cut and paste | iOS, Android |
+Common actions have shortcuts: <kbd>⌘</kbd> <kbd>K</kbd> opens the [deep link](/testing/deep-links) box, <kbd>⌘</kbd> <kbd>S</kbd> takes a [screenshot](/testing/screenshots-and-recordings#screenshots), and <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Y</kbd> starts or stops a [recording](/testing/screenshots-and-recordings#recordings). They do not fire while the cursor is in one of the dashboard's text fields. Every shortcut is in [Keyboard shortcuts](/reference/keyboard-shortcuts#qa-session).
 
 Any other key goes to the device once you have clicked its screen.
 

@@ -119,18 +119,7 @@ tapflow 밖에서 기기를 껐다 켰다면(Simulator.app 종료 등) 돌아갈
 
 ## 키보드 단축키 {#keyboard-shortcuts}
 
-아래 단축키는 대시보드의 입력창에 커서가 있을 때는 동작하지 않습니다.
-
-| 단축키 | 동작 | 플랫폼 |
-|---|---|---|
-| <kbd>⌘</kbd> <kbd>K</kbd> | [딥 링크](/ko/testing/deep-links) 입력창 열기 | iOS, Android |
-| <kbd>⌘</kbd> <kbd>S</kbd> | [스크린샷](/ko/testing/screenshots-and-recordings#screenshots) | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Y</kbd> | [녹화](/ko/testing/screenshots-and-recordings#recordings) 시작·중지 | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> | [회전](/ko/testing/device-controls#rotate) | iOS, Android |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd> | [Home 버튼](/ko/testing/device-controls#device-buttons) | iOS |
-| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd> | [소프트웨어 키보드](/ko/testing/device-controls#software-keyboard) 올리기·내리기 | iOS |
-| <kbd>⌥</kbd> + 드래그 | [핀치](/ko/testing/device-controls#touch-and-gestures) | iOS, Android |
-| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>C</kbd>·<kbd>X</kbd>·<kbd>V</kbd> | [클립보드](/ko/testing/device-controls#clipboard) 복사·잘라내기·붙여넣기 | iOS, Android |
+자주 쓰는 동작에는 단축키가 있습니다. <kbd>⌘</kbd> <kbd>K</kbd>는 [딥 링크](/ko/testing/deep-links) 입력창을 엽니다. <kbd>⌘</kbd> <kbd>S</kbd>는 [스크린샷](/ko/testing/screenshots-and-recordings#screenshots)을 찍고 <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Y</kbd>는 [녹화](/ko/testing/screenshots-and-recordings#recordings)를 시작하거나 멈춥니다. 대시보드의 입력창에 커서가 있을 때는 동작하지 않습니다. 전체 단축키는 [키보드 단축키](/ko/reference/keyboard-shortcuts#qa-session)에 있습니다.
 
 그 밖의 키는 기기 화면을 클릭한 뒤 누르면 기기로 전달됩니다.
 

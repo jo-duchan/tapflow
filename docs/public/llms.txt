@@ -79,7 +79,7 @@
 
 ## Reference
 
-- [CLI Reference](https://www.tapflow.dev/reference/cli): Every command with a section on that page — doctor, setup, init, admin init, start, relay start, agent start, devices, boot, reset, status, logs, migrate, migrate data-dir, migrate net-filter. `tapflow flow run` is documented under Flow Reference instead.
+- [CLI Reference](https://www.tapflow.dev/reference/cli): Every command with a section on that page — doctor, setup, init, admin init, start, relay start, agent start, devices, boot, reset, status, logs, flow run (every option with its default), token set, token status, migrate, migrate data-dir, migrate net-filter. How to write flows, and what each exit code means, is in Flow Reference.
 - [Configuration](https://www.tapflow.dev/reference/configuration): tapflow.config.json schema and environment variable overrides (JWT_SECRET, TAPFLOW_PORT, TAPFLOW_DATA_DIR, SMTP_*, etc.).
 - [REST API](https://www.tapflow.dev/reference/api): Full REST API reference — Auth, Invitations, Password reset, Apps, Builds, Comments, Team, Tokens, Profile, Settings, Recordings, Agents, Logs. Base path: /api/v1/.
 - [Keyboard shortcuts](https://www.tapflow.dev/reference/keyboard-shortcuts): Every dashboard shortcut: QA Session actions (deep link, screenshot, recording, rotate, Home, software keyboard, pinch, clipboard), typing on the device, the sidebar, and the Mac Resources charts.

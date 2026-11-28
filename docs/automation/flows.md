@@ -326,20 +326,7 @@ You can pass several files at once.
 tapflow flow run .tapflow/flows/login.yaml .tapflow/flows/checkout.yaml
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--relay <url>` | Relay URL (default `ws://localhost:4000`) |
-| `--token <token>` | Personal access token (PAT) for a remote relay (or the `TAPFLOW_TOKEN` env var, or the [token file](/ai-agents/mcp-server#token-file)). Use an API-type token from the dashboard (`view, builds:write`) |
-| `--device <name>` | Target device by name. Boots it when shut down. |
-| `--session <id>` | Session id of the target device. Use it when several devices share a name and `--device` cannot pick one. |
-| `--build <id>` | Build under test. Installed before the run; the `launchApp` step launches it. |
-| `--no-install` | Skip installing the `--build` build before the run. Use it to re-run against a build that is already installed. |
-| `--junit <path>` | Write a JUnit XML report to this path. |
-| `--artifacts <dir>` | Failure-screenshot directory (default `.tapflow/artifacts`) |
-| `--timeout <seconds>` | Default per-selector wait (default 10, max 2147483.647) |
-| `--no-record` | Do not record this run on the relay. |
-| `--include-tags <tags>` | Run only flows tagged with at least one of these (comma-separated). |
-| `--exclude-tags <tags>` | Skip flows tagged with any of these (comma-separated). Wins over `--include-tags`. |
+Point the run at a device with `--device`, give it the build under test with `--build`, and write a JUnit report with `--junit`. Every option, with its default, is in the [CLI reference](/reference/cli#tapflow-flow-run).
 
 The `launchApp` step names no build and launches the one passed via `--build`. That keeps the build id out of the flow file, so the same flow runs against a fresh build on every CI run.
 
@@ -366,7 +353,7 @@ With a token, the runner records the run on the relay: each flow's pass, fail or
 - A run without a token against a relay on the same Mac is not recorded, and one line says so.
 - A run's record is deleted with its build; a record of a run with no build is deleted after 7 days.
 
-### Exit codes
+### Exit codes {#exit-codes}
 
 The exit codes are a contract so CI can tell what happened.
 
@@ -374,7 +361,7 @@ The exit codes are a contract so CI can tell what happened.
 |------|---------|
 | `0` | All flows passed |
 | `1` | At least one product failure, including a run with both product and environment failures |
-| `2` | Environment/config error before execution, or every failed flow was environmental |
+| `2` | Environment/config error before execution, every failed flow was environmental, or a `--parallel` run left flows that no device ran |
 | `130` | Cancelled by `SIGINT` (Ctrl+C, or a cancelled GitHub Actions job) |
 | `143` | Cancelled by `SIGTERM` (what `kill` sends by default) |
 
