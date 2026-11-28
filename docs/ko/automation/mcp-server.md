@@ -126,7 +126,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 |------|------|
 | `list_builds` | 릴레이의 앱·빌드 목록 조회 (`install_app`·`launch_app`에 넘길 `buildId`의 출처) |
 | `list_devices` | 연결된 시뮬레이터·에뮬레이터 목록 조회 |
-| `connect_device` | 세션 참여 (제어 전 필수). 기기를 지켜볼 수 있는 대시보드 링크 `watchUrl`을 함께 돌려줌 |
+| `connect_device` | 세션 참여 (제어 전 필수). 기기를 지켜볼 수 있는 대시보드 링크 `watchUrl`을 함께 돌려줌. `capture: true`를 주면 플로우로 남기기 위해 코딩 에이전트가 하는 일을 기록하고, `capture: false`는 기록을 끝냄([AI 에이전트 Flow Capture](/ko/automation/agent-flow-capture)) |
 | `disconnect_device` | 세션 종료 |
 | `boot_device` | 시뮬레이터·에뮬레이터 부팅 |
 | `shutdown_device` | 기기 전원 종료 (리소스 반납·다음 콜드 부팅 강제) |
@@ -139,6 +139,8 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `press_button` | 하드웨어 버튼 입력 (홈, 잠금 등) |
 | `install_app` | 앱 설치 |
 | `launch_app` | 앱 실행. `arguments`·`env`로 [실행 인자](/ko/automation/flows#launch-arguments)를 넘길 수 있습니다. 결과의 `applied`에 앱이 받은 키가 [실행 기본값](/ko/reference/configuration#launch-defaults)까지 포함해 남습니다 |
+| `list_captured_steps` | 열린 캡처의 스텝을 번호와 함께 조회. 각 스텝의 이름과 확인할 수 있는 요소([AI 에이전트 Flow Capture](/ko/automation/agent-flow-capture)) |
+| `capture_flow` | 코딩 에이전트가 고른 대로 캡처한 스텝을 플로우로 만들고, CI처럼 기기를 초기화해 재생. 통과할 때만 YAML을 돌려줌([AI 에이전트 Flow Capture](/ko/automation/agent-flow-capture)) |
 | `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음). 코딩 에이전트가 핀치하거나 기기를 돌리거나 접을 때도 이 툴로 [`pinch`](/ko/automation/flows#pinch), [`setOrientation`, `setPosture`](/ko/automation/flows#orientation-and-posture) 스텝을 씁니다 |
 | `list_runs` | `tapflow flow run`이 릴레이에 남긴 실행 기록 목록 조회 (상태·빌드·플로우 이름·CI 여부로 거르기) |
 | `get_run` | 실행 기록 하나 조회. 실패한 플로우의 단계(통과한 플로우는 단계 수)·실패 메시지·플로우 파일 경로와 실패한 플로우의 스크린샷(최대 4장) |
@@ -158,9 +160,11 @@ launch_app         → 앱 실행
 query_ui_tree      → 화면 읽기 (시각적인 확인에만 screenshot)
 tap / swipe / ...  → 조작
 query_ui_tree      → 결과 확인 → 반복
-run_flow           → 검증한 시나리오를 플로우로 재생
+capture_flow       → 확인한 경로를 플로우로 저장 (capture: true로 연결)
 disconnect_device  → 세션 종료, 다른 사람이 기기를 쓸 수 있게 반납
 ```
+
+확인한 경로를 플로우로 남기려면 코딩 에이전트가 경로를 따라가기 전에 `connect_device`로 캡처를 열고, 마지막에 `list_captured_steps`와 `capture_flow`를 부릅니다. [AI 에이전트 Flow Capture](/ko/automation/agent-flow-capture)를 참고하세요.
 
 ::: info 시뮬레이터 이미 부팅된 경우
 `list_devices` 응답의 `status` 필드가 `"booted"`이면 `boot_device`를 생략할 수 있습니다.

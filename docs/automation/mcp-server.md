@@ -126,7 +126,7 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 |------|-------------|
 | `list_builds` | List the apps and builds on the relay (where the `buildId` for `install_app` and `launch_app` comes from) |
 | `list_devices` | List connected simulators and emulators |
-| `connect_device` | Join a session (required before controlling a device). Also returns `watchUrl`, a dashboard link for watching the device |
+| `connect_device` | Join a session (required before controlling a device). Also returns `watchUrl`, a dashboard link for watching the device. With `capture: true`, records what the coding agent does for a flow, and `capture: false` ends that ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
 | `disconnect_device` | End a session |
 | `boot_device` | Boot a simulator or emulator |
 | `shutdown_device` | Power the device down (frees resources; forces a cold boot next time) |
@@ -139,6 +139,8 @@ Connected straight to the relay's port on the Mac it runs on, the MCP server sta
 | `press_button` | Press a hardware button (home, lock, etc.) |
 | `install_app` | Install an app |
 | `launch_app` | Launch an installed app. `arguments` and `env` pass [launch arguments](/automation/flows#launch-arguments). The result's `applied` names the keys the app received, [launch defaults](/reference/configuration#launch-defaults) included |
+| `list_captured_steps` | The open capture's numbered steps, how each is named, and what each may expect ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
+| `capture_flow` | Make a flow of the captured steps by the coding agent's choices, reset the device as CI does and replay it. Returns the YAML only if it passes ([AI Agent Flow Capture](/automation/agent-flow-capture)) |
 | `run_flow` | Replay a YAML flow deterministically (no further LLM calls). Also how a coding agent pinches, turns or folds the device: a [`pinch`](/automation/flows#pinch), [`setOrientation` or `setPosture`](/automation/flows#orientation-and-posture) step |
 | `list_runs` | List the run records `tapflow flow run` left on the relay (filter by status, build, flow name, CI or local) |
 | `get_run` | Read one run record: each failed flow's steps (a passed flow's step count), failure message and file path, and screenshots of up to four failed flows |
@@ -158,9 +160,11 @@ launch_app         → launch the app
 query_ui_tree      → read the screen (screenshot only for something visual)
 tap / swipe / ...  → interact
 query_ui_tree      → check the result → repeat
-run_flow           → replay the verified scenario as a flow
+capture_flow       → save the verified path as a flow (connect with capture: true)
 disconnect_device  → end the session, freeing the device for others
 ```
+
+To save the verified path as a flow, the coding agent opens a capture with `connect_device` before walking it and ends with `list_captured_steps` and `capture_flow`. See [AI Agent Flow Capture](/automation/agent-flow-capture).
 
 ::: info Device already booted
 If `list_devices` returns `"status": "booted"` for a device, you can skip `boot_device`.
