@@ -82,4 +82,6 @@ If you forget your password, ask an Admin. The Admin clicks **Reset pwd** in **S
 - [Manual QA](/testing): every feature App Center and a QA Session offer.
 - [QA Session](/testing/qa-session): picking a Mac and a device, the info card, and why a session ends.
 - [App Center](/testing/app-center): the build list, review status, search and filters.
+- [AI Agent QA](/ai-agents): if someone sent you a link to watch a coding agent test on a device, this explains what it is.
+- [Automation QA](/automation): save what you did in a QA Session as a flow and replay it in CI.
 - [Sign-in & accounts](/troubleshooting/accounts): what to do when an invite or password-reset link has expired.

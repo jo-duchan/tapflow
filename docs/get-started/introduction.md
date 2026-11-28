@@ -86,9 +86,9 @@ Visual quality and latency may differ between the two. Resolution and decoder ad
 
 There are three ways to use tapflow, and a team can start from any of them. All three run on the same devices and sessions.
 
-- **Manual QA**: CI or the operator uploads a build, and teammates test it in the browser. This is the most mature path, and the Get started and Manual QA sections cover it.
-- **AI agents** (experimental): the [MCP server](/ai-agents/mcp-server) lets a coding agent drive a simulator or emulator.
-- **Automation** (experimental): the [flow runner](/automation/flows) replays YAML flows with no LLM calls, mainly in CI.
+- **[Manual QA](/testing)**: CI or the operator uploads a build, and teammates test it in the browser. This is the most mature way.
+- **[AI Agent QA](/ai-agents)** (experimental): a coding agent drives a simulator or emulator through the [MCP server](/ai-agents/mcp-server).
+- **[Automation QA](/automation)** (experimental): `tapflow flow run` replays YAML flows with no AI model calls, mainly in CI.
 
 Each one works on its own, and manual testing never depends on the other two.
 
