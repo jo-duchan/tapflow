@@ -26,15 +26,29 @@ tapflow의 **AI 에이전트**(MCP 서버)와 **자동화**(플로우 러너)는
           TAPFLOW_RELAY_URL: ${{ secrets.TAPFLOW_RELAY_URL }}
           TAPFLOW_TOKEN: ${{ secrets.TAPFLOW_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          WORKSPACE: ${{ github.workspace }}
         run: |
-          claude --mcp-config .mcp.json -p "
+          # MCP 서버는 릴레이의 ws:// 주소를 받고, 업로드 API는 같은 릴레이의 http 주소를 씁니다.
+          RELAY_HTTP="${TAPFLOW_RELAY_URL/#ws/http}"
+          BUILD_ID=$(curl -sf -X POST "$RELAY_HTTP/api/v1/builds" \
+            -H "Authorization: Bearer $TAPFLOW_TOKEN" \
+            -F "file=@MyApp.app.zip" | jq -r '.id')
+
+          claude --mcp-config .mcp.json --allowedTools "mcp__tapflow" -p "
             사용 가능한 기기를 조회하고 부팅된 iOS 시뮬레이터에 연결하세요.
-            $WORKSPACE/MyApp.app.zip 빌드를 설치하고 앱을 실행하세요.
-            스크린샷을 찍어 메인 화면이 정상적으로 로드됐는지 확인하세요.
-            오류 메시지나 빈 화면이 있으면 문제를 설명하고 실패로 종료하세요.
-          "
+            빌드 $BUILD_ID를 설치하고 앱을 실행하세요.
+            화면을 읽어 메인 화면이 정상적으로 로드됐는지 확인하세요.
+            끝나면 기기 연결을 해제하세요.
+            답의 마지막 줄에 TAPFLOW_VERDICT: pass 또는 TAPFLOW_VERDICT: fail과 그 이유를 쓰세요.
+          " | tee claude-output.txt
+
+          grep -Eq '^TAPFLOW_VERDICT: pass[[:space:]]*$' claude-output.txt
 ```
+
+이 단계에서 눈여겨볼 곳은 세 군데입니다.
+
+- `install_app`은 러너에 있는 파일이 아니라 릴레이에 이미 있는 빌드를 ID로 설치합니다. 그래서 이 단계는 만든 빌드(여기서는 `MyApp.app.zip`)를 먼저 [빌드 API](/ko/operate/ci-distribution)로 올리고 돌려받은 ID를 코딩 에이전트에게 줍니다. `TAPFLOW_TOKEN`은 API 유형 토큰이라 업로드할 수 있습니다.
+- `claude -p` 실행에는 도구 사용을 승인할 사람이 없어서 허용하지 않은 도구는 거부됩니다. `--allowedTools "mcp__tapflow"`는 tapflow MCP 서버의 도구만 허용합니다.
+- `claude`는 답을 마치면 종료 코드 `0`으로 끝납니다. 답에 앱이 망가졌다고 써도 마찬가지입니다. 그래서 단계의 성패는 마지막 줄이 정합니다. 코딩 에이전트가 `TAPFLOW_VERDICT: pass`를 썼을 때만 통과하므로 중간에 끝났거나 판정을 쓰지 않은 실행도 실패합니다.
 
 탐색적 프롬프트는 결과를 기술하는 방식이 좋습니다. "목록의 세 번째 항목을 탭하세요" 같은 단계 지시 대신 "홈 화면이 로드됐는지 확인하세요"처럼 목표를 쓰면 UI가 바뀌어도 잘 깨지지 않습니다. 다만 반복 실행할 회귀 테스트라면 확인된 시나리오를 플로우로 고정하는 편이 결정적이고 비용도 들지 않습니다.
 
