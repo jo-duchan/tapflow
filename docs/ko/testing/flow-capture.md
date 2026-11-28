@@ -5,8 +5,6 @@ description: QA 세션에서 직접 해 본 탭, 스와이프, 입력을 플로�
 
 # Flow Capture
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 [QA 세션](/ko/testing/qa-session)에서 직접 해 본 탭, 스와이프, 입력을 [플로우](/ko/automation/flows) YAML 파일로 저장할 수 있습니다. 저장한 플로우는 CI에서 `tapflow flow run`으로 같은 동작을 반복합니다. 플로우 파일을 손으로 쓰지 않아도 됩니다. 재생할 때 AI 모델은 쓰지 않습니다. 동작 기록은 처음부터 켜져 있고 팀원마다 끌 수 있습니다.
 
 ## 사용 방법 {#how-to-use}

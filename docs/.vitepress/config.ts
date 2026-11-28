@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import tapflowLight from './theme/tapflow-light.json'
 import tapflowDark from './theme/tapflow-dark.json'
 import { emitAgentArtifacts } from './agent-artifacts.mjs'
+import { withStatusBadges } from './page-status.mjs'
 
 // The canonical origin, written once.
 //
@@ -12,6 +16,13 @@ import { emitAgentArtifacts } from './agent-artifacts.mjs'
 // every one of the sitemap's 47 URLs and every link in `llms.txt`. Repeating the string is what
 // let the two drift, so it is a constant now.
 const SITE = 'https://www.tapflow.dev'
+
+// The docs source root, for reading each sidebar page's `status` frontmatter (`page-status.mjs`).
+// Resolved from this file rather than the working directory: the root scripts suite imports this
+// config from the repo root. `vitepress dev` reads it once, so a changed `status` shows in the
+// sidebar after a restart; the page banner follows the frontmatter on reload.
+const SRC_DIR = fileURLToPath(new URL('..', import.meta.url))
+const readPage = (page: string) => readFileSync(join(SRC_DIR, page), 'utf8')
 
 // VitePress(mdit-vue) 기본 slugify는 NFKD 정규화라 한글 음절을 자모 분리(NFD) 형태의 헤딩 id로 만든다.
 // 브라우저 URL hash는 NFC라 바이트가 어긋나 비ASCII 헤딩으로 스크롤이 안 된다.
@@ -339,7 +350,7 @@ export default withMermaid(defineConfig({
           { text: 'Docs', link: '/get-started/introduction', activeMatch: docsActiveMatch(enSidebar) },
           { text: 'Changelog', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
-        sidebar: enSidebar,
+        sidebar: withStatusBadges(enSidebar, readPage, 'en'),
       },
     },
     ko: {
@@ -350,7 +361,7 @@ export default withMermaid(defineConfig({
           { text: '문서', link: '/ko/get-started/introduction', activeMatch: docsActiveMatch(koSidebar, '/ko') },
           { text: '변경 기록', link: 'https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md' },
         ],
-        sidebar: koSidebar,
+        sidebar: withStatusBadges(koSidebar, readPage, 'ko'),
       },
     },
   },

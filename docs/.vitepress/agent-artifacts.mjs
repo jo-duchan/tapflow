@@ -13,6 +13,7 @@
 // all.
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { readPageStatus } from './page-status.mjs'
 
 /** The path prefix VitePress gives the Korean locale. */
 const TRANSLATION_PREFIX = 'ko/'
@@ -81,7 +82,12 @@ export function pageUrl(page, hostname) {
  * Each section is preceded by the page's own URL, so an agent that quotes a passage can cite the
  * page it came from rather than the bundle.
  *
- * @param {{ page: string, source: string }[]} pages already filtered and ordered
+ * An experimental or deprecated page also gets a `Status:` line under its URL. The bundle strips
+ * frontmatter, and the page's banner is drawn by the theme from that frontmatter, so without this
+ * line the bundle would present every page as stable.
+ *
+ * @param {{ page: string, source: string, status?: ReturnType<typeof readPageStatus> }[]} pages
+ *   already filtered and ordered
  * @param {string} hostname origin with no trailing slash
  */
 export function renderLlmsFull(pages, hostname) {
@@ -104,8 +110,14 @@ export function renderLlmsFull(pages, hostname) {
     '',
   ].join('\n')
 
-  const sections = pages.map(({ page, source }) =>
-    [`# ${pageUrl(page, hostname)}`, '', source.trimEnd(), ''].join('\n'),
+  const statusLine = (status) =>
+    status.status === 'deprecated'
+      ? `Status: deprecated, replaced by ${hostname}${status.replacedBy}`
+      : `Status: ${status.status}`
+  const sections = pages.map(({ page, source, status }) =>
+    [`# ${pageUrl(page, hostname)}`, '', ...(status ? [statusLine(status), ''] : []), source.trimEnd(), ''].join(
+      '\n',
+    ),
   )
 
   return [header, ...sections].join('\n---\n\n')
@@ -129,7 +141,7 @@ export function renderLlmsFull(pages, hostname) {
 export async function emitAgentArtifacts({ srcDir, outDir, pages, hostname }) {
   const ordered = [...pages].sort()
   const copied = []
-  /** @type {{ page: string, source: string }[]} */
+  /** @type {{ page: string, source: string, status: ReturnType<typeof readPageStatus> }[]} */
   const bundled = []
 
   for (const page of ordered) {
@@ -141,7 +153,11 @@ export async function emitAgentArtifacts({ srcDir, outDir, pages, hostname }) {
     await copyFile(join(srcDir, page), target)
     copied.push(page)
     if (!isTranslation(page) && !isLanding(source)) {
-      bundled.push({ page, source: source.replace(FRONTMATTER, '').trimStart() })
+      bundled.push({
+        page,
+        source: source.replace(FRONTMATTER, '').trimStart(),
+        status: readPageStatus(source, page),
+      })
     }
   }
 

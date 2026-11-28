@@ -5,8 +5,6 @@ description: QA 세션의 기기를 마우스와 키보드로 다루는 방법�
 
 # 기기 조작
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 [QA 세션](/ko/testing/qa-session)의 기기는 마우스와 키보드로 실제 폰처럼 다룹니다. 따로 켤 설정은 없고 세션을 시작하면 바로 쓸 수 있습니다. 버튼은 기기 오른쪽 툴바에 있고 마우스를 올리면 이름과 단축키가 보입니다.
 
 ## 화면 조작 {#touch-and-gestures}
@@ -34,7 +32,7 @@ iOS는 기기 테두리에 그려진 측면 버튼(전원, 볼륨 등)을 클릭
 
 ## 소프트웨어 키보드 {#software-keyboard}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS 전용" />
 
 툴바의 키보드 버튼(**Software keyboard**, <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd>)을 누르면 iOS 시뮬레이터의 화면 키보드가 올라오거나 내려갑니다. 화면 키보드가 가린 레이아웃을 확인할 때 씁니다. 기기가 응답하지 않으면 키보드 상태가 바뀌지 않았다는 알림이 뜹니다.
 
@@ -44,7 +42,7 @@ iOS는 기기 테두리에 그려진 측면 버튼(전원, 볼륨 등)을 클릭
 
 ### iOS 회전 {#rotate-ios}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS 전용" />
 
 <a id="rotate-iphone-duo"></a>
 
@@ -58,7 +56,7 @@ Xcode의 DeviceHub나 Simulator.app에서 돌린 방향은 세션을 시작할 �
 
 ### Android 회전 {#rotate-android}
 
-<Badge type="info" text="Android" />
+<Badge type="info" text="Android 전용" />
 
 Android 에뮬레이터도 iOS처럼 **Rotate**를 누를 때마다 기기 몸체가 시계 방향으로 90°씩 돌아갑니다. 기기가 먼저 돌아가고 화면이 따라옵니다. 앱이 그 방향을 지원하면 앱 화면이 다시 바로 서고 지원하지 않으면 옆으로 누운 채 보입니다. 직접 띄운 에뮬레이터 창의 회전 버튼으로 돌린 방향도 tapflow 화면에 반영됩니다. tapflow가 켠 에뮬레이터는 창 없이 실행되므로 이 버튼이 없습니다.
 
@@ -76,7 +74,7 @@ Android 에뮬레이터도 iOS처럼 **Rotate**를 누를 때마다 기기 몸�
 
 ### iPhone Duo 접기 {#fold-iphone-duo}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS 전용" />
 
 iPhone Duo는 접거나 펼치는 데 4~6초가 걸립니다. 그동안 기기 화면에 **Folding...** 또는 **Unfolding...**이 표시되고 새 화면이 켜지면 서서히 나타납니다. 펼치면 완전히 편 상태(180°)가 됩니다.
 

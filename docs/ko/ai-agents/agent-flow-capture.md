@@ -1,13 +1,10 @@
 ---
 title: AI 에이전트 Flow Capture
 description: 코딩 에이전트가 MCP로 기기에서 확인한 경로를 플로우 YAML로 남깁니다. MCP 서버가 코딩 에이전트의 탭과 입력을 기록하면 capture_flow가 CI처럼 기기를 초기화해 재생한 뒤 통과한 플로우만 돌려줍니다.
+status: experimental
 ---
 
 # AI 에이전트 Flow Capture
-
-::: warning 실험적 기능
-tapflow의 **AI 에이전트**(MCP 서버)와 **자동화**(플로우 러너)는 실험적 기능입니다. tapflow에서 가장 성숙한 부분은 수동 QA 대시보드이고 두 기능은 아직 다듬어지는 중입니다. 특히 셀렉터 매칭과 앱 실행 직후 타이밍에서 거친 부분이 있을 수 있습니다.
-:::
 
 Claude Code 같은 코딩 에이전트가 [MCP 서버](/ko/ai-agents/mcp-server)로 기기를 조작하며 확인한 경로를 [플로우](/ko/automation/flows) YAML로 남길 수 있습니다. MCP 서버가 코딩 에이전트의 탭, 스와이프, 입력을 기록하면 `capture_flow`가 `tapflow flow run`과 같은 방식으로 기기를 초기화한 뒤 플로우를 재생합니다. YAML은 재생이 통과해야만 돌려주며 재생에는 AI 모델을 쓰지 않습니다. 팀원이 대시보드에서 쓰는 [Flow Capture](/ko/testing/flow-capture)와 같은 일을 코딩 에이전트가 합니다. 캡처는 코딩 에이전트가 `connect_device`에 `capture: true`를 줄 때만 열립니다.
 

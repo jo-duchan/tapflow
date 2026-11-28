@@ -1,13 +1,10 @@
 ---
 title: Exploratory runs in CI
 description: "Let a coding agent judge the app's screen in CI on every run. It is not deterministic and costs API calls, so it suits scenarios not yet pinned into a flow."
+status: experimental
 ---
 
 # Exploratory runs in CI
-
-::: warning Experimental
-tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) are experimental. The manual QA dashboard is the most mature part of tapflow; these two are still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
-:::
 
 When you are exploring a new screen or debugging a flow, you can let an LLM judge the screen directly in CI. This path reads the screen with an LLM on every run, so it is not deterministic and it costs API calls, but it is useful for quickly checking a scenario you have not yet pinned into a flow.
 

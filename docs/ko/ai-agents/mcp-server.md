@@ -1,13 +1,10 @@
 ---
 title: MCP 서버
 description: "@tapflowio/mcp-server를 설치하고 코딩 에이전트에 연결합니다. 코딩 에이전트가 건네주는 링크로 에이전트가 조작하는 기기를 실시간으로 볼 수 있습니다."
+status: experimental
 ---
 
 # MCP 서버
-
-::: warning 실험적 기능
-tapflow의 **AI 에이전트**(MCP 서버)와 **자동화**(플로우 러너)는 실험적 기능입니다. tapflow에서 가장 성숙한 부분은 수동 QA 대시보드이고 두 기능은 아직 다듬어지는 중입니다. 특히 셀렉터 매칭과 앱 실행 직후 타이밍에서 거친 부분이 있을 수 있습니다.
-:::
 
 `@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
 

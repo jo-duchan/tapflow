@@ -4,9 +4,6 @@ description: "Take the QA Session device offline and back online to check offlin
 ---
 # Network control
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
-
 Pressing the network control button in the toolbar takes the simulator or emulator offline, and pressing it again brings it back online. Offline banners, retry handling and anything else that only appears with no connection can be checked from the browser.
 
 The button works per simulator or emulator. Other devices running on the same agent Mac, and the agent Mac's own network, are unaffected.

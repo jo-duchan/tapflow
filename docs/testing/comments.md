@@ -5,8 +5,6 @@ description: "Leave notes and images on a build from a QA Session. Comments coll
 
 # Comments
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 A comment is a note on a build. Write down what you found while testing, with a screenshot, and every teammate who opens the same build sees it. Every role can comment, and there is nothing to turn on.
 
 ## How to use {#how-to-use}

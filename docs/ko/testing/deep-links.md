@@ -5,8 +5,6 @@ description: URL을 입력해 QA 세션의 기기에서 앱의 특정 화면을 
 
 # 딥 링크
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 딥 링크는 앱의 특정 화면을 여는 URL입니다(예: `myapp://settings`). QA 세션에서 딥 링크를 입력하면 첫 화면부터 탭해 들어가지 않고 확인할 화면으로 바로 갑니다. 따로 켤 설정은 없습니다.
 
 <!-- 영상 자리: 클립을 docs/public/media/에 넣은 뒤 이 주석을 <VideoPlayer src="/media/파일.mp4" poster="/media/파일.png" />로 바꿉니다. -->

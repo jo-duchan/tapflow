@@ -1,13 +1,10 @@
 ---
 title: AI Agent Flow Capture
 description: Save a path a coding agent checked on a device over MCP as a flow YAML. The MCP server records the agent's taps and typing, and capture_flow resets the device as CI does, replays the flow, and returns it only if it passes.
+status: experimental
 ---
 
 # AI Agent Flow Capture
-
-::: warning Experimental
-tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) are experimental. The manual QA dashboard is the most mature part of tapflow; these two are still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
-:::
 
 A coding agent such as Claude Code can save the path it checked on a device through the [MCP server](/ai-agents/mcp-server) as a [flow](/automation/flows) YAML file. The MCP server records the coding agent's taps, swipes and typing, and `capture_flow` resets the device the way `tapflow flow run` does and replays the flow. It returns the YAML only if that replay passes, and no AI model runs in the replay. It is what [Flow Capture](/testing/flow-capture) does for a teammate in the dashboard, done by a coding agent. A capture opens only when the coding agent passes `capture: true` to `connect_device`.
 

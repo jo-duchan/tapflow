@@ -92,6 +92,14 @@ There are three ways to use tapflow, and a team can start from any of them. All 
 
 Each one works on its own, and manual testing never depends on the other two.
 
+## Page status {#page-status}
+
+Some pages carry an **Experimental** or **Deprecated** banner at the top, and the same badge beside their entry in the sidebar. A page without one describes a stable feature.
+
+- **Experimental**: the feature works, but its names, options and behavior can still change in a minor release. Each change is listed in the [CHANGELOG](https://github.com/jo-duchan/tapflow/blob/main/CHANGELOG.md).
+- **Deprecated**: the feature still works but will be removed. The banner links to what replaces it.
+- **Stable**: a change adds to the feature rather than altering it. Changing something that already exists goes through Deprecated first.
+
 ## Next steps {#next-steps}
 
 - [Quick Start](/get-started/quick-start): install tapflow on a Mac as the operator and follow it through to the first tap on your build.

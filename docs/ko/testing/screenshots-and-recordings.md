@@ -5,8 +5,6 @@ description: QA 세션의 기기 화면을 PNG로 내려받거나 영상으로 �
 
 # 스크린샷과 녹화
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 [QA 세션](/ko/testing/qa-session)에서 본 화면을 이미지나 영상으로 남겨 버그 보고나 [댓글](/ko/testing/comments)에 붙일 수 있습니다. 두 기능 모두 툴바의 Capture 묶음에 있고 따로 켤 설정은 없습니다.
 
 ## 스크린샷 {#screenshots}

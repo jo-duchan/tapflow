@@ -5,8 +5,6 @@ description: "Driving the device in a QA Session with mouse and keyboard: touch 
 
 # Device controls
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 You drive the device in a [QA Session](/testing/qa-session) with your mouse and keyboard, much like a phone in your hand. There is nothing to turn on: it works as soon as the session starts. The buttons are in the toolbar to the right of the device, and hovering one shows its name and shortcut.
 
 ## Touch and gestures {#touch-and-gestures}
@@ -34,7 +32,7 @@ On iOS, clicking a side button drawn on the device frame (power, volume and so o
 
 ## Software keyboard {#software-keyboard}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS only" />
 
 The keyboard button in the toolbar (**Software keyboard**, <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd>) shows or hides the iOS simulator's on-screen keyboard. Use it to check a layout the on-screen keyboard covers. If the device does not answer, a notice says the keyboard stayed where it was.
 
@@ -44,7 +42,7 @@ The keyboard button in the toolbar (**Software keyboard**, <kbd>⌘</kbd> <kbd>�
 
 ### Rotate on iOS {#rotate-ios}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS only" />
 
 <a id="rotate-iphone-duo"></a>
 
@@ -58,7 +56,7 @@ A turn made in Xcode's DeviceHub or Simulator.app shows in tapflow when a sessio
 
 ### Rotate on Android {#rotate-android}
 
-<Badge type="info" text="Android" />
+<Badge type="info" text="Android only" />
 
 An Android emulator turns like an iOS simulator: each press of **Rotate** turns the device's body a quarter turn clockwise. The device turns first and the screen follows. An app that supports the new orientation stands its screen back up; one that does not stays on its side. A turn made with the rotate buttons of an emulator window you started yourself shows in tapflow too. An emulator started by tapflow runs without a window, so it has none.
 
@@ -76,7 +74,7 @@ A foldable Android emulator and the iPhone Duo simulator get a fold button in th
 
 ### Fold an iPhone Duo {#fold-iphone-duo}
 
-<Badge type="info" text="iOS" />
+<Badge type="info" text="iOS only" />
 
 An iPhone Duo takes 4–6 seconds to fold or unfold. Meanwhile the device screen shows **Folding...** or **Unfolding...**, and the new screen fades in once it lights. Unfolding opens the device all the way (180°).
 
