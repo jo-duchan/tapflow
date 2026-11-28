@@ -29,6 +29,42 @@ const commonRules = {
   '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
 }
 
+// A selector, not a rule of our own, and it knows nothing about function boundaries: a `fetch`
+// in an event handler *registered* by an effect is flagged too. None exists today; one that
+// appears takes a suppression with its reason, and the day there are several is the day for a
+// rule that walks to the nearest function. It sees the call only where it is written: a fetch
+// wrapped in a `useCallback` that the effect calls passes — CommentPanel's `load()` did, and was
+// moved to Query when the review of this rule found it. So do `window.fetch` and a renamed `api`.
+const effectFetchSelectors = ['useEffect', 'useLayoutEffect'].flatMap((hook) =>
+  // `useEffect(...)` and `React.useEffect(...)`, the form the shadcn primitives use.
+  [`[callee.name='${hook}']`, `[callee.property.name='${hook}']`].flatMap((effect) => [
+    {
+      selector: `CallExpression${effect} CallExpression[callee.name='fetch']`,
+      message: `Read server data with TanStack Query (useQuery), not fetch inside ${hook}. See packages/dashboard/AGENTS.md.`,
+    },
+    {
+      selector: `CallExpression${effect} CallExpression[callee.object.name='api']`,
+      message: `Read server data with TanStack Query (useQuery), not api.* inside ${hook}. See packages/dashboard/AGENTS.md.`,
+    },
+  ]))
+
+// **A test sits inside a `describe` named for the behaviour it holds.** Nearly every test file already
+// did, and nothing said so; #1261 added another lone top-level `it`. A call to `it`/`test` in any form
+// (`.skip`, `.only`, `.each()()`, a tagged `.each`) is flagged unless some `describe` or `suite` call
+// encloses it, so a top-level `for` or `if` around a test is caught too: correlatedRequestsGated hid
+// one that way. Hooks are not matched: a file-wide `beforeEach` at the top is a legitimate shape, and
+// dozens of files use one, which is why `vitest/require-top-level-describe` (it flags hooks too) is not
+// used. Out of reach: an `it` imported under another name, a `test.extend()` fixture, and an `it`
+// inside a top-level helper that a describe calls (flagged, though it runs inside one). None exists.
+const topLevelTestSelector = {
+  selector: [
+    'CallExpression',
+    ':matches([callee.name=/^(it|test)$/], [callee.object.name=/^(it|test)$/], [callee.object.object.name=/^(it|test)$/], [callee.callee.object.name=/^(it|test)$/], [callee.callee.object.object.name=/^(it|test)$/], [callee.tag.object.name=/^(it|test)$/])',
+    ':not(CallExpression[callee.name=/^(describe|suite)$/] *, CallExpression[callee.object.name=/^(describe|suite)$/] *, CallExpression[callee.callee.object.name=/^(describe|suite)$/] *)',
+  ].join(''),
+  message: 'Put the test inside a describe() named for the behaviour it checks, as the rest of the suite does.',
+}
+
 export default tseslint.config(
   // `!scripts/**` re-includes: a global ignore cannot be undone by a later `files` entry, so the
   // negation has to live here.
@@ -83,27 +119,7 @@ export default tseslint.config(
       // **Server data is read with TanStack Query, not fetched in an effect** (packages/dashboard/
       // AGENTS.md). `set-state-in-effect` cannot hold that line: it does not see `setState` inside
       // `.then()`, which is how an effect fetch writes. So the call itself is flagged.
-      //
-      // A selector, not a rule of our own, and it knows nothing about function boundaries: a `fetch`
-      // in an event handler *registered* by an effect is flagged too. None exists today; one that
-      // appears takes a suppression with its reason, and the day there are several is the day for a
-      // rule that walks to the nearest function. It sees the call only where it is written: a fetch
-      // wrapped in a `useCallback` that the effect calls passes — CommentPanel's `load()` did, and was
-      // moved to Query when the review of this rule found it. So do `window.fetch` and a renamed `api`.
-      'no-restricted-syntax': ['error',
-        ...['useEffect', 'useLayoutEffect'].flatMap((hook) =>
-          // `useEffect(...)` and `React.useEffect(...)`, the form the shadcn primitives use.
-          [`[callee.name='${hook}']`, `[callee.property.name='${hook}']`].flatMap((effect) => [
-            {
-              selector: `CallExpression${effect} CallExpression[callee.name='fetch']`,
-              message: `Read server data with TanStack Query (useQuery), not fetch inside ${hook}. See packages/dashboard/AGENTS.md.`,
-            },
-            {
-              selector: `CallExpression${effect} CallExpression[callee.object.name='api']`,
-              message: `Read server data with TanStack Query (useQuery), not api.* inside ${hook}. See packages/dashboard/AGENTS.md.`,
-            },
-          ])),
-      ],
+      'no-restricted-syntax': ['error', ...effectFetchSelectors],
       // **Toasts mount through the shadcn wrapper** (`components/ui/sonner.tsx`), so the toast's look lives in the
       // design system's one place. App.tsx imported sonner's `Toaster` directly for months, and the wrapper's icons,
       // colors and shadow never reached the screen while the spec and the Figma file were drawn from them.
@@ -116,6 +132,18 @@ export default tseslint.config(
         }],
       }],
     },
+  },
+
+  // Tests. `no-restricted-syntax` is replaced, not merged, by a later block, so the dashboard's
+  // tests restate its effect-fetch selectors beside the test one rather than losing them.
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx', 'scripts/**/*.test.mjs'],
+    ignores: ['packages/dashboard/**'],
+    rules: { 'no-restricted-syntax': ['error', topLevelTestSelector] },
+  },
+  {
+    files: ['packages/dashboard/**/*.test.{ts,tsx}'],
+    rules: { 'no-restricted-syntax': ['error', ...effectFetchSelectors, topLevelTestSelector] },
   },
 
   // The wrapper is the one file that mounts sonner's own Toaster.
