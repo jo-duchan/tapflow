@@ -80,6 +80,7 @@ const enSidebar = [
   {
     text: 'AI Agent QA',
     items: [
+      { text: 'Overview', link: '/ai-agents' },
       { text: 'MCP server', link: '/ai-agents/mcp-server' },
       { text: 'AI Agent Flow Capture', link: '/ai-agents/agent-flow-capture' },
       { text: 'Exploratory runs in CI', link: '/ai-agents/exploratory-runs' },
@@ -88,6 +89,7 @@ const enSidebar = [
   {
     text: 'Automation QA',
     items: [
+      { text: 'Overview', link: '/automation' },
       { text: 'Flow reference', link: '/automation/flows' },
       { text: 'Flow Runs', link: '/automation/runs' },
       { text: 'Run flows in CI', link: '/automation/ci' },
@@ -202,6 +204,7 @@ const koSidebar = [
   {
     text: 'AI 에이전트 QA',
     items: [
+      { text: '개요', link: '/ko/ai-agents' },
       { text: 'MCP 서버', link: '/ko/ai-agents/mcp-server' },
       { text: 'AI 에이전트 Flow Capture', link: '/ko/ai-agents/agent-flow-capture' },
       { text: 'CI에서 탐색적 실행', link: '/ko/ai-agents/exploratory-runs' },
@@ -210,6 +213,7 @@ const koSidebar = [
   {
     text: '자동화 QA',
     items: [
+      { text: '개요', link: '/ko/automation' },
       { text: '플로우 레퍼런스', link: '/ko/automation/flows' },
       { text: '플로우 실행 기록 (Flow Runs)', link: '/ko/automation/runs' },
       { text: 'CI에서 플로우 실행', link: '/ko/automation/ci' },
