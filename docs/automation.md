@@ -18,7 +18,7 @@ In Automation QA, `tapflow flow run` tests your app by replaying saved [flows](/
 ## Where flows come from {#where-flows-come-from}
 
 - **Saved from a QA Session**: a teammate exports the taps, swipes and typing they did with [Flow Capture](/testing/flow-capture).
-- **Saved by a coding agent**: a coding agent saves a path it checked over MCP with [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
+- **Saved by an AI agent**: an AI agent saves a path it checked over MCP with [AI Agent Flow Capture](/ai-agents/agent-flow-capture).
 - **Written by hand**: write the YAML in the format of the [Flow reference](/automation/flows), or edit a saved flow.
 
 ## Replay and run records {#replay-and-results}
@@ -27,10 +27,10 @@ In Automation QA, `tapflow flow run` tests your app by replaying saved [flows](/
 
 ## Running in CI {#ci}
 
-[Run flows in CI](/automation/ci) has a GitHub Actions example that replays flows on a self-hosted Mac runner, and covers authoring flows with a coding agent.
+[Run flows in CI](/automation/ci) has a GitHub Actions example that replays flows on a self-hosted Mac runner, and covers authoring flows with an AI agent.
 
 ## Related {#related}
 
 - [Manual QA](/testing): how teammates test builds in the browser themselves.
-- [AI Agent QA](/ai-agents): how a coding agent tests by driving a device over MCP.
+- [AI Agent QA](/ai-agents): how an AI agent tests by driving a device over MCP.
 - [Page status](/get-started/introduction#page-status): what the Experimental and Deprecated banners mean.

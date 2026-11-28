@@ -8,7 +8,7 @@
 
 ## 에이전트
 
-에이전트는 macOS에서 실행됩니다. iOS와 Android를 한 Mac에서 함께 실행할 수 있습니다.
+에이전트는 macOS에서 실행됩니다. iOS와 Android를 한 Mac에서 함께 실행할 수 있습니다. Android만 쓴다면 Windows에서도 실행할 수 있습니다([Windows](#windows)).
 
 - **Apple Silicon**(M 시리즈) macOS
 - Node.js ≥ 22
@@ -37,6 +37,16 @@ tapflow가 개발과 검증에 사용해온 환경이 Apple Silicon입니다. In
 
 - Android SDK (`adb`가 `$PATH`에 있거나 `ANDROID_HOME` 설정)
 - `google_apis/arm64-v8a` 시스템 이미지 (android-35)를 사용하는 에뮬레이터
+
+### Windows (Android만) {#windows}
+
+Android 에뮬레이터만 쓴다면 에이전트를 Windows에서도 실행할 수 있습니다. 외부 기여로 추가된 커뮤니티 지원이며 메인테이너는 Windows에서 테스트하지 않습니다.
+
+- `tapflow doctor`는 `ANDROID_HOME`과 `%LOCALAPPDATA%\Android\Sdk`에서 Android SDK를 찾습니다.
+- `tapflow setup android`는 macOS에서만 동작합니다. Windows에서는 Android SDK와 에뮬레이터(AVD)를 직접 준비해야 합니다.
+- iOS 시뮬레이터는 macOS에서만 실행할 수 있습니다.
+- x86_64 PC에서는 AVD에 `arm64-v8a`가 아니라 `x86_64` 시스템 이미지가 필요합니다.
+- Windows에서 에뮬레이터를 부팅하고 화면을 스트리밍하는 것은 아직 확인되지 않았습니다. 확인된 것은 `tapflow doctor`가 SDK와 AVD를 찾는 것, 그리고 `tapflow start`로 릴레이가 뜨고 에이전트가 등록되는 것까지입니다.
 
 ## 대시보드
 

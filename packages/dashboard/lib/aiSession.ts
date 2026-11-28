@@ -1,9 +1,16 @@
 import type { AiClientKind, WatchEndReason, WatchRefusal } from '@tapflowio/protocol'
 
-/** How the dashboard names an AI client. "Coding agent", not "agent": in tapflow's own words an agent is the
- *  process on a Mac that runs the devices, and the MCP server is driven by a tool like Claude Code. */
+/** How the dashboard names an AI client. "AI agent", not "agent": in tapflow's own words an agent is the
+ *  process that runs the devices, and the MCP server is driven by a tool like Claude Code. The docs use the
+ *  same name (their glossary), so a label read here can be searched for there. */
 export function holderKindLabel(kind: AiClientKind): string {
-  return kind === 'mcp' ? 'Coding agent' : 'Flow runner'
+  return kind === 'mcp' ? 'AI agent' : 'Flow runner'
+}
+
+/** The same name inside a sentence ("Waiting for the AI agent…"). Not `toLowerCase()` of the label, which
+ *  turns "AI" into "ai". */
+export function holderKindNoun(kind: AiClientKind): string {
+  return kind === 'mcp' ? 'AI agent' : 'flow runner'
 }
 
 /** What a watcher is told when the relay refuses the watch — one sentence per thing they do differently. */

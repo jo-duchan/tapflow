@@ -148,6 +148,6 @@ Match와 Verify는 탭마다 화면이 어떻게 바뀌었는지도 봅니다. �
 ## 관련 문서 {#related}
 
 - [플로우](/ko/automation/flows): 플로우 파일 형식과 `tapflow flow run`, 비밀 값
-- [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture): 코딩 에이전트가 MCP로 확인한 경로를 플로우로 저장하는 방법
+- [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture): AI 에이전트가 MCP로 확인한 경로를 플로우로 저장하는 방법
 - [QA 세션](/ko/testing/qa-session): 세션에서 쓸 수 있는 기능과 정보 카드
 - [기기 조작](/ko/testing/device-controls): 기록되는 탭, 스와이프, 입력을 하는 방법

@@ -49,6 +49,10 @@ const FORBIDDEN = [
   // A flow's step. Manual Flow Capture said 단계 from the start; the MCP and flow pages said 스텝.
   // The flows page's `## 단계 {#스텝}` keeps its frozen id, which the `{#...}` strip leaves alone.
   { re: /스텝/g, use: '단계' },
+  // Claude Code and the like, driving a device over MCP. One name for the actor and the use (AI 에이전트 QA),
+  // and bare 에이전트 stays tapflow's own. The `tapflow init` pages keep 코딩 에이전트: there the tool reads the
+  // install directory's AGENTS.md, as the CLI's own output says, rather than driving a device.
+  { re: /코딩\s?에이전트/g, use: 'AI 에이전트' },
   // A Latin word on its own. `tapflow-agent` and `agent.lean` are not words here. `/` is not a
   // boundary: link targets are already stripped, so `relay/agent` in prose is two words.
   { re: /(?<![A-Za-z0-9_.-])relays?(?![A-Za-z0-9_-])/gi, use: '릴레이' },
@@ -65,7 +69,8 @@ const ALLOW = [
   { text: '**AGENT ALREADY RUNNING**', files: ['troubleshooting/install-and-agents.md'], reason: 'literal CLI output the reader will see' },
   { text: '에이전트 (Agents)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
   { text: '릴레이 (Relay)', files: ['reference/api.md'], reason: 'API reference heading glossing the English resource group' },
-  { text: '**Coding agent is driving it**', files: ['ai-agents/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
+  { text: '**AI agent is driving it**', files: ['ai-agents/mcp-server.md'], reason: 'QA session device-card label, shown as-is in the dashboard' },
+  { text: '코딩 에이전트', files: ['operate/configure.md', 'reference/cli.md', 'reference/configuration.md'], reason: '`tapflow init` writes AGENTS.md for a coding tool reading the install directory, not for an AI agent driving a device' },
   { text: '**Agent activity**', files: ['ai-agents/mcp-server.md'], reason: 'AI session watch page panel title, shown as-is in the dashboard' },
   { text: '디바이스 팜', files: ['reference/sustainability.md'], reason: 'industry term (device farm); "기기 팜" is not a phrase anyone searches for' },
 ]

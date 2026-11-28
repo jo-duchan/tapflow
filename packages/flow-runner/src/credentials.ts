@@ -12,7 +12,7 @@ import path from 'path'
  *
  * - **The file is the user's, on the machine that runs the client** — `$XDG_CONFIG_HOME/tapflow/credentials.json`,
  *   else `~/.config/tapflow/credentials.json`, or `TAPFLOW_TOKEN_FILE`. Never the relay's `tapflow.config.json` or
- *   `<dataDir>/.env`: those belong to the relay host, and the person running a coding agent often has no relay.
+ *   `<dataDir>/.env`: those belong to the relay host, and the person running an AI agent often has no relay.
  * - **Keyed by relay origin**, so a token minted on one relay is never sent to another. Loopback hosts on the same
  *   port share a key: `localhost`, `127.0.0.1` and `[::1]` reach the same listener.
  * - **An explicit token is never replaced by the file.** It is what the person asked for; a refusal says so and

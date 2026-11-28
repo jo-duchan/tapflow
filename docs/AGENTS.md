@@ -63,9 +63,8 @@ iOS/Android 양쪽을 지원하는 기능을 설명할 때 특정 플랫폼 도�
 | 개념 | KO 산문 | EN 산문 | 쓰지 않는 표기 |
 |---|---|---|---|
 | relay | 릴레이 | relay | KO 산문의 `relay`, 리레이 |
-| tapflow agent | 에이전트 | agent | KO 산문의 `agent` |
-| Claude Code 같은 도구 | 코딩 에이전트 | coding agent | 맥락 없는 "에이전트"/"agent" |
-| 코딩 에이전트가 MCP로 기기를 쓰는 쓰임과 그 기능의 이름(행위자가 아님) | AI 에이전트(AI 에이전트 QA, AI 에이전트 Flow Capture) | AI Agent | 쓰임 이름으로서 "에이전트 QA", "Agents"(tapflow agent와 혼동) |
+| tapflow agent: 시뮬레이터·에뮬레이터를 띄우는 프로세스. 보통 Mac, Android만이면 Windows도(커뮤니티 지원) | 에이전트 | agent | KO 산문의 `agent`, 정의에서 Mac에만 한정하는 표현 |
+| Claude Code처럼 MCP로 기기를 조작하는 AI 도구, 그리고 그 쓰임과 기능의 이름 | AI 에이전트(AI 에이전트 QA, AI 에이전트 Flow Capture) | AI agent (AI Agent QA, AI Agent Flow Capture) | "코딩 에이전트"/"coding agent", 맥락 없는 "에이전트"/"agent", 쓰임 이름으로서 "에이전트 QA", "Agents"(tapflow agent와 혼동). 예외: `tapflow init`이 쓰는 AGENTS.md를 읽는 도구는 "코딩 에이전트"(CLI 출력 문구와 같게, `docsGlossary`가 허용 목록으로 지킴) |
 | a flow's step (and a captured step) | 단계 | step | KO 산문의 "스텝" |
 | device | 기기 | device | 디바이스 |
 | directory | 디렉터리 | directory | 디렉토리 |

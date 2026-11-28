@@ -1,6 +1,6 @@
 ---
 title: Exploratory runs in CI
-description: "Let a coding agent judge the app's screen in CI on every run. It is not deterministic and costs API calls, so it suits scenarios not yet pinned into a flow."
+description: "Let an AI agent judge the app's screen in CI on every run. It is not deterministic and costs API calls, so it suits scenarios not yet pinned into a flow."
 status: experimental
 ---
 
@@ -45,15 +45,15 @@ This path needs a few more prerequisites.
 
 Three parts of the step matter:
 
-- `install_app` installs a build the relay already has, by its ID, not a file on the runner. The step uploads the build it made (here `MyApp.app.zip`) with the [builds API](/operate/ci-distribution) first and gives the coding agent the ID it gets back. `TAPFLOW_TOKEN` is an API-type token, so it may upload. `pipefail` and the ID check stop the step when the upload fails, before `claude` runs.
+- `install_app` installs a build the relay already has, by its ID, not a file on the runner. The step uploads the build it made (here `MyApp.app.zip`) with the [builds API](/operate/ci-distribution) first and gives the AI agent the ID it gets back. `TAPFLOW_TOKEN` is an API-type token, so it may upload. `pipefail` and the ID check stop the step when the upload fails, before `claude` runs.
 - A `claude -p` run has no one to approve a tool call, so a call that needs approval is refused. `--allowedTools "mcp__tapflow"` approves the tapflow MCP server's tools in advance. It adds no other tool: one that needs approval is still refused.
 - `claude` exits with `0` when it finishes answering, even when its answer says the app is broken. The last line decides the step instead: it passes only when the output's final line is `TAPFLOW_VERDICT: pass`, so a run that ended early, wrote no verdict or ended on a fail fails too.
 
 Exploratory prompts work best when they describe outcomes. "Verify the home screen loaded" holds up better than "tap the third item in the list" when the UI changes. For a regression test you run repeatedly, though, pinning the confirmed scenario into a flow is deterministic and free.
 
-The example uses the `.mcp.json` from [Authoring flows with a coding agent](/automation/ci#authoring-flows-with-an-agent), which hands the MCP server the step's `TAPFLOW_RELAY_URL` and `TAPFLOW_TOKEN`, so the coding agent reaches the relay the build was uploaded to.
+The example uses the `.mcp.json` from [Authoring flows with an AI agent](/automation/ci#authoring-flows-with-an-agent), which hands the MCP server the step's `TAPFLOW_RELAY_URL` and `TAPFLOW_TOKEN`, so the AI agent reaches the relay the build was uploaded to.
 
 ## Related
 
 - [Run flows in CI](/automation/ci): the deterministic CI path, replaying saved flows with no LLM calls
-- [MCP server](/ai-agents/mcp-server): installing it, connecting a coding agent, and the tools
+- [MCP server](/ai-agents/mcp-server): installing it, connecting an AI agent, and the tools

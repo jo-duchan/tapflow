@@ -38,7 +38,7 @@ const AGENTS: SessionInfo[] = [{
 
 describe('QASession — a device an AI agent is driving', () => {
   // The list says why the device is taken and who is driving it, and offers no way in: watching an AI session
-  // is for the person who started it, through the link their coding agent hands them.
+  // is for the person who started it, through the link their AI agent hands them.
   it('names the driver and stays disabled, like any device in use', async () => {
     const user = userEvent.setup()
     render(withQuery(
@@ -50,7 +50,7 @@ describe('QASession — a device an AI agent is driving', () => {
     await act(async () => { deliver!({ type: 'agents:listed', sessions: AGENTS }) })
     await user.click(await screen.findByText('studio-mac'))
     const driven = await screen.findByRole('button', { name: /iPhone 15/ })
-    expect(driven.textContent).toContain('Coding agent is driving it')
+    expect(driven.textContent).toContain('AI agent is driving it')
     expect(driven).toHaveProperty('disabled', true)
     expect(screen.queryByRole('link', { name: /iPhone 15/ })).toBeNull()
     expect(screen.getByRole('button', { name: /iPhone SE/ }).textContent).toContain('In use')

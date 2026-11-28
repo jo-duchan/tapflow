@@ -5,7 +5,7 @@ import { useWatchSession } from '@/hooks/useWatchSession'
 import { WatchedDevice } from '@/components/device/WatchedDevice'
 import { AgentActivity } from '@/components/watch/AgentActivity'
 import { Separator } from '@/components/ui/separator'
-import { holderKindLabel, watchEndText, watchRefusalText } from '@/lib/aiSession'
+import { holderKindLabel, holderKindNoun, watchEndText, watchRefusalText } from '@/lib/aiSession'
 
 /**
  * **Watch, read-only, the device an AI agent is driving.** Reached through a link, never a list of AI sessions:
@@ -32,8 +32,8 @@ function WatchView({ sessionId }: { sessionId: string }) {
 
   const over = phase.kind === 'ended' || phase.kind === 'refused'
   const refused = phase.kind === 'refused'
-  // Never a bare "agent": in tapflow's words that is the process on the Mac, which the line above names.
-  const driver = device?.holder ? holderKindLabel(device.holder.kind).toLowerCase() : 'AI client'
+  // Never a bare "agent": in tapflow's words that is the process that runs the devices.
+  const driver = device?.holder ? holderKindNoun(device.holder.kind) : 'AI client'
   const status =
     phase.kind === 'refused' ? watchRefusalText(phase.reason)
       : phase.kind === 'ended' ? watchEndText(phase.reason)

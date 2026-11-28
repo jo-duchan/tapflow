@@ -11,7 +11,7 @@ A flow is a UI test scenario written in YAML, replayed deterministically by `tap
 ::: info Three ways to use tapflow
 There are three ways to use tapflow, all on the same devices and sessions: **Manual QA** in the browser dashboard, where your team tests by hand; **AI agents**, which drive a device through MCP; and **Automation**, the flow runner covered here, whose main stage is CI/CD.
 
-Flows are not a language you hand-write from scratch — they are an artifact a coding agent generates or a recording produces. To author them with an agent, see [Run flows in CI](/automation/ci).
+Flows are not a language you hand-write from scratch — they are an artifact an AI agent generates or a recording produces. To author them with an agent, see [Run flows in CI](/automation/ci).
 :::
 
 ## Flow file structure
@@ -427,6 +427,6 @@ The exit-code contract makes the job fail when a step fails (`1` or `2`). `if: a
 
 ## Relationship to run_flow
 
-The same flow engine runs through the MCP `run_flow` tool. A coding agent authors a scenario once while exploring the app, then replays that flow deterministically afterward. Exploratory work goes through the individual MCP tools; verified scenarios replay through `run_flow` — a hybrid of the two.
+The same flow engine runs through the MCP `run_flow` tool. An AI agent authors a scenario once while exploring the app, then replays that flow deterministically afterward. Exploratory work goes through the individual MCP tools; verified scenarios replay through `run_flow` — a hybrid of the two.
 
 Authoring by an agent and replaying with a deterministic runner is covered in more depth in [Run flows in CI](/automation/ci).

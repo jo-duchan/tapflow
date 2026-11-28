@@ -1,6 +1,6 @@
 ---
 title: MCP 서버
-description: "@tapflowio/mcp-server를 설치하고 코딩 에이전트에 연결합니다. 코딩 에이전트가 건네주는 링크로 에이전트가 조작하는 기기를 실시간으로 볼 수 있습니다."
+description: "@tapflowio/mcp-server를 설치하고 AI 에이전트에 연결합니다. AI 에이전트가 건네주는 링크로 에이전트가 조작하는 기기를 실시간으로 볼 수 있습니다."
 status: experimental
 ---
 
@@ -8,7 +8,7 @@ status: experimental
 
 `@tapflowio/mcp-server`는 tapflow를 [Model Context Protocol(MCP)](https://modelcontextprotocol.io) 서버로 노출합니다. Claude Code, Codex 등 MCP를 지원하는 LLM 에이전트가 iOS 시뮬레이터와 Android 에뮬레이터를 네이티브 도구로 직접 제어할 수 있습니다. 스크립팅도, 좌표 하드코딩도 필요 없습니다.
 
-세 문서는 이렇게 이어집니다. 여기서 코딩 에이전트를 연결하고, [플로우 레퍼런스](/ko/automation/flows)에서 플로우 YAML 형식을 익힌 뒤, [CI에서 플로우 실행](/ko/automation/ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
+세 문서는 이렇게 이어집니다. 여기서 AI 에이전트를 연결하고, [플로우 레퍼런스](/ko/automation/flows)에서 플로우 YAML 형식을 익힌 뒤, [CI에서 플로우 실행](/ko/automation/ci)에서 둘을 합칩니다. 에이전트가 플로우를 한 번 작성하면 이후 CI가 그 플로우를 결정적으로 재생합니다.
 
 ## 이럴 때 쓰세요
 
@@ -123,7 +123,7 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 |------|------|
 | `list_builds` | 릴레이의 앱·빌드 목록 조회 (`install_app`·`launch_app`에 넘길 `buildId`의 출처) |
 | `list_devices` | 연결된 시뮬레이터·에뮬레이터 목록 조회 |
-| `connect_device` | 세션 참여 (제어 전 필수). 기기를 지켜볼 수 있는 대시보드 링크 `watchUrl`을 함께 돌려줌. `capture: true`를 주면 플로우로 남기기 위해 코딩 에이전트가 하는 일을 기록하고, `capture: false`는 기록을 끝냄([AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)) |
+| `connect_device` | 세션 참여 (제어 전 필수). 기기를 지켜볼 수 있는 대시보드 링크 `watchUrl`을 함께 돌려줌. `capture: true`를 주면 플로우로 남기기 위해 AI 에이전트가 하는 일을 기록하고, `capture: false`는 기록을 끝냄([AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)) |
 | `disconnect_device` | 세션 종료 |
 | `boot_device` | 시뮬레이터·에뮬레이터 부팅 |
 | `shutdown_device` | 기기 전원 종료 (리소스 반납·다음 콜드 부팅 강제) |
@@ -137,8 +137,8 @@ MCP를 지원하는 클라이언트라면 모두 tapflow를 사용할 수 있습
 | `install_app` | 앱 설치 |
 | `launch_app` | 앱 실행. `arguments`·`env`로 [실행 인자](/ko/automation/flows#launch-arguments)를 넘길 수 있습니다. 결과의 `applied`에 앱이 받은 키가 [실행 기본값](/ko/reference/configuration#launch-defaults)까지 포함해 남습니다 |
 | `list_captured_steps` | 열린 캡처의 단계를 번호와 함께 조회. 각 단계의 이름과 확인할 수 있는 요소([AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)) |
-| `capture_flow` | 코딩 에이전트가 고른 대로 캡처한 단계를 플로우로 만들고, CI처럼 기기를 초기화해 재생. 통과할 때만 YAML을 돌려줌([AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)) |
-| `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음). 코딩 에이전트가 핀치하거나 기기를 돌리거나 접을 때도 이 툴로 [`pinch`](/ko/automation/flows#pinch), [`setOrientation`, `setPosture`](/ko/automation/flows#orientation-and-posture) 단계를 씁니다 |
+| `capture_flow` | AI 에이전트가 고른 대로 캡처한 단계를 플로우로 만들고, CI처럼 기기를 초기화해 재생. 통과할 때만 YAML을 돌려줌([AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)) |
+| `run_flow` | YAML 플로우를 결정적으로 재생 (추가 LLM 호출 없음). AI 에이전트가 핀치하거나 기기를 돌리거나 접을 때도 이 툴로 [`pinch`](/ko/automation/flows#pinch), [`setOrientation`, `setPosture`](/ko/automation/flows#orientation-and-posture) 단계를 씁니다 |
 | `list_runs` | `tapflow flow run`이 릴레이에 남긴 실행 기록 목록 조회 (상태·빌드·플로우 이름·CI 여부로 거르기) |
 | `get_run` | 실행 기록 하나 조회. 실패한 플로우의 단계(통과한 플로우는 단계 수)·실패 메시지·플로우 파일 경로와 실패한 플로우의 스크린샷(최대 4장) |
 | `get_testing_guide` | 이 도구들로 모바일 기능을 테스트하는 방법. 다룰 경우, 여기서 테스트할 수 없는 것, 잘못된 버그 판정을 피하는 법, 검증된 경로를 플로우로 남기는 법, 보고 형식 |
@@ -161,7 +161,7 @@ capture_flow       → 확인한 경로를 플로우로 저장 (capture: true로
 disconnect_device  → 세션 종료, 다른 사람이 기기를 쓸 수 있게 반납
 ```
 
-확인한 경로를 플로우로 남기려면 코딩 에이전트가 경로를 따라가기 전에 `connect_device`로 캡처를 열고, 마지막에 `list_captured_steps`와 `capture_flow`를 부릅니다. [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)를 참고하세요.
+확인한 경로를 플로우로 남기려면 AI 에이전트가 경로를 따라가기 전에 `connect_device`로 캡처를 열고, 마지막에 `list_captured_steps`와 `capture_flow`를 부릅니다. [AI 에이전트 Flow Capture](/ko/ai-agents/agent-flow-capture)를 참고하세요.
 
 ::: info 시뮬레이터 이미 부팅된 경우
 `list_devices` 응답의 `status` 필드가 `"booted"`이면 `boot_device`를 생략할 수 있습니다.
@@ -173,24 +173,24 @@ CI 파이프라인에서 실행하는 방법은 [CI에서 플로우 실행](/ko/
 
 ## 에이전트가 받는 안내 {#agent-guidance}
 
-MCP 서버는 코딩 에이전트에게 두 가지 안내를 줍니다. 그래서 경우를 하나하나 적지 않고 "로그인 화면 테스트해 줘"라고만 요청해도 꼼꼼히 테스트합니다.
+MCP 서버는 AI 에이전트에게 두 가지 안내를 줍니다. 그래서 경우를 하나하나 적지 않고 "로그인 화면 테스트해 줘"라고만 요청해도 꼼꼼히 테스트합니다.
 
 - **서버 instructions**: 에이전트가 연결할 때 한 번 전달됩니다. 도구 호출 순서, 화면은 스크린샷보다 `query_ui_tree`로 읽기, 끝나면 기기 반납하기, 부팅 거절이나 확인되지 않은 입력이 무슨 뜻인지를 담습니다. MCP 서버 instructions를 지원하는 클라이언트가 이 내용을 에이전트 컨텍스트에 넣습니다. Claude Code와 VS Code가 지원하고, Gemini CLI는 신뢰한 폴더에서만 넣습니다. Codex는 tapflow 도구 묶음의 설명으로 보여 줍니다. 지원하지 않는 클라이언트를 위해 가장 중요한 두 규칙은 `connect_device` 설명에도 들어 있습니다.
 - **`get_testing_guide`**: 에이전트가 테스트 전에 부르는 도구입니다. 다룰 경우, 이 도구들로 테스트할 수 없는 것, 버그로 판단하기 전에 확인할 것, 검증된 경로를 플로우로 남기는 법, 보고 형식을 돌려줍니다.
 
 instructions는 세션마다 약 400토큰이 듭니다. 테스트 가이드는 약 1,200토큰이고, 에이전트가 부를 때만 듭니다.
 
-## 코딩 에이전트가 조작하는 기기 보기 {#watch-the-device}
+## AI 에이전트가 조작하는 기기 보기 {#watch-the-device}
 
-`connect_device`는 결과에 `watchUrl`을 함께 돌려줍니다. 이 링크를 브라우저에서 열면 코딩 에이전트가 조작하는 기기 화면을 실시간으로 볼 수 있습니다. 도구 설명에 요청한 사람에게 이 링크를 전달하라는 안내가 들어 있습니다. 그래서 "로그인 화면을 테스트해 줘"처럼 요청하면 코딩 에이전트가 테스트를 시작하면서 링크를 알려 줍니다.
+`connect_device`는 결과에 `watchUrl`을 함께 돌려줍니다. 이 링크를 브라우저에서 열면 AI 에이전트가 조작하는 기기 화면을 실시간으로 볼 수 있습니다. 도구 설명에 요청한 사람에게 이 링크를 전달하라는 안내가 들어 있습니다. 그래서 "로그인 화면을 테스트해 줘"처럼 요청하면 AI 에이전트가 테스트를 시작하면서 링크를 알려 줍니다.
 
-이 화면에는 링크로만 들어갈 수 있습니다. 코딩 에이전트에게 테스트를 맡긴 사람이 자기 작업을 지켜보는 용도라서 대시보드에 따로 목록을 두지 않았습니다. 다른 팀원이 QA 세션의 기기 목록을 열면 그 기기는 사용 중으로 표시되고 이유로 **Coding agent is driving it**이 함께 나옵니다.
+이 화면에는 링크로만 들어갈 수 있습니다. AI 에이전트에게 테스트를 맡긴 사람이 자기 작업을 지켜보는 용도라서 대시보드에 따로 목록을 두지 않았습니다. 다른 팀원이 QA 세션의 기기 목록을 열면 그 기기는 사용 중으로 표시되고 이유로 **AI agent is driving it**이 함께 나옵니다.
 
 - 보기 전용입니다. 화면을 눌러도 기기에는 아무것도 전달되지 않고, 소리도 나오지 않습니다.
-- 대시보드에 로그인한 팀원이면 누구나 볼 수 있습니다. 코딩 에이전트가 기기에 입력하는 내용도 화면에 그대로 보이므로, 팀에 보여서는 안 되는 값은 테스트에 쓰지 마세요.
+- 대시보드에 로그인한 팀원이면 누구나 볼 수 있습니다. AI 에이전트가 기기에 입력하는 내용도 화면에 그대로 보이므로, 팀에 보여서는 안 되는 값은 테스트에 쓰지 마세요.
 - 세션 하나를 동시에 4명까지 볼 수 있습니다.
-- 기기 옆 **Agent activity**에 코딩 에이전트가 한 일이 일어난 순서대로 쌓입니다. 기기 화면 위에는 탭과 스와이프가 도착하는 대로 파란색으로 그려집니다. 스와이프는 시작한 곳에서 손을 뗀 곳까지 선으로 이어집니다. Manual QA에서 직접 움직이는 포인터도 모양은 같고 색만 흰색입니다. `run_flow`나 `tapflow flow run`으로 플로우를 실행하면 단계마다 한 줄이 생기고 그 아래에 단계 안에서 한 행동이 보입니다. 단계는 펼쳐진 채로 나오고 필요하면 접을 수 있습니다. 입력한 글자는 글자 수만 보여 주고 연 URL과 누른 문자 키는 보여 주지 않습니다. 기록은 저장하지 않으므로 페이지를 연 뒤의 행동만 보입니다. 세션이 끝나도 페이지를 닫기 전까지는 마지막 화면과 기록이 남습니다.
-- 코딩 에이전트의 연결이 잠깐 끊기면 마지막 화면을 둔 채 돌아오기를 기다립니다. 코딩 에이전트가 세션을 마치거나(`disconnect_device`) 다른 팀원이 그 기기를 이어서 쓰기 시작하면 보기가 끝납니다.
+- 기기 옆 **Agent activity**에 AI 에이전트가 한 일이 일어난 순서대로 쌓입니다. 기기 화면 위에는 탭과 스와이프가 도착하는 대로 파란색으로 그려집니다. 스와이프는 시작한 곳에서 손을 뗀 곳까지 선으로 이어집니다. Manual QA에서 직접 움직이는 포인터도 모양은 같고 색만 흰색입니다. `run_flow`나 `tapflow flow run`으로 플로우를 실행하면 단계마다 한 줄이 생기고 그 아래에 단계 안에서 한 행동이 보입니다. 단계는 펼쳐진 채로 나오고 필요하면 접을 수 있습니다. 입력한 글자는 글자 수만 보여 주고 연 URL과 누른 문자 키는 보여 주지 않습니다. 기록은 저장하지 않으므로 페이지를 연 뒤의 행동만 보입니다. 세션이 끝나도 페이지를 닫기 전까지는 마지막 화면과 기록이 남습니다.
+- AI 에이전트의 연결이 잠깐 끊기면 마지막 화면을 둔 채 돌아오기를 기다립니다. AI 에이전트가 세션을 마치거나(`disconnect_device`) 다른 팀원이 그 기기를 이어서 쓰기 시작하면 보기가 끝납니다.
 
 ::: details 링크 주소가 정해지는 방식
 릴레이에 팀원이 열 수 있는 주소(터널이나 `relay.url`)가 설정되어 있으면 링크는 그 주소를 씁니다. 팀원에게 그대로 공유할 수 있는 주소입니다. 그런 주소가 없으면(`relay.url`이 `localhost`인 경우 포함) MCP 서버가 접속한 `TAPFLOW_RELAY_URL`로 링크를 만듭니다. 예를 들어 `ws://localhost:4000`으로 접속했다면 링크는 `http://localhost:4000/automation/sessions/`로 시작하며 MCP 서버를 실행한 사람의 컴퓨터에서 열립니다. 팀원에게 보낼 주소가 필요하면 [외부 접속](/ko/operate/external-access)을 참고하세요.
@@ -198,7 +198,7 @@ instructions는 세션마다 약 400토큰이 듭니다. 테스트 가이드는 
 
 ## 실패한 실행 고치기 {#fix-a-failed-run}
 
-CI에서 `tapflow flow run`이 실패하면 코딩 에이전트에게 그 실행을 읽고 플로우를 고치게 할 수 있습니다. 예를 들어 "어젯밤 실패한 CI 실행 고쳐 줘"라고 요청하면 코딩 에이전트는 아래 순서로 도구를 씁니다.
+CI에서 `tapflow flow run`이 실패하면 AI 에이전트에게 그 실행을 읽고 플로우를 고치게 할 수 있습니다. 예를 들어 "어젯밤 실패한 CI 실행 고쳐 줘"라고 요청하면 AI 에이전트는 아래 순서로 도구를 씁니다.
 
 ```text
 list_runs   → status: failed로 실패한 실행 찾기
@@ -207,8 +207,8 @@ get_run     → 어느 단계가 왜 실패했는지, 그 순간의 화면, 플�
 run_flow    → 고친 플로우를 기기에서 다시 재생해 확인
 ```
 
-- 기록된 플로우 파일 경로는 러너에 넘긴 그대로라서 러너가 실행된 디렉터리(CI면 그 잡의 작업 디렉터리)가 기준입니다. 코딩 에이전트는 자기 체크아웃에서 그 파일을 찾아 고칩니다.
-- 실행 기록은 읽기만 합니다. 다시 실행하는 것은 코딩 에이전트가 `run_flow`로 직접 하고 CI를 다시 돌리지는 않습니다.
+- 기록된 플로우 파일 경로는 러너에 넘긴 그대로라서 러너가 실행된 디렉터리(CI면 그 잡의 작업 디렉터리)가 기준입니다. AI 에이전트는 자기 체크아웃에서 그 파일을 찾아 고칩니다.
+- 실행 기록은 읽기만 합니다. 다시 실행하는 것은 AI 에이전트가 `run_flow`로 직접 하고 CI를 다시 돌리지는 않습니다.
 - `get_run`은 실패한 플로우의 스크린샷을 최대 4장까지 함께 돌려줍니다. 통과한 플로우의 마지막 화면과 영상은 포함하지 않으니 결과의 `url`로 실행 페이지를 열어 확인하세요.
 - `failureKind`가 `environment`인 실패는 앱이나 플로우가 아니라 기기·에이전트·릴레이 문제입니다. 이때는 플로우를 고칠 필요가 없습니다.
 

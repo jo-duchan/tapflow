@@ -32,7 +32,7 @@ Two kinds of people use tapflow. One operator installs it; everyone else install
 ## Key concepts
 
 - **Relay** — the server between the dashboard and the agents. It serves the dashboard, stores accounts and uploaded builds, and carries the device screen and your input between the browser and an agent. A team runs one.
-- **Agent** — the tapflow process on a Mac that runs iOS simulators and Android emulators and sends their screens to the relay. In these docs "agent" always means the tapflow agent; tools like Claude Code are called "coding agents".
+- **Agent** — the tapflow process that runs iOS simulators and Android emulators and sends their screens to the relay. It usually runs on a Mac, and for Android alone it can also run on Windows (community-supported). In these docs a bare "agent" always means the tapflow agent; an AI tool such as Claude Code that drives a device over MCP is called an "AI agent".
 - **Dashboard** — the tapflow screens you open in a browser. The relay serves it, so there is nothing separate to deploy.
 - **App Center** — the build list inside the dashboard. It has nothing to do with Microsoft App Center. Builds are grouped by app, and an app is identified by its bundle ID, which can differ between iOS and Android.
 - **Build** — the app file you test: a simulator `.app.zip` or `.tar.gz`/`.tgz` for iOS, an `.apk` for Android.
@@ -87,7 +87,7 @@ Visual quality and latency may differ between the two. Resolution and decoder ad
 There are three ways to use tapflow, and a team can start from any of them. All three run on the same devices and sessions.
 
 - **[Manual QA](/testing)**: CI or the operator uploads a build, and teammates test it in the browser. This is the most mature way.
-- **[AI Agent QA](/ai-agents)** (experimental): a coding agent drives a simulator or emulator through the [MCP server](/ai-agents/mcp-server).
+- **[AI Agent QA](/ai-agents)** (experimental): an AI agent drives a simulator or emulator through the [MCP server](/ai-agents/mcp-server).
 - **[Automation QA](/automation)** (experimental): `tapflow flow run` replays YAML flows with no AI model calls, mainly in CI.
 
 Each one works on its own, and manual testing never depends on the other two.

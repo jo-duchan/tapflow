@@ -1,6 +1,6 @@
 ---
 title: Run flows in CI
-description: "Replay saved flows in CI with tapflow flow run, with no LLM calls, and author those flows with a coding agent over MCP."
+description: "Replay saved flows in CI with tapflow flow run, with no LLM calls, and author those flows with an AI agent over MCP."
 status: experimental
 ---
 
@@ -47,11 +47,11 @@ jobs:
 
 The flow YAML syntax, selector rules, and exit-code contract are covered in the [Flow Reference](/automation/flows).
 
-## Authoring flows with a coding agent {#authoring-flows-with-an-agent}
+## Authoring flows with an AI agent {#authoring-flows-with-an-agent}
 
 Flows are an artifact an agent produces while exploring the app, not something you hand-write from scratch. Ask an MCP-capable agent like Claude Code for a scenario in plain language, and it drives the app through tapflow's MCP tools to confirm the behavior, then extracts the verified sequence as flow YAML and commits it to the repository.
 
-To connect the coding agent to the relay, keep a `.mcp.json` at the repo root pointing at the relay.
+To connect the AI agent to the relay, keep a `.mcp.json` at the repo root pointing at the relay.
 
 ```json
 {
@@ -82,7 +82,7 @@ You can use deterministic replay from within an agent session too. The `run_flow
 
 ## Tips
 
-- **Flows for regression, coding agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an agent.
+- **Flows for regression, AI agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an AI agent.
 - **`.mcp.json` takes the relay address and token from the environment** (`${TAPFLOW_TOKEN:-}`), so secrets never land in the repo. A value written into `env` as it is wins over the environment, so do not put a placeholder there. With `TAPFLOW_TOKEN` unset, the MCP server reads the [token file](/ai-agents/mcp-server#token-file). To use the local default address, leave `TAPFLOW_RELAY_URL` unset rather than empty: an empty value can reach the MCP server as it is, and the server refuses an empty address.
 - **One session per device.** The relay routes by session, so running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.
 

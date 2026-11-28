@@ -34,7 +34,7 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 
 - **첫 문단은 이 페이지로 무엇을 할 수 있게 되는지 말한다.** 기능 페이지라면 무엇을 하는지, 지원 플랫폼, 기본 켜짐 여부까지 쓴다.
 - **검색으로 바로 들어와도 읽혀야 한다.** 사이드바 순서로 왔다고 가정하지 않고, 전제조건은 링크로 건다.
-- **처음 보는 독자 대상 페이지에서는 용어를 처음 나올 때 한 줄로 정의한다.** relay(대시보드와 에이전트를 잇는 서버), agent(시뮬레이터·에뮬레이터를 띄우는 Mac 쪽 프로세스), App Center(tapflow 대시보드 안의 빌드 목록 화면으로, Microsoft App Center와 무관) 등이 대상이다. "agent"는 tapflow agent만 뜻하고, Claude Code 같은 도구는 "coding agent"로 쓴다.
+- **처음 보는 독자 대상 페이지에서는 용어를 처음 나올 때 한 줄로 정의한다.** relay(대시보드와 에이전트를 잇는 서버), agent(시뮬레이터·에뮬레이터를 띄우는 프로세스. 보통 Mac, Android만이면 Windows도), App Center(tapflow 대시보드 안의 빌드 목록 화면으로, Microsoft App Center와 무관) 등이 대상이다. "agent"는 tapflow agent만 뜻하고, Claude Code처럼 MCP로 기기를 조작하는 도구는 "AI agent"(KO "AI 에이전트")로 쓴다.
 - 누가 하는 일인지 구분한다. Mac 세팅은 운영자가 하고, 팀원은 브라우저만 연다.
 
 ## 2. 소스 대조 검증 (작성 전 + 작성 후)
@@ -149,7 +149,7 @@ KO 헤딩은 `사용 방법 / 플랫폼 지원 / 제한 사항 / 설정(운영�
 |---|---|---|
 | Get started (튜토리얼·소개) | `docs/get-started/{slug}.md` | `docs/ko/get-started/{slug}.md` |
 | Manual QA (기능 페이지) | `docs/testing/{slug}.md` | `docs/ko/testing/{slug}.md` |
-| AI Agent QA (코딩 에이전트가 MCP로 기기를 쓰는 페이지) | `docs/ai-agents/{slug}.md` | `docs/ko/ai-agents/{slug}.md` |
+| AI Agent QA (AI 에이전트가 MCP로 기기를 쓰는 페이지) | `docs/ai-agents/{slug}.md` | `docs/ko/ai-agents/{slug}.md` |
 | Automation QA (flow와 그 재생) | `docs/automation/{slug}.md` | `docs/ko/automation/{slug}.md` |
 | Operate (운영자 how-to) | `docs/operate/{slug}.md` | `docs/ko/operate/{slug}.md` |
 | 레퍼런스 | `docs/reference/{slug}.md` | `docs/ko/reference/{slug}.md` |

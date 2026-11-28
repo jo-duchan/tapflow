@@ -167,7 +167,7 @@ tapflow가 파일에서 bundle ID, 버전, 빌드 번호를 읽어 앱 항목을
 
 - [팀원 시작 가이드](/ko/get-started/teammates): 초대받은 팀원이 가입하고 테스트하는 과정입니다. 링크와 함께 보내 주세요.
 - [수동 QA](/ko/testing): QA 세션에서 쓸 수 있는 기능(딥 링크, 네트워크 제어, 녹화, 댓글 등)을 안내합니다.
-- [AI 에이전트 QA](/ko/ai-agents): 코딩 에이전트가 MCP로 기기를 조작해 테스트하게 합니다.
+- [AI 에이전트 QA](/ko/ai-agents): AI 에이전트가 MCP로 기기를 조작해 테스트하게 합니다.
 - [자동화 QA](/ko/automation): 저장한 플로우를 CI에서 AI 모델 없이 재생합니다.
 - [CI에서 빌드 올리기](/ko/operate/ci-distribution): 빌드를 손으로 올리지 않고 CI가 올리게 합니다.
 - [배포 방식 선택](/ko/operate/deployment): 릴레이를 따로 두거나 Mac을 늘리는 구성을 고릅니다.

@@ -158,7 +158,7 @@ for what that means and what moves each to stable). Hardening is tracked under t
 - [x] Deterministic YAML flow format + headless CLI runner — `tapflow flow run`, with state reset, condition-based waits, JUnit report and failure screenshots, and no LLM at replay time ([flow reference](https://www.tapflow.dev/automation/flows))
 - [x] `run_flow` MCP tool — agents replay verified flows through the same deterministic engine
 - [x] **Flow Capture** (the manual↔AI bridge) — a person operates the app in a QA Session; tapflow names each step by a selector from the UI tree where something there can be named, keeps a point marked fragile where nothing can, and replays the flow on the device before it is exported, no agent required (0.33, [Flow Capture](https://www.tapflow.dev/testing/flow-capture))
-- [x] **MCP Flow Capture** — the same for a coding agent: `capture_flow` resets the device, replays the captured steps and returns the YAML only if it passes. With an agent that cannot reset the device, it clears only the app's data, or nothing, and its reply says so in `resetNote` (unreleased)
+- [x] **MCP Flow Capture** — the same for an AI agent: `capture_flow` resets the device, replays the captured steps and returns the YAML only if it passes. With an agent that cannot reset the device, it clears only the app's data, or nothing, and its reply says so in `resetNote` (unreleased)
 
 ### Reviewable automation
 
