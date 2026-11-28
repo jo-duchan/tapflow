@@ -63,6 +63,8 @@ description: {한 문장. llms.txt 설명과 맞춘다}
 ---
 ```
 
+**실험적이거나 지원 중단 예정인 페이지는 frontmatter에 `status`를 단다.** `status: experimental`, 또는 `status: deprecated`와 대체 페이지 `replacedBy: /경로`(`/ko` 없이, KO 페이지도 같은 값)다. 값이 없으면 정식이다. 페이지 맨 위 배너와 사이드바 배지, `llms-full.txt`의 `Status:` 줄은 이 값에서 만들어지므로 **경고 박스를 본문에 손으로 쓰지 않는다.** `llms.txt` 행 끝에는 `(experimental)` 또는 `(deprecated → https://www.tapflow.dev{replacedBy})`를 직접 붙이고, `pageStatus` 테스트가 frontmatter와 맞는지 검사한다. 정식 페이지 안의 실험적 절 하나는 H2 아래에 `<Badge type="warning" text="Experimental" />`(KO `text="실험적"`)를 단다. 상태의 뜻은 `/get-started/introduction#page-status`에 있다. `pnpm docs:dev` 중 `status`를 바꾸면 사이드바는 dev 서버를 다시 띄워야 반영된다(config는 시작할 때 한 번 읽는다).
+
 템플릿의 섹션 순서는 유지하되, 해당 없는 섹션은 생략한다.
 
 **튜토리얼** (처음부터 끝까지 따라 하면 결과가 보이는 페이지)
@@ -89,7 +91,7 @@ title: {기능 이름}
 description: {한 문장. llms.txt 설명과 맞춘다}
 ---
 # {기능 이름}
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />   ← 기능 페이지에만 지원 플랫폼 배지를 단다(App Center, QA Session 같은 화면·개요 페이지에는 달지 않는다). 한쪽 플랫폼에만 있는 절은 그 절 제목 아래에 해당 배지를 단다
+<Badge type="info" text="iOS only" />   ← 한쪽 플랫폼 전용인 페이지에만 단다. 기본은 양쪽 지원이라 양쪽 배지는 달지 않는다. 한쪽 전용인 절은 그 절 제목 아래에 단다. 문구는 "iOS only"/"Android only", KO "iOS 전용"/"Android 전용"뿐이다(맨 "iOS"는 '지원'으로 읽혀 금지, `pageStatus` 테스트가 검사). 차이는 Platform support 표가 말한다
 {무엇을 하고 누구에게 쓸모 있는지 1~2문장, 기본 켜짐 여부}
 <VideoPlayer ... />   ← 있으면
 ## How to use          ← 대시보드에서의 단계

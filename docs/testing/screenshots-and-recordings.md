@@ -5,8 +5,6 @@ description: "Download the QA Session device screen as a PNG, or record it as a 
 
 # Screenshots & recordings
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 Keep what you saw in a [QA Session](/testing/qa-session) as an image or a video, for a bug report or a [comment](/testing/comments). Both are in the toolbar's Capture group, and there is nothing to turn on.
 
 ## Screenshots {#screenshots}

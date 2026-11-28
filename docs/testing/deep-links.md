@@ -5,8 +5,6 @@ description: "Open a specific screen of the app on the QA Session device from a 
 
 # Deep links
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 A deep link is a URL that opens a specific screen of an app, such as `myapp://settings`. Enter one in a QA Session and you land on the screen you want to check instead of tapping your way there from the first screen. There is nothing to turn on.
 
 <!-- Video slot: once the clip is in docs/public/media/, replace this comment with <VideoPlayer src="/media/FILE.mp4" poster="/media/FILE.png" />. -->

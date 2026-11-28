@@ -5,8 +5,6 @@ description: QA 세션에서 빌드에 글과 이미지를 남겨 팀과 공유�
 
 # 댓글
 
-<Badge type="info" text="iOS" /> <Badge type="info" text="Android" />
-
 댓글은 빌드마다 남기는 메모입니다. 테스트하며 발견한 문제를 글과 스크린샷으로 남기면 같은 빌드를 여는 팀원 모두가 봅니다. 모든 역할이 댓글을 쓸 수 있고 따로 켤 설정은 없습니다.
 
 ## 사용 방법 {#how-to-use}

@@ -1,13 +1,10 @@
 ---
 title: Flow Reference
 description: "The YAML flow format that tapflow flow run replays deterministically with no LLM calls: file structure, step types, selectors, running in CI, and the link for watching a run."
+status: experimental
 ---
 
 # Flow Reference
-
-::: warning Experimental
-tapflow's **AI agents** (the MCP server) and **Automation** (the flow runner) are experimental. The manual QA dashboard is the most mature part of tapflow; these two are still maturing. Expect rough edges, especially in selector matching and in timing right after an app launches.
-:::
 
 A flow is a UI test scenario written in YAML, replayed deterministically by `tapflow flow run` with no LLM calls. The same flow always runs in the same order from the same input, so it is idempotent — and it costs nothing in API calls in CI.
 

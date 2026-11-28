@@ -49,6 +49,13 @@ iOS/Android 양쪽을 지원하는 기능을 설명할 때 특정 플랫폼 도�
 
 예외: 해당 섹션이 실제로 iOS 전용 또는 Android 전용인 경우 플랫폼명 명시 가능.
 
+### 배지와 페이지 상태
+
+- **플랫폼 배지는 한쪽 전용일 때만 단다.** 기본은 양쪽 지원이고 차이는 각 기능 페이지의 Platform support 표가 말한다. 문구는 `iOS only`/`Android only`, KO `iOS 전용`/`Android 전용`뿐이다. 맨 `iOS`는 '지원'으로 읽혀서 쓰지 않는다.
+- **실험적·지원 중단 예정은 frontmatter `status` 하나로 표시한다**(`experimental`, 또는 `deprecated` + `replacedBy: /경로`). 배너·사이드바 배지·`llms-full.txt`가 여기서 만들어지므로 경고 박스를 손으로 쓰지 않는다. 형식은 `/write-docs` §3, 상태의 뜻은 Introduction의 `#page-status`.
+- 정식 페이지 안의 실험적 절은 H2 아래 `<Badge type="warning" text="Experimental" />`(KO `실험적`)를 단다.
+- 위 문구 밖의 `<Badge>`와 frontmatter와 맞지 않는 `llms.txt` 행은 `scripts/__tests__/pageStatus.test.mjs`가 막는다.
+
 ### 용어집
 
 같은 개념은 한 표기로만 쓴다. **산문에만 적용한다.** 코드, 명령어, 설정 키, 파일 경로, 대시보드 UI 라벨은 원문 그대로 둔다(`tapflow relay start`, `relay.url`, **Select device**).
