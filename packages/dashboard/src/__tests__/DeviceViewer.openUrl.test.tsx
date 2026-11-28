@@ -163,47 +163,49 @@ describe.each(['ios', 'android'] as const)('DeepLinkDialog focus on %s', (platfo
   })
 })
 
-it('keeps the toolbar opener when Cmd+K reopens the dialog during its exit animation', async () => {
-  const real = window.getComputedStyle.bind(window)
-  const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
-    const style = real(element, pseudo)
-    if (!(element instanceof HTMLElement) || element.getAttribute('role') !== 'dialog') return style
-    // Radix rereads the animation name on close from the style object it saved on mount.
-    return new Proxy(style, {
-      get(target, prop) {
-        if (prop === 'animationName') return element.dataset.state === 'closed' ? 'exit' : 'enter'
-        const value = Reflect.get(target, prop)
-        return typeof value === 'function' ? value.bind(target) : value
-      },
+describe('DeepLinkDialog reopened during its exit animation', () => {
+  it('keeps the toolbar opener when Cmd+K reopens the dialog during its exit animation', async () => {
+    const real = window.getComputedStyle.bind(window)
+    const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      const style = real(element, pseudo)
+      if (!(element instanceof HTMLElement) || element.getAttribute('role') !== 'dialog') return style
+      // Radix rereads the animation name on close from the style object it saved on mount.
+      return new Proxy(style, {
+        get(target, prop) {
+          if (prop === 'animationName') return element.dataset.state === 'closed' ? 'exit' : 'enter'
+          const value = Reflect.get(target, prop)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
     })
+    try {
+      const user = userEvent.setup()
+      live()
+      const toolbar = screen.getByRole('button', { name: 'Open a deeplink' })
+      await user.click(toolbar)
+      const dialog = screen.getByRole('dialog', { name: 'Open Deeplink' })
+      const input = screen.getByRole('textbox', { name: 'Deeplink URL' })
+      await user.type(input, 'myapp://home')
+      await user.tab()
+      const submit = screen.getByRole('button', { name: 'Open' })
+      expect(submit).toHaveFocus()
+
+      await user.keyboard('{Escape}')
+      expect(dialog).toHaveAttribute('data-state', 'closed')
+      expect(submit).toHaveFocus()
+      await user.keyboard('{Meta>}k{/Meta}')
+      expect(dialog).toHaveAttribute('data-state', 'open')
+      const reopenedInput = screen.getByRole('textbox', { name: 'Deeplink URL' })
+      await waitFor(() => expect(reopenedInput).toHaveFocus())
+      expect(reopenedInput).toHaveValue('')
+
+      await user.keyboard('{Escape}')
+      const end = new Event('animationend', { bubbles: true })
+      Object.defineProperty(end, 'animationName', { value: 'exit' })
+      fireEvent(dialog, end)
+      await waitFor(() => expect(toolbar).toHaveFocus())
+    } finally {
+      styles.mockRestore()
+    }
   })
-  try {
-    const user = userEvent.setup()
-    live()
-    const toolbar = screen.getByRole('button', { name: 'Open a deeplink' })
-    await user.click(toolbar)
-    const dialog = screen.getByRole('dialog', { name: 'Open Deeplink' })
-    const input = screen.getByRole('textbox', { name: 'Deeplink URL' })
-    await user.type(input, 'myapp://home')
-    await user.tab()
-    const submit = screen.getByRole('button', { name: 'Open' })
-    expect(submit).toHaveFocus()
-
-    await user.keyboard('{Escape}')
-    expect(dialog).toHaveAttribute('data-state', 'closed')
-    expect(submit).toHaveFocus()
-    await user.keyboard('{Meta>}k{/Meta}')
-    expect(dialog).toHaveAttribute('data-state', 'open')
-    const reopenedInput = screen.getByRole('textbox', { name: 'Deeplink URL' })
-    await waitFor(() => expect(reopenedInput).toHaveFocus())
-    expect(reopenedInput).toHaveValue('')
-
-    await user.keyboard('{Escape}')
-    const end = new Event('animationend', { bubbles: true })
-    Object.defineProperty(end, 'animationName', { value: 'exit' })
-    fireEvent(dialog, end)
-    await waitFor(() => expect(toolbar).toHaveFocus())
-  } finally {
-    styles.mockRestore()
-  }
 })

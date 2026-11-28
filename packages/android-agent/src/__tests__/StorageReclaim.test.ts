@@ -176,9 +176,11 @@ describe('StorageFullError', () => {
   })
 })
 
-// Kept beside the list it is scoped to: nothing here may ever reach GMS, WebView or Play Store.
-it('never names a package an app under test depends on', () => {
-  for (const pkg of ['com.google.android.gms', 'com.google.android.webview', 'com.android.vending']) {
-    expect(LEAN_PACKAGES as readonly string[]).not.toContain(pkg)
-  }
+describe('LEAN_PACKAGES', () => {
+  // Kept beside the list it is scoped to: nothing here may ever reach GMS, WebView or Play Store.
+  it('never names a package an app under test depends on', () => {
+    for (const pkg of ['com.google.android.gms', 'com.google.android.webview', 'com.android.vending']) {
+      expect(LEAN_PACKAGES as readonly string[]).not.toContain(pkg)
+    }
+  })
 })

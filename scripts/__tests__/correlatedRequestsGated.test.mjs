@@ -128,20 +128,21 @@ function correlatorOf(sf) {
   return out
 }
 
-  const proto = read('packages/protocol/src/index.ts')
-  const validatePath = 'packages/protocol/src/validate/index.ts'
-  const validateSrc = read(validatePath)
-  const sf = sourceOf(validatePath, validateSrc)
+const proto = read('packages/protocol/src/index.ts')
+const validatePath = 'packages/protocol/src/validate/index.ts'
+const validateSrc = read(validatePath)
+const sf = sourceOf(validatePath, validateSrc)
 
-  const types = correlatedRequestTypes(proto)
-  const bodies = correlatorOf(sf)
-  const unaddressed = unaddressedTypes(proto, types)
-  /** The requests a malformed payload can be answered for: they name the session the answer goes to. */
-  const addressed = types.filter((t) => !unaddressed.includes(t))
-  // Lifecycle shutdowns can receive a refusal without a caller-minted ID.
-  const optionallyCorrelated = ['device:shutdown']
-  const answerableRequests = [...addressed, ...optionallyCorrelated]
+const types = correlatedRequestTypes(proto)
+const bodies = correlatorOf(sf)
+const unaddressed = unaddressedTypes(proto, types)
+/** The requests a malformed payload can be answered for: they name the session the answer goes to. */
+const addressed = types.filter((t) => !unaddressed.includes(t))
+// Lifecycle shutdowns can receive a refusal without a caller-minted ID.
+const optionallyCorrelated = ['device:shutdown']
+const answerableRequests = [...addressed, ...optionallyCorrelated]
 
+describe('the correlated request set, derived from the protocol', () => {
   it('keeps lifecycle shutdown correlation optional', () => {
     expect(bodies.get('device:shutdown')?.init).toBe('requestId.optional()')
   })
@@ -186,28 +187,29 @@ function correlatorOf(sf) {
       ).toBe(false)
     })
   }
+})
 
-  // ── the three lists that must not drift apart ─────────────────────────────────────────────────
-  //
-  // A correlated browser request is refused at the door when its payload is wrong, and refusing it
-  // without answering turns a diagnosis into a caller waiting out its deadline — which for the acked
-  // inputs is worse than it sounds, since `awaitInputAck` reports silence from a never-acked session
-  // as **success** (#457). So three lists have to agree, and only one of them is derived:
-  //
-  //   1. the required request set from the protocol plus optional lifecycle shutdown
-  //   2. `ANSWERABLE` in `protocol/src/validate/index.ts`, which decides what gets a second parse
-  //   3. `refuseMalformed` in the relay, which decides which reply each one gets
-  //
-  // Nothing else compares them: a request missing from (2) is refused with `bad-shape` and dropped, and
-  // one missing from (3) falls to a `default` that answers `input:error` — a reply whose waiter does
-  // not exist for a non-input request.
+// ── the three lists that must not drift apart ─────────────────────────────────────────────────
+//
+// A correlated browser request is refused at the door when its payload is wrong, and refusing it
+// without answering turns a diagnosis into a caller waiting out its deadline — which for the acked
+// inputs is worse than it sounds, since `awaitInputAck` reports silence from a never-acked session
+// as **success** (#457). So three lists have to agree, and only one of them is derived:
+//
+//   1. the required request set from the protocol plus optional lifecycle shutdown
+//   2. `ANSWERABLE` in `protocol/src/validate/index.ts`, which decides what gets a second parse
+//   3. `refuseMalformed` in the relay, which decides which reply each one gets
+//
+// Nothing else compares them: a request missing from (2) is refused with `bad-shape` and dropped, and
+// one missing from (3) falls to a `default` that answers `input:error` — a reply whose waiter does
+// not exist for a non-input request.
 
-  /** The literal keys of the `ANSWERABLE` map. */
-  function answerableTypes(src) {
-    const body = src.match(/const ANSWERABLE = \{([\s\S]*?)\n\} as const/)
-    expect(body, 'ANSWERABLE is gone from protocol/src/validate').not.toBeNull()
-    return new Set([...body[1].matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]))
-  }
+/** The literal keys of the `ANSWERABLE` map. */
+function answerableTypes(src) {
+  const body = src.match(/const ANSWERABLE = \{([\s\S]*?)\n\} as const/)
+  expect(body, 'ANSWERABLE is gone from protocol/src/validate').not.toBeNull()
+  return new Set([...body[1].matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]))
+}
 
 /**
  * Which reply each answerable request must be refused with.
@@ -221,23 +223,23 @@ function correlatorOf(sf) {
  * wrong reply, and the two assertions below need both.
  */
 const EXPECTED_REPLY = {
-  'device:boot': 'device:boot-error',
-  'device:shutdown': 'device:shutdown-error',
-  'app:install': 'app:install-error',
-  'app:launch': 'app:launch-error',
-  'app:clear-state': 'app:clear-state-error',
-  'device:keyboard-set': 'device:keyboard-set-error',
-  'device:run-reset': 'device:run-reset-error',
-  'capture:observe': 'capture:observe-error',
-  'open-url': 'open-url:error',
-  'input:type': 'input:type-error',
-  'clipboard:read': 'clipboard:error',
-  'clipboard:write': 'clipboard:error',
-  'network:set': 'network:error',
-  'input:touch:end': 'input:error',
-  'input:pinch:end': 'input:error',
-  'input:key': 'input:error',
-  'input:button': 'input:error',
+'device:boot': 'device:boot-error',
+'device:shutdown': 'device:shutdown-error',
+'app:install': 'app:install-error',
+'app:launch': 'app:launch-error',
+'app:clear-state': 'app:clear-state-error',
+'device:keyboard-set': 'device:keyboard-set-error',
+'device:run-reset': 'device:run-reset-error',
+'capture:observe': 'capture:observe-error',
+'open-url': 'open-url:error',
+'input:type': 'input:type-error',
+'clipboard:read': 'clipboard:error',
+'clipboard:write': 'clipboard:error',
+'network:set': 'network:error',
+'input:touch:end': 'input:error',
+'input:pinch:end': 'input:error',
+'input:key': 'input:error',
+'input:button': 'input:error',
 }
 
 describe('every correlated browser request is gated at the relay door', () => {
