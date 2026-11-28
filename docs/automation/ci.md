@@ -86,7 +86,7 @@ You can use deterministic replay from within an agent session too. The `run_flow
 ## Tips
 
 - **Flows for regression, coding agents for exploration.** A test that runs every time in CI fits deterministic replay; checking a new scenario is faster with an agent.
-- **`.mcp.json` takes the relay address and token from the environment** (`${TAPFLOW_TOKEN:-}`), so secrets never land in the repo. A value written into `env` as it is wins over the environment, so do not put a placeholder there. With `TAPFLOW_TOKEN` unset, the MCP server reads the [token file](/ai-agents/mcp-server#token-file).
+- **`.mcp.json` takes the relay address and token from the environment** (`${TAPFLOW_TOKEN:-}`), so secrets never land in the repo. A value written into `env` as it is wins over the environment, so do not put a placeholder there. With `TAPFLOW_TOKEN` unset, the MCP server reads the [token file](/ai-agents/mcp-server#token-file). To use the local default address, leave `TAPFLOW_RELAY_URL` unset rather than empty: an empty value can reach the MCP server as it is, and the server refuses an empty address.
 - **One session per device.** The relay routes by session, so running multiple jobs against the same relay concurrently is fine as long as they connect to different devices.
 
 ## Moved sections {#moved-sections}
